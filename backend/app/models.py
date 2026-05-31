@@ -161,6 +161,8 @@ class DepartmentLog(Base):
     is_delayed       = Column(Boolean,  nullable=False, default=False)
     delay_reason     = Column(Text,     nullable=True)
     delay_reason_at  = Column(DateTime, nullable=True)
+    operator_name = Column(String(128), nullable=True)   # for PRINTING + LASER_CUTTING
+    under_whom    = Column(String(128), nullable=True)   # for PRINTING only
 
     job = relationship("JobCard", back_populates="logs")
 
@@ -174,6 +176,35 @@ class DepartmentLog(Base):
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
 
+
+def run_migration() -> None:
+    """
+    PostgreSQL-safe migration. Runs on startup, safe to run multiple times.
+    ADD COLUMN IF NOT EXISTS means it will never crash even if columns already exist.
+    """
+    from sqlalchemy import text
+    with engine.connect() as conn:
+        conn.execute(text("""
+            ALTER TABLE department_logs
+            ADD COLUMN IF NOT EXISTS delay_reason TEXT;
+        """))
+        conn.execute(text("""
+            ALTER TABLE department_logs
+            ADD COLUMN IF NOT EXISTS delay_reason_at TIMESTAMP;
+        """))
+        conn.execute(text("""
+            ALTER TABLE department_logs
+            ADD COLUMN IF NOT EXISTS operator_name VARCHAR(128);
+        """))
+        conn.execute(text("""
+            ALTER TABLE department_logs
+            ADD COLUMN IF NOT EXISTS under_whom VARCHAR(128);
+        """))
+        conn.execute(text("""
+            ALTER TABLE job_cards
+            ADD COLUMN IF NOT EXISTS box_type VARCHAR(256);
+        """))
+        conn.commit()
 
 
 def get_db():

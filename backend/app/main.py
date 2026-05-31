@@ -5,7 +5,7 @@ import os
 from datetime import datetime, timedelta
 from typing import List, Optional
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException,Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -24,6 +24,7 @@ from .models import (
     StageStatusEnum,
     get_db,
     init_db,
+    run_migration,
 )
 from .routers import history as history_router
 # from .routers import analytics as analytics_router
@@ -53,6 +54,7 @@ app.add_middleware(
 @app.on_event("startup")
 def on_startup():
     init_db()
+    run_migration()
 
 COMPLETED_VISIBLE_HOURS = 24
 EXPIRING_SOON_HOURS     = 20
@@ -86,7 +88,9 @@ app.include_router(history_router.router)
 
 
 class StageAdvanceRequest(BaseModel):
-    action: str
+    action:        str
+    operator_name: Optional[str] = None
+    under_whom:    Optional[str] = None
 
 
 class DelayReasonRequest(BaseModel):
@@ -294,6 +298,24 @@ def advance(
             raise HTTPException(409, f"{dept} is {current}. Cannot start again.")
         setattr(job, field, StageStatusEnum.IN_PROGRESS)
         _open_log(job, dept_enum, db)
+
+        # ── Store operator identity ──────────────────────
+        if dept in ("PRINTING", "LASER_CUTTING") and body.operator_name:
+            log = (
+                db.query(DepartmentLog)
+                .filter(
+                    DepartmentLog.job_id     == job.id,
+                    DepartmentLog.department == dept_enum,
+                    DepartmentLog.exited_at  == None,  # noqa
+                )
+                .order_by(desc(DepartmentLog.entered_at))
+                .first()
+            )
+            if log:
+                log.operator_name = body.operator_name.strip()
+                if dept == "PRINTING" and body.under_whom:
+                    log.under_whom = body.under_whom.strip()
+                db.commit()
     elif action == "complete":
         if current != "IN_PROGRESS":
             raise HTTPException(409, f"{dept} must be IN_PROGRESS to complete (currently {current}).")
@@ -444,6 +466,70 @@ def get_dept_stats(db: Session = Depends(get_db)):
     result["ENTRY"] = entry_count
 
     return result
+
+@app.get("/api/stats/operators")
+def operator_stats(
+    db:    Session = Depends(get_db),
+    year:  int = Query(...),
+    month: int = Query(...),
+):
+    start = datetime(year, month, 1)
+    end   = datetime(year + 1, 1, 1) if month == 12 else datetime(year, month + 1, 1)
+
+    rows = (
+        db.query(
+            DepartmentLog.department,
+            DepartmentLog.operator_name,
+            DepartmentLog.under_whom,
+            func.count(DepartmentLog.id).label("count"),
+        )
+        .filter(
+            DepartmentLog.department.in_([
+                DepartmentEnum.PRINTING,
+                DepartmentEnum.LASER_CUTTING,
+            ]),
+            DepartmentLog.operator_name != None,  # noqa
+            DepartmentLog.entered_at >= start,
+            DepartmentLog.entered_at <  end,
+        )
+        .group_by(
+            DepartmentLog.department,
+            DepartmentLog.operator_name,
+            DepartmentLog.under_whom,
+        )
+        .all()
+    )
+
+    result = {"PRINTING": [], "LASER_CUTTING": []}
+    for r in rows:
+        dept_key = str(r.department).split(".")[-1]
+        result[dept_key].append({
+            "operator_name": r.operator_name,
+            "under_whom":    r.under_whom,
+            "count":         r.count,
+        })
+    return result
+
+
+@app.get("/api/stats/albums")
+def album_stats(
+    db:    Session = Depends(get_db),
+    year:  int = Query(...),
+    month: int = Query(...),
+):
+    start = datetime(year, month, 1)
+    end   = datetime(year + 1, 1, 1) if month == 12 else datetime(year, month + 1, 1)
+
+    count = (
+        db.query(func.count(JobCard.id))
+        .filter(
+            JobCard.is_fully_completed == True,  # noqa
+            JobCard.updated_at >= start,
+            JobCard.updated_at <  end,
+        )
+        .scalar() or 0
+    )
+    return {"year": year, "month": month, "total": count}
 
 @app.get("/api/health")
 def health():

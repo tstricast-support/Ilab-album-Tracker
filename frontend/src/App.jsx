@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { API_BASE, POLL_INTERVAL_MS, APP_NAME } from "./config.js";
-import {ArrowRight, Calendar,Pen,SquareX, Trash,Printer,TriangleAlert,Flame,Activity, Speech}from "lucide-react";
+import {ArrowRight, Calendar,Pen,SquareX, Trash,Printer,TriangleAlert,Flame,Activity, Speech, Scissors,BookOpen}from "lucide-react";
 import logo from "./assets/logo.jpg";
 
 // ── API ───────────────────────────────────────────────────────────────────────
@@ -24,8 +24,9 @@ const api = {
   updateJob: (id, body) => apiFetch(`/api/jobs/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteJob:     (id)           => apiFetch(`/api/jobs/${id}`, { method: "DELETE" }),
   queue:         (dept)         => apiFetch(`/api/station/${dept}/queue`),
-  advance:       (id, dept, action) => apiFetch(`/api/jobs/${id}/advance/${dept}`, {
-    method: "POST", body: JSON.stringify({ action }),
+  // FIXED
+  advance: (id, dept, action, extra = {}) => apiFetch(`/api/jobs/${id}/advance/${dept}`, {
+    method: "POST", body: JSON.stringify({ action, ...extra }),
   }),
   stats:         ()             => apiFetch("/api/stats"),
   deptStats: () => apiFetch("/api/stats/departments"),
@@ -416,9 +417,6 @@ function Shell({ title, accent = "var(--amber)", topRight, children }) {
       <main className="r-main-pad" style={{ flex: 1, padding: 20, maxWidth: 1400, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
         {children}
       </main>
-      <footer style={{ textAlign: "center", padding: "12px 20px", borderTop: "1px solid var(--border)", background: "var(--bg1)" }}>
-        <span style={{ fontSize: 11, color: "var(--text-dim)", letterSpacing: ".06em" }}>© 2026 Yasith Wijesuriya</span>
-      </footer>
     </div>
   );
 }
@@ -1289,188 +1287,7 @@ const STATION_CFG = {
 
 // ── Station page ──────────────────────────────────────────────────────────────
 // ── Station page ──────────────────────────────────────────────────────────────
-function StationPage({ deptKey }) {
-  const cfg = STATION_CFG[deptKey];
-  const { toasts, add } = useToast();
-  const [queue,              setQueue]              = useState([]);
-  const [deptCompletedCount, setDeptCompletedCount] = useState(null);
-  const [actingId,           setActingId]           = useState(null);
-  const [reasonJob,          setReasonJob]          = useState(null);
-  // NEW: track if modal was opened specifically to unblock a completion
-  const [pendingCompleteJob, setPendingCompleteJob] = useState(null);
-  const isMobile = useIsMobile();
 
-  const reload = useCallback(async () => {
-    try {
-      const [q, ds] = await Promise.all([api.queue(deptKey), api.deptStats()]);
-      setQueue(q);
-      setDeptCompletedCount(ds?.[cfg.dept] ?? 0);
-    } catch {}
-  }, [deptKey]);
-
-  useEffect(() => {
-    reload();
-    const t = setInterval(reload, POLL_INTERVAL_MS);
-    return () => clearInterval(t);
-  }, [reload]);
-
-  if (!cfg) return (
-    <Shell title="UNKNOWN STATION">
-      <div style={{ color: "var(--red)", padding: 20 }}>Unknown station: {deptKey}</div>
-    </Shell>
-  );
-
-  async function act(job) {
-    const a = cfg.getAction(job);
-    if (!a) return;
-
-    // ── GUARD: block "complete" if job is delayed but has no reason ──────────
-    if (a.action === "complete") {
-      const activeLog = job.logs?.find(
-        l => l.department === cfg.dept && !l.exited_at && l.is_delayed
-      );
-      if (activeLog && !activeLog.delay_reason) {
-        // Force them to fill the reason first; remember this job so we can
-        // auto-complete once the reason is saved.
-        add("⏱ This job is delayed — please fill in the delay reason before completing.", "error");
-        setPendingCompleteJob(job);
-        setReasonJob(job);
-        return;
-      }
-    }
-
-    setActingId(job.id);
-    try {
-      await api.advance(job.id, cfg.dept, a.action);
-      add(
-        a.action === "start"
-          ? `Job #${job.job_no} started at ${cfg.label}.`
-          : `Job #${job.job_no} ✓ completed!`,
-        "success"
-      );
-      await reload();
-    } catch (err) {
-      add(err.message, "error");
-    } finally {
-      setActingId(null);
-    }
-  }
-
-  // Called after delay reason is saved — if we were blocking a completion,
-  // automatically proceed with it now.
-  async function onReasonSaved() {
-    await reload();
-    if (pendingCompleteJob) {
-      const refreshed = (await api.queue(deptKey)).find(j => j.id === pendingCompleteJob.id);
-      setPendingCompleteJob(null);
-      if (refreshed) await act(refreshed);
-    }
-  }
-
-  return (
-    <>
-      <Shell title={`${cfg.label} STATION`} accent={cfg.accent} topRight={
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {/* Queue count */}
-          <div style={{
-            display: "flex", alignItems: "center", gap: isMobile ? 6 : 10,
-            background: "#000", border: "1px solid var(--border)",
-            borderRadius: 8, padding: isMobile ? "2px 8px 2px 6px" : "2px 10px 2px 8px",
-          }}>
-            <span className="r-station-queue-num" style={{
-              fontFamily: "var(--fd)",
-              fontSize: isMobile ? 36 : 50,
-              fontWeight: 900, lineHeight: 1,
-              color: queue.length > 0 ? "var(--green)" : "var(--text-dim)",
-            }}>{queue.length}</span>
-            <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-              <span style={{ fontSize: isMobile ? 10 : 12, fontWeight: 800, color: "#fff", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>{queue.length !== 1 ? "JOBS" : "JOB"}</span>
-              <span style={{ fontSize: isMobile ? 8 : 10, fontWeight: 600, color: "#dad2d2", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>IN QUEUE</span>
-            </div>
-          </div>
-          {/* Completed count (24h) */}
-          <div style={{
-            display: "flex", alignItems: "center", gap: isMobile ? 5 : 8,
-            background: "#001a00", border: "1px solid #1a4a1a",
-            borderRadius: 8, padding: isMobile ? "2px 8px 2px 6px" : "2px 10px 2px 8px",
-          }}>
-            <span style={{
-              fontFamily: "var(--fd)",
-              fontSize: isMobile ? 36 : 50,
-              fontWeight: 900, lineHeight: 1,
-              color: deptCompletedCount > 0 ? "var(--green)" : "var(--text-dim)",
-            }}>{deptCompletedCount ?? "—"}</span>
-            <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-              <span style={{ fontSize: isMobile ? 10 : 12, fontWeight: 800, color: "var(--green)", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>DONE</span>
-              <span style={{ fontSize: isMobile ? 8 : 10, fontWeight: 600, color: "#6aaa6a", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>TODAY</span>
-            </div>
-          </div>
-        </div>
-      }>
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          {queue.length === 0
-            ? <div style={{ textAlign: "center", padding: isMobile ? "40px 16px" : "60px 20px", color: "var(--text-dim)", fontFamily: "var(--fd)", fontSize: isMobile ? 15 : 20, letterSpacing: ".06em" }}>✓ QUEUE CLEAR</div>
-            : queue.map(job => {
-                const a = cfg.getAction(job);
-
-                // ── Determine if this job is blocked (delayed + no reason) ──
-                const activeLog = job.logs?.find(
-                  l => l.department === cfg.dept && !l.exited_at && l.is_delayed
-                );
-                const isBlocked = a?.action === "complete" && activeLog && !activeLog.delay_reason;
-
-                return (
-                  <div key={job.id}>
-                    <JobCardFull
-                      job={job}
-                      actionLabel={
-                        isBlocked
-                          ? "⏱ Fill Delay Reason to Complete"
-                          : a?.label
-                      }
-                      onAction={act}
-                      acting={actingId === job.id}
-                      // Override button style via a new prop when blocked
-                      actionBlocked={isBlocked}
-                      onAddReason={setReasonJob}
-                      reasonDept={cfg.dept}
-                    />
-                    {/* Inline warning strip shown under blocked cards */}
-                    {isBlocked && (
-                      <div style={{
-                        background: "#2a0000",
-                        border: "1px solid var(--red)",
-                        borderTop: "none",
-                        borderRadius: "0 0 8px 8px",
-                        padding: "9px 16px",
-                        display: "flex", alignItems: "center", gap: 8,
-                        fontSize: 12, fontWeight: 700, color: "var(--red)",
-                      }}>
-                        ⚠ Delay reason required — tap the ⏱ button above to unlock completion
-                      </div>
-                    )}
-                  </div>
-                );
-              })
-          }
-          <LivePanel />
-        </div>
-      </Shell>
-
-      {reasonJob && (
-        <DelayReasonModal
-          job={reasonJob}
-          dept={cfg.dept}
-          onClose={() => { setReasonJob(null); setPendingCompleteJob(null); }}
-          // Use onReasonSaved instead of plain reload so auto-complete fires
-          onSaved={onReasonSaved}
-          addToast={add}
-        />
-      )}
-      <ToastStack toasts={toasts} />
-    </>
-  );
-}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // NEW PRODUCTION DASHBOARD FEATURES
@@ -1794,7 +1611,6 @@ function DailyGoalRing({ active, done }) {
         textTransform: "uppercase",
         letterSpacing: ".05em",
 
-        // ✅ ADD THIS
         width: "100%",
         maxWidth: isMobile ? "100%" : "auto",
       }}
@@ -1815,6 +1631,638 @@ function DailyGoalRing({ active, done }) {
   );
 }
 
+function AlbumCountPanel() {
+  const now = new Date();
+  const [year,  setYear]  = useState(now.getFullYear());
+  const [month, setMonth] = useState(now.getMonth() + 1);
+  const [data,  setData]  = useState(null);
+  const isMobile = useIsMobile();
+
+  useEffect(() => {
+    const load = () =>
+      apiFetch(`/api/stats/albums?year=${year}&month=${month}`)
+        .then(setData).catch(() => {});
+    load();
+    const t = setInterval(load, 10_000);
+    return () => clearInterval(t);
+  }, [year, month]);
+
+  const monthLabel = new Date(year, month - 1, 1)
+    .toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+
+  return (
+    <div style={{
+      background: "#444343e0",
+      border: "1px solid var(--border)",
+      borderRadius: 10,
+      padding: "14px 16px",
+      gridColumn: isMobile ? "1" : "1 / -1",
+    }}>
+      {/* Header */}
+      <div style={{
+        display: "flex", alignItems: "center",
+        justifyContent: "space-between",
+        marginBottom: 14, flexWrap: "wrap", gap: 8,
+      }}>
+        <span style={{
+          fontFamily: "var(--fd)", fontSize: 14, fontWeight: 1000,
+          letterSpacing: ".1em", textTransform: "uppercase",
+          color: "var(--text-pri)", textShadow: "2px 2px 4px rgba(0,0,0,0.9)",
+        }}>
+          Albums Produced
+        </span>
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <select
+            value={month}
+            onChange={e => setMonth(+e.target.value)}
+            style={{ width: "auto", margin: 0, fontSize: 12, padding: "5px 8px" }}>
+            {Array.from({ length: 12 }, (_, i) =>
+              <option key={i + 1} value={i + 1}>
+                {new Date(2000, i).toLocaleDateString("en-GB", { month: "short" })}
+              </option>
+            )}
+          </select>
+          <select
+            value={year}
+            onChange={e => setYear(+e.target.value)}
+            style={{ width: "auto", margin: 0, fontSize: 12, padding: "5px 8px" }}>
+            {[now.getFullYear(), now.getFullYear() - 1].map(y =>
+              <option key={y} value={y}>{y}</option>
+            )}
+          </select>
+        </div>
+      </div>
+
+      {/* Count display */}
+      {data ? (
+        <div style={{
+          background: "#000",
+          border: "1px solid var(--green)33",
+          borderTop: "3px solid var(--green)",
+          borderRadius: 8,
+          padding: isMobile ? "20px 16px" : "24px 20px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 16,
+          flexWrap: "wrap",
+        }}>
+          {/* Left side */}
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <div style={{
+              width: isMobile ? 48 : 56, height: isMobile ? 48 : 56,
+              borderRadius: 10,
+              background: "var(--green)" + "22",
+              border: "1px solid var(--green)" + "44",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              flexShrink: 0,
+            }}>
+              <BookOpen size={isMobile ? 22 : 26} color="var(--green)" />
+            </div>
+            <div>
+              <div style={{
+                fontSize: isMobile ? 13 : 14,
+                fontWeight: 700,
+                color: "var(--text-pri)",
+              }}>
+                Total Albums Completed
+              </div>
+              <div style={{
+                fontSize: 11,
+                color: "var(--text-dim)",
+                marginTop: 3,
+              }}>
+                {monthLabel}
+              </div>
+            </div>
+          </div>
+
+          {/* Right side — big number */}
+          <div style={{
+            display: "flex", flexDirection: "column",
+            alignItems: "flex-end",
+          }}>
+            <span style={{
+              fontFamily: "var(--fd)",
+              fontSize: isMobile ? 52 : 64,
+              fontWeight: 900,
+              lineHeight: 1,
+              color: data.total > 0 ? "var(--green)" : "var(--text-dim)",
+              textShadow: "2px 2px 8px rgba(0,0,0,0.9)",
+            }}>
+              {data.total}
+            </span>
+            <span style={{
+              fontSize: 10,
+              color: "var(--text-dim)",
+              textTransform: "uppercase",
+              letterSpacing: ".1em",
+              marginTop: 2,
+            }}>
+              {data.total === 1 ? "album" : "albums"}
+            </span>
+          </div>
+        </div>
+      ) : (
+        <div style={{
+          textAlign: "center", padding: "24px 0",
+          color: "var(--text-dim)", fontFamily: "var(--fd)",
+          fontSize: 13, letterSpacing: ".08em",
+        }}>
+          LOADING…
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OperatorStatsPanel() {
+  const now = new Date();
+  const [year,  setYear]  = useState(now.getFullYear());
+  const [month, setMonth] = useState(now.getMonth() + 1);
+  const [data,  setData]  = useState(null);
+  const isMobile = useIsMobile();
+
+  useEffect(() => {
+    const load = () =>
+      apiFetch(`/api/stats/operators?year=${year}&month=${month}`)
+        .then(setData).catch(() => {});
+    load();
+    const t = setInterval(load, 10_000);
+    return () => clearInterval(t);
+  }, [year, month]);
+
+  const monthLabel = new Date(year, month - 1, 1)
+    .toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+
+  function Section({ icon, label, accent, rows }) {
+    return (
+      <div style={{
+        background: "#000",
+        border: `1px solid ${accent}33`,
+        borderTop: `3px solid ${accent}`,
+        borderRadius: 8,
+        padding: "12px 14px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 0,
+      }}>
+        {/* Section header */}
+        <div style={{
+          display: "flex", alignItems: "center", gap: 7,
+          marginBottom: 10,
+        }}>
+          <div style={{
+            width: 28, height: 28, borderRadius: 6,
+            background: accent + "22",
+            border: `1px solid ${accent}44`,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            flexShrink: 0,
+          }}>
+            {icon}
+          </div>
+          <div>
+            <div style={{
+              fontSize: 11, fontWeight: 800, color: accent,
+              textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1,
+            }}>{label}</div>
+            <div style={{
+              fontSize: 10, color: "var(--text-dim)",
+              marginTop: 2, letterSpacing: ".04em",
+            }}>{monthLabel}</div>
+          </div>
+          <div style={{ marginLeft: "auto" }}>
+            <span style={{
+              fontFamily: "var(--fd)", fontSize: 11, fontWeight: 700,
+              color: rows.length > 0 ? accent : "var(--text-dim)",
+              background: accent + "11",
+              border: `1px solid ${accent}33`,
+              borderRadius: 4, padding: "2px 8px",
+            }}>
+              {rows.length} operator{rows.length !== 1 ? "s" : ""}
+            </span>
+          </div>
+        </div>
+
+        {/* Rows */}
+        {rows.length === 0 ? (
+          <div style={{
+            textAlign: "center", padding: "16px 0",
+            color: "var(--text-dim)", fontSize: 12,
+            fontFamily: "var(--fd)", letterSpacing: ".06em",
+          }}>
+            NO DATA
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {rows.sort((a, b) => b.count - a.count).map((r, i) => {
+              const isTop = i === 0 && rows.length > 1;
+              return (
+                <div key={i} style={{
+                  display: "flex", alignItems: "center",
+                  justifyContent: "space-between",
+                  background: isTop ? accent + "11" : "var(--bg2)",
+                  border: `1px solid ${isTop ? accent + "44" : "var(--border)"}`,
+                  borderLeft: `3px solid ${isTop ? accent : "var(--border)"}`,
+                  borderRadius: 6,
+                  padding: "8px 10px",
+                  gap: 8,
+                }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{
+                      fontSize: isMobile ? 13 : 14,
+                      fontWeight: 700,
+                      color: "var(--text-pri)",
+                      display: "flex", alignItems: "center", gap: 6,
+                      flexWrap: "wrap",
+                    }}>
+                      {r.operator_name}
+                      {isTop && (
+                        <span style={{
+                          fontSize: 9, fontWeight: 800,
+                          padding: "1px 6px", borderRadius: 3,
+                          background: accent, color: "#000",
+                          textTransform: "uppercase", letterSpacing: ".06em",
+                        }}>TOP</span>
+                      )}
+                    </div>
+                    {r.under_whom && (
+                      <div style={{
+                        fontSize: 11, color: "var(--text-dim)",
+                        marginTop: 2, display: "flex", alignItems: "center", gap: 4,
+                      }}>
+                        <span style={{ color: "var(--text-dim)" }}>under</span>
+                        <span style={{ color: "var(--text-sec)", fontWeight: 600 }}>
+                          {r.under_whom}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  <div style={{
+                    flexShrink: 0, textAlign: "right",
+                    display: "flex", flexDirection: "column", alignItems: "flex-end",
+                  }}>
+                    <span style={{
+                      fontFamily: "var(--fd)",
+                      fontSize: isMobile ? 24 : 28,
+                      fontWeight: 900, lineHeight: 1,
+                      color: accent,
+                      textShadow: "2px 2px 4px rgba(0,0,0,0.9)",
+                    }}>{r.count}</span>
+                    <span style={{
+                      fontSize: 9, color: "var(--text-dim)",
+                      textTransform: "uppercase", letterSpacing: ".06em",
+                    }}>job{r.count !== 1 ? "s" : ""}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{
+      background: "#444343e0",
+      border: "1px solid var(--border)",
+      borderRadius: 10,
+      padding: "14px 16px",
+      gridColumn: isMobile ? "1" : "1 / -1",
+    }}>
+      {/* Panel header */}
+      <div style={{
+        display: "flex", alignItems: "center",
+        justifyContent: "space-between",
+        marginBottom: 14, flexWrap: "wrap", gap: 8,
+      }}>
+        <span style={{
+          fontFamily: "var(--fd)", fontSize: 14, fontWeight: 1000,
+          letterSpacing: ".1em", textTransform: "uppercase",
+          color: "var(--text-pri)", textShadow: "2px 2px 4px rgba(0,0,0,0.9)",
+        }}>
+          Operator Activity
+        </span>
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <select
+            value={month}
+            onChange={e => setMonth(+e.target.value)}
+            style={{ width: "auto", margin: 0, fontSize: 12, padding: "5px 8px" }}>
+            {Array.from({ length: 12 }, (_, i) =>
+              <option key={i + 1} value={i + 1}>
+                {new Date(2000, i).toLocaleDateString("en-GB", { month: "short" })}
+              </option>
+            )}
+          </select>
+          <select
+            value={year}
+            onChange={e => setYear(+e.target.value)}
+            style={{ width: "auto", margin: 0, fontSize: 12, padding: "5px 8px" }}>
+            {[now.getFullYear(), now.getFullYear() - 1].map(y =>
+              <option key={y} value={y}>{y}</option>
+            )}
+          </select>
+        </div>
+      </div>
+
+      {/* Two columns — stacks to 1 col on mobile */}
+      {data && (
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
+          gap: 12,
+        }}>
+          <Section
+            icon={<Printer size={14} color="#3b82f6" />}
+            label="Printing"
+            accent="#3b82f6"
+            rows={data.PRINTING}
+          />
+          <Section
+            icon={<Scissors size={14} color="#a855f7" />}
+            label="Laser Cutting"
+            accent="#a855f7"
+            rows={data.LASER_CUTTING}
+          />
+        </div>
+      )}
+
+      {!data && (
+        <div style={{
+          textAlign: "center", padding: "24px 0",
+          color: "var(--text-dim)", fontFamily: "var(--fd)",
+          fontSize: 13, letterSpacing: ".08em",
+        }}>
+          LOADING…
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+function OperatorIdentityModal({ dept, onConfirm, onCancel }) {
+  const [name,     setName]  = useState("");
+  const [underWhom, setUnder] = useState("");
+  const isPrinting = dept === "PRINTING";
+
+  function submit() {
+    if (!name.trim()) return;
+    if (isPrinting && !underWhom.trim()) return;
+    onConfirm({ operator_name: name.trim(), under_whom: underWhom.trim() || undefined });
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.85)",
+      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9100 }}>
+      <div style={{ background: "var(--bg1)", border: "1px solid var(--border)",
+        borderRadius: 12, padding: 28, width: "100%", maxWidth: 400,
+        display: "flex", flexDirection: "column", gap: 16 }}>
+        <div style={{ fontSize: 13, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".1em" }}>
+          Before you start
+        </div>
+        <div>
+          <label>Your name *</label>
+          <input value={name} onChange={e => setName(e.target.value)}
+            placeholder="Enter your name" autoFocus />
+        </div>
+        {isPrinting && (
+          <div>
+            <label>Under whom are you printing? *</label>
+            <input value={underWhom} onChange={e => setUnder(e.target.value)}
+              placeholder="Supervisor / manager name" />
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            onClick={submit}
+            disabled={!name.trim() || (isPrinting && !underWhom.trim())}
+            style={{ flex: 1, padding: "12px 0", background: "var(--amber)", color: "#000",
+              borderRadius: 8, fontWeight: 800, fontSize: 15 }}>
+            Confirm &amp; Start
+          </button>
+          <button onClick={onCancel} style={{ padding: "12px 18px", background: "var(--bg3)",
+            color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 8, fontWeight: 700 }}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StationPage({ deptKey }) {
+  const cfg = STATION_CFG[deptKey];
+  const { toasts, add } = useToast();
+  const [queue,              setQueue]              = useState([]);
+  const [deptCompletedCount, setDeptCompletedCount] = useState(null);
+  const [actingId,           setActingId]           = useState(null);
+  const [reasonJob,          setReasonJob]          = useState(null);
+  // NEW: track if modal was opened specifically to unblock a completion
+  const [pendingCompleteJob, setPendingCompleteJob] = useState(null);
+  const [identityPending, setIdentityPending] = useState(null);
+  const isMobile = useIsMobile();
+
+  const reload = useCallback(async () => {
+    try {
+      const [q, ds] = await Promise.all([api.queue(deptKey), api.deptStats()]);
+      setQueue(q);
+      setDeptCompletedCount(ds?.[cfg.dept] ?? 0);
+    } catch {}
+  }, [deptKey]);
+
+  useEffect(() => {
+    reload();
+    const t = setInterval(reload, POLL_INTERVAL_MS);
+    return () => clearInterval(t);
+  }, [reload]);
+
+  if (!cfg) return (
+    <Shell title="UNKNOWN STATION">
+      <div style={{ color: "var(--red)", padding: 20 }}>Unknown station: {deptKey}</div>
+    </Shell>
+  );
+
+    async function act(job) {
+      const a = cfg.getAction(job);
+      if (!a) return;
+
+      // ── Intercept START for PRINTING and LASER_CUTTING ──
+      if (a.action === "start" && (cfg.dept === "PRINTING" || cfg.dept === "LASER_CUTTING")) {
+        setIdentityPending(job);
+        return;
+      }
+
+      // existing delay-reason guard unchanged
+      if (a.action === "complete") {
+        const activeLog = job.logs?.find(
+          l => l.department === cfg.dept && !l.exited_at && l.is_delayed
+        );
+        if (activeLog && !activeLog.delay_reason) {
+          add("⏱ This job is delayed — please fill in the delay reason before completing.", "error");
+          setPendingCompleteJob(job);
+          setReasonJob(job);
+          return;
+        }
+      }
+
+      setActingId(job.id);
+      try {
+        await api.advance(job.id, cfg.dept, a.action);
+        add(
+          a.action === "start"
+            ? `Job #${job.job_no} started at ${cfg.label}.`
+            : `Job #${job.job_no} ✓ completed!`,
+          "success"
+        );
+        await reload();
+      } catch (err) {
+        add(err.message, "error");
+      } finally {
+        setActingId(null);
+      }
+    }
+
+    async function handleIdentityConfirm({ operator_name, under_whom }) {
+      const job = identityPending;
+      setIdentityPending(null);
+      const a = cfg.getAction(job);
+      setActingId(job.id);
+      try {
+        await api.advance(job.id, cfg.dept, a.action, { operator_name, under_whom });
+        add(`Job #${job.job_no} started at ${cfg.label}.`, "success");
+        await reload();
+      } catch (err) {
+        add(err.message, "error");
+      } finally {
+        setActingId(null);
+      }
+    }
+
+  // Called after delay reason is saved — if we were blocking a completion,
+  // automatically proceed with it now.
+  async function onReasonSaved() {
+    await reload();
+    if (pendingCompleteJob) {
+      const refreshed = (await api.queue(deptKey)).find(j => j.id === pendingCompleteJob.id);
+      setPendingCompleteJob(null);
+      if (refreshed) await act(refreshed);
+    }
+  }
+
+  return (
+    <>
+      <Shell title={`${cfg.label} STATION`} accent={cfg.accent} topRight={
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {/* Queue count */}
+          <div style={{
+            display: "flex", alignItems: "center", gap: isMobile ? 6 : 10,
+            background: "#000", border: "1px solid var(--border)",
+            borderRadius: 8, padding: isMobile ? "2px 8px 2px 6px" : "2px 10px 2px 8px",
+          }}>
+            <span className="r-station-queue-num" style={{
+              fontFamily: "var(--fd)",
+              fontSize: isMobile ? 36 : 50,
+              fontWeight: 900, lineHeight: 1,
+              color: queue.length > 0 ? "var(--green)" : "var(--text-dim)",
+            }}>{queue.length}</span>
+            <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+              <span style={{ fontSize: isMobile ? 10 : 12, fontWeight: 800, color: "#fff", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>{queue.length !== 1 ? "JOBS" : "JOB"}</span>
+              <span style={{ fontSize: isMobile ? 8 : 10, fontWeight: 600, color: "#dad2d2", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>IN QUEUE</span>
+            </div>
+          </div>
+          {/* Completed count (24h) */}
+          <div style={{
+            display: "flex", alignItems: "center", gap: isMobile ? 5 : 8,
+            background: "#001a00", border: "1px solid #1a4a1a",
+            borderRadius: 8, padding: isMobile ? "2px 8px 2px 6px" : "2px 10px 2px 8px",
+          }}>
+            <span style={{
+              fontFamily: "var(--fd)",
+              fontSize: isMobile ? 36 : 50,
+              fontWeight: 900, lineHeight: 1,
+              color: deptCompletedCount > 0 ? "var(--green)" : "var(--text-dim)",
+            }}>{deptCompletedCount ?? "—"}</span>
+            <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+              <span style={{ fontSize: isMobile ? 10 : 12, fontWeight: 800, color: "var(--green)", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>DONE</span>
+              <span style={{ fontSize: isMobile ? 8 : 10, fontWeight: 600, color: "#6aaa6a", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>TODAY</span>
+            </div>
+          </div>
+        </div>
+      }>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {queue.length === 0
+            ? <div style={{ textAlign: "center", padding: isMobile ? "40px 16px" : "60px 20px", color: "var(--text-dim)", fontFamily: "var(--fd)", fontSize: isMobile ? 15 : 20, letterSpacing: ".06em" }}>✓ QUEUE CLEAR</div>
+            : queue.map(job => {
+                const a = cfg.getAction(job);
+
+                // ── Determine if this job is blocked (delayed + no reason) ──
+                const activeLog = job.logs?.find(
+                  l => l.department === cfg.dept && !l.exited_at && l.is_delayed
+                );
+                const isBlocked = a?.action === "complete" && activeLog && !activeLog.delay_reason;
+
+                return (
+                  <div key={job.id}>
+                    <JobCardFull
+                      job={job}
+                      actionLabel={
+                        isBlocked
+                          ? "⏱ Fill Delay Reason to Complete"
+                          : a?.label
+                      }
+                      onAction={act}
+                      acting={actingId === job.id}
+                      // Override button style via a new prop when blocked
+                      actionBlocked={isBlocked}
+                      onAddReason={setReasonJob}
+                      reasonDept={cfg.dept}
+                    />
+                    {/* Inline warning strip shown under blocked cards */}
+                    {isBlocked && (
+                      <div style={{
+                        background: "#2a0000",
+                        border: "1px solid var(--red)",
+                        borderTop: "none",
+                        borderRadius: "0 0 8px 8px",
+                        padding: "9px 16px",
+                        display: "flex", alignItems: "center", gap: 8,
+                        fontSize: 12, fontWeight: 700, color: "var(--red)",
+                      }}>
+                        ⚠ Delay reason required — tap the ⏱ button above to unlock completion
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+          }
+          <LivePanel />
+        </div>
+      </Shell>
+
+      {identityPending && (
+        <OperatorIdentityModal
+          dept={cfg.dept}
+          onConfirm={handleIdentityConfirm}
+          onCancel={() => setIdentityPending(null)}
+        />
+      )}
+
+      {reasonJob && (
+        <DelayReasonModal
+          job={reasonJob}
+          dept={cfg.dept}
+          onClose={() => { setReasonJob(null); setPendingCompleteJob(null); }}
+          // Use onReasonSaved instead of plain reload so auto-complete fires
+          onSaved={onReasonSaved}
+          addToast={add}
+        />
+      )}
+      <ToastStack toasts={toasts} />
+    </>
+  );
+}
 // ── 3. OVERDUE DELIVERY ALERT ─────────────────────────────────────────────────
 // Jobs that are past their delivery date but still in the pipeline.
 // Computed from `active` jobs — no backend needed.
@@ -2185,6 +2633,8 @@ const reload = useCallback(async () => {
         <div className="r-grid-intelligence" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
           <BottleneckRadar active={active} />
           <DailyGoalRing   active={active} done={done} />
+          <AlbumCountPanel />
+          <OperatorStatsPanel />
         </div>
  
         {/* Throughput ticker */}
@@ -2525,7 +2975,7 @@ function buildPrintHTML(job) {
     </div>
   </div>
   <div class="chips">${chips.map(([l, v]) => `<span class="chip"><span class="lbl">${l}</span><span class="val">${v}</span></span>`).join("")}</div>
-  ${job.special_note ? `<div class="note"><div class="note-title">Special Instructions</div>${job.special_note}</div>` : ""}
+  ${job.special_note ? `<div class="note"><div class="note-title">${<Speech size={14}/>}Special Instructions</div>${job.special_note}</div>` : ""}
   <table>
     <thead><tr><th>Stage</th><th>Status</th></tr></thead>
     <tbody>${stageRows.map(([label, status]) => `<tr><td>${label}</td><td>${status || "—"}</td></tr>`).join("")}</tbody>
