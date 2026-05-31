@@ -488,7 +488,8 @@ def operator_stats(
                 DepartmentEnum.PRINTING,
                 DepartmentEnum.LASER_CUTTING,
             ]),
-            DepartmentLog.operator_name != None,  # noqa
+            DepartmentLog.operator_name.isnot(None),   # ← fix: use isnot(None)
+            DepartmentLog.operator_name != "",          # ← fix: also exclude empty strings
             DepartmentLog.entered_at >= start,
             DepartmentLog.entered_at <  end,
         )
@@ -510,7 +511,6 @@ def operator_stats(
         })
     return result
 
-
 @app.get("/api/operators/known")
 def get_known_operators(
     dept: str = Query(...),
@@ -520,13 +520,15 @@ def get_known_operators(
         db.query(DepartmentLog.operator_name)
         .filter(
             DepartmentLog.department    == dept.upper(),
-            DepartmentLog.operator_name != None,  # noqa
+            DepartmentLog.operator_name.isnot(None),   # ← fix
+            DepartmentLog.operator_name != "",          # ← fix
         )
         .distinct()
         .all()
     )
     names = sorted({r[0].strip().title() for r in rows if r[0]})
     return {"names": names}
+
 
 @app.get("/api/stats/albums")
 def album_stats(
