@@ -488,8 +488,8 @@ def operator_stats(
                 DepartmentEnum.PRINTING,
                 DepartmentEnum.LASER_CUTTING,
             ]),
-            DepartmentLog.operator_name.isnot(None),   # ← fix: use isnot(None)
-            DepartmentLog.operator_name != "",          # ← fix: also exclude empty strings
+            DepartmentLog.operator_name.isnot(None),  
+            DepartmentLog.operator_name != "",         
             DepartmentLog.entered_at >= start,
             DepartmentLog.entered_at <  end,
         )
@@ -510,6 +510,7 @@ def operator_stats(
             "count":         r.count,
         })
     return result
+
 
 @app.get("/api/operators/known")
 def get_known_operators(
