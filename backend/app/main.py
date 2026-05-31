@@ -473,8 +473,13 @@ def operator_stats(
     year:  int = Query(...),
     month: int = Query(...),
 ):
-    start = datetime(year, month, 1)
-    end   = datetime(year + 1, 1, 1) if month == 12 else datetime(year, month + 1, 1)
+    # Sri Lanka is UTC+5:30 — shift the window back by 5h30m
+    # so "June 2026" in LK time maps correctly to UTC stored timestamps
+    from datetime import timezone
+    TZ_OFFSET = timedelta(hours=5, minutes=30)
+
+    start = datetime(year, month, 1) - TZ_OFFSET
+    end   = (datetime(year + 1, 1, 1) if month == 12 else datetime(year, month + 1, 1)) - TZ_OFFSET
 
     rows = (
         db.query(
@@ -488,8 +493,8 @@ def operator_stats(
                 DepartmentEnum.PRINTING,
                 DepartmentEnum.LASER_CUTTING,
             ]),
-            DepartmentLog.operator_name.isnot(None),  
-            DepartmentLog.operator_name != "",         
+            DepartmentLog.operator_name.isnot(None),
+            DepartmentLog.operator_name != "",
             DepartmentLog.entered_at >= start,
             DepartmentLog.entered_at <  end,
         )
@@ -537,8 +542,9 @@ def album_stats(
     year:  int = Query(...),
     month: int = Query(...),
 ):
-    start = datetime(year, month, 1)
-    end   = datetime(year + 1, 1, 1) if month == 12 else datetime(year, month + 1, 1)
+    TZ_OFFSET = timedelta(hours=5, minutes=30)
+    start = datetime(year, month, 1) - TZ_OFFSET
+    end   = (datetime(year + 1, 1, 1) if month == 12 else datetime(year, month + 1, 1)) - TZ_OFFSET
 
     count = (
         db.query(func.count(JobCard.id))
