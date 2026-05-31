@@ -463,6 +463,11 @@ print(f"assets exists: {os.path.isdir(os.path.join(DIST_DIR, 'assets'))}")
 if os.path.isdir(os.path.join(DIST_DIR, "assets")):
     app.mount("/assets", StaticFiles(directory=os.path.join(DIST_DIR, "assets")), name="assets")
 
+@app.get("/ilab_icon.jpg")
+def icon():
+    f = os.path.join(DIST_DIR, "ilab_icon.jpg")
+    return FileResponse(f) if os.path.exists(f) else HTTPException(404)
+
 @app.get("/favicon.svg")
 def favicon():
     f = os.path.join(DIST_DIR, "favicon.svg")
