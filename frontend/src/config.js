@@ -1,5 +1,4 @@
 // ─── CONFIGURE THIS VALUE ─────────────────────────────────────
-const NGROK_DOMAIN = "https://trivial-fruit-corsage.ngrok-free.dev";
 // ─────────────────────────────────────────────────────────────
 
 const isLocal =
@@ -8,7 +7,7 @@ const isLocal =
 
 export const API_BASE = isLocal
   ? "http://localhost:8000"
-  : NGROK_DOMAIN;
+  : "";
 
 export const POLL_INTERVAL_MS = 4000;
 
