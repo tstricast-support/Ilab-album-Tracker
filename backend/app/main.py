@@ -454,6 +454,12 @@ def health():
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DIST_DIR = os.path.join(BASE_DIR, "frontend", "dist")
 
+# Debug: print the path so we can see it in logs
+print(f"BASE_DIR: {BASE_DIR}")
+print(f"DIST_DIR: {DIST_DIR}")
+print(f"DIST exists: {os.path.isdir(DIST_DIR)}")
+print(f"assets exists: {os.path.isdir(os.path.join(DIST_DIR, 'assets'))}")
+
 if os.path.isdir(os.path.join(DIST_DIR, "assets")):
     app.mount("/assets", StaticFiles(directory=os.path.join(DIST_DIR, "assets")), name="assets")
 
