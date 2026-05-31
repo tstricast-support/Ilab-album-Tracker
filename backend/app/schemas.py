@@ -27,6 +27,8 @@ class DepartmentLogOut(BaseModel):
     is_delayed: bool
     delay_reason: Optional[str]
     delay_reason_at: Optional[datetime]
+    operator_name: Optional[str] = None   
+    under_whom: Optional[str] = None
 
     model_config = {"from_attributes": True}
 

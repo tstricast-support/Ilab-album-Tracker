@@ -481,6 +481,38 @@ function SpecialNote({ note }) {
   );
 }
 
+// ── Operator tag ──────────────────────────────────────────────────────────────
+function OperatorTag({ log, dept }) {
+  if (!log?.operator_name) return null;
+  const showUnder = dept === "PRINTING" && log.under_whom;
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", marginTop: 3,
+    }}>
+      <span style={{
+        display: "inline-flex", alignItems: "center", gap: 4,
+        fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 4,
+        background: "#0a0a1a", border: "1px solid #2a2a4a",
+        color: "#a0a8ff",
+      }}>
+        👤 {log.operator_name}
+      </span>
+      {showUnder && (
+        <span style={{
+          fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 4,
+          background: "#0a1500", border: "1px solid #2a3a00",
+          color: "#8abf50",
+        }}>
+          under {log.under_whom}
+        </span>
+      )}
+    </div>
+  );
+}
+
+
+
+
 // ── Stage row ─────────────────────────────────────────────────────────────────
 function StageRow({ job }) {
   const delayed = job.logs?.some(l => l.is_delayed && !l.exited_at);
@@ -528,10 +560,11 @@ function StageRow({ job }) {
               )}
               {sv === "IN_PROGRESS" && <span style={{ fontSize: 10, color: "var(--amber)", fontWeight: 600 }}>Running…</span>}
               {reason && (
-                <div style={{ fontSize: 10, color: isDelayed ? "#ffaa60" : "var(--text-dim)", background: isDelayed ? "rgba(255,100,0,.08)" : "rgba(255,255,255,.03)", borderRadius: 3, padding: "3px 6px", lineHeight: 1.4, borderLeft: `2px solid ${isDelayed ? "#ff6030" : "var(--border)"}` }}>
-                  {reason}
-                </div>
-              )}
+                  <div style={{ fontSize: 10, color: isDelayed ? "#ffaa60" : "var(--text-dim)", background: isDelayed ? "rgba(255,100,0,.08)" : "rgba(255,255,255,.03)", borderRadius: 3, padding: "3px 6px", lineHeight: 1.4, borderLeft: `2px solid ${isDelayed ? "#ff6030" : "var(--border)"}` }}>
+                    {reason}
+                  </div>
+                )}
+                <OperatorTag log={activeLog || completedLog} dept={st.dept} />
             </div>
           );
         })}
@@ -557,6 +590,18 @@ function DelayReasonsList({ logs }) {
             {l.duration_minutes && <span style={{ fontSize: 10, color: "var(--text-dim)", marginLeft: "auto" }}>⏱ {l.duration_minutes} min</span>}
           </div>
           <div style={{ fontSize: 13, color: "#ffcc80", fontWeight: 500 }}>"{l.delay_reason}"</div>
+          {l.operator_name && (
+            <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 3, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 4, background: "#0a0a1a", border: "1px solid #2a2a4a", color: "#a0a8ff" }}>
+                👤 {l.operator_name}
+              </span>
+              {l.under_whom && l.department === "PRINTING" && (
+                <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 4, background: "#0a1500", border: "1px solid #2a3a00", color: "#8abf50" }}>
+                  under {l.under_whom}
+                </span>
+              )}
+            </div>
+          )}
         </div>
       ))}
     </div>
