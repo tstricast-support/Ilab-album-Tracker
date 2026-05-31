@@ -55,7 +55,7 @@ class DepartmentEnum(str, enum.Enum):
 
 
 TIMEOUT_MINUTES: dict[str, int] = {
-    "PRINTING":      1,
+    "PRINTING":      75,
     "LAMINATING":    60,
     "LASER_CUTTING": 45,
     "BINDING":       90,

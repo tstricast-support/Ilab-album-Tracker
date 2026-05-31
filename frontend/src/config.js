@@ -21,7 +21,7 @@ export const DEPARTMENTS = {
 };
 
 export const TIMEOUT_MINUTES = {
-  PRINTING:      1,
+  PRINTING:      75,
   LAMINATING:    60,
   LASER_CUTTING: 45,
   BINDING:       90,
