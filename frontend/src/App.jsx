@@ -416,6 +416,9 @@ function Shell({ title, accent = "var(--amber)", topRight, children }) {
       <main className="r-main-pad" style={{ flex: 1, padding: 20, maxWidth: 1400, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
         {children}
       </main>
+      <footer style={{ textAlign: "center", padding: "12px 20px", borderTop: "1px solid var(--border)", background: "var(--bg1)" }}>
+        <span style={{ fontSize: 11, color: "var(--text-dim)", letterSpacing: ".06em" }}>© 2026 Yasith Wijesuriya</span>
+      </footer>
     </div>
   );
 }
@@ -2522,7 +2525,7 @@ function buildPrintHTML(job) {
     </div>
   </div>
   <div class="chips">${chips.map(([l, v]) => `<span class="chip"><span class="lbl">${l}</span><span class="val">${v}</span></span>`).join("")}</div>
-  ${job.special_note ? `<div class="note"><div class="note-title">${<Speech size={14}/>}Special Instructions</div>${job.special_note}</div>` : ""}
+  ${job.special_note ? `<div class="note"><div class="note-title">Special Instructions</div>${job.special_note}</div>` : ""}
   <table>
     <thead><tr><th>Stage</th><th>Status</th></tr></thead>
     <tbody>${stageRows.map(([label, status]) => `<tr><td>${label}</td><td>${status || "—"}</td></tr>`).join("")}</tbody>

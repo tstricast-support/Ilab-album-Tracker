@@ -24,7 +24,6 @@ from .models import (
     StageStatusEnum,
     get_db,
     init_db,
-    run_migration,
 )
 from .routers import history as history_router
 # from .routers import analytics as analytics_router
@@ -54,7 +53,6 @@ app.add_middleware(
 @app.on_event("startup")
 def on_startup():
     init_db()
-    run_migration()
 
 COMPLETED_VISIBLE_HOURS = 24
 EXPIRING_SOON_HOURS     = 20

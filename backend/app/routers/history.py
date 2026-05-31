@@ -86,18 +86,19 @@ def dates_with_completions(
     else:
         end = datetime(year, month + 1, 1)
 
+    from sqlalchemy import extract
+
     rows = (
         db.query(
-            func.strftime("%d", JobCard.updated_at).label("day"),
+            extract("day", JobCard.updated_at).label("day"),
             func.count(JobCard.id).label("cnt"),
         )
         .filter(
-            JobCard.is_fully_completed == True,       # noqa
+            JobCard.is_fully_completed == True,
             JobCard.updated_at >= start,
             JobCard.updated_at <  end,
         )
-        .group_by(func.strftime("%d", JobCard.updated_at))
+        .group_by(extract("day", JobCard.updated_at))
         .all()
     )
-    # Returns {"15": 4, "16": 1, ...}
-    return {r.day.lstrip("0") or "0": r.cnt for r in rows}
+    return {str(int(r.day)): r.cnt for r in rows}

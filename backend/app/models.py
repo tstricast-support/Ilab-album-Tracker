@@ -1,27 +1,24 @@
 import enum
+import os
+from dotenv import load_dotenv
 from datetime import datetime
-
 from sqlalchemy import (
     Boolean, Column, DateTime, Enum, ForeignKey,
-    Integer, String, Text, create_engine, event
-)
+    Integer, String, Text, create_engine)
 from sqlalchemy.orm import DeclarativeBase, relationship, sessionmaker
+load_dotenv()  # Load environment variables from .env file
 
-DATABASE_URL = "sqlite:///./ilab_prod.db"
-
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False},
-    echo=False,
+DATABASE_URL = os.environ.get(
+    "DATABASE_URL",
+    "postgresql://localhost/ilab_prod"   # used only on your local machine
 )
 
-@event.listens_for(engine, "connect")
-def set_sqlite_pragma(dbapi_connection, _connection_record):
-    cursor = dbapi_connection.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL")
-    cursor.execute("PRAGMA synchronous=NORMAL")
-    cursor.execute("PRAGMA foreign_keys=ON")
-    cursor.close()
+# Railway gives a URL starting with postgres:// but SQLAlchemy
+# requires postgresql:// — this one line fixes that.
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+engine = create_engine(DATABASE_URL, echo=False)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -176,34 +173,6 @@ class DepartmentLog(Base):
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
 
-
-def run_migration() -> None:
-    
-    import sqlite3
-    db_path = DATABASE_URL.replace("sqlite:///", "")
-    conn    = sqlite3.connect(db_path)
-    cursor  = conn.cursor()
-
-    cursor.execute("PRAGMA table_info(department_logs)")
-    dl_cols = {row[1] for row in cursor.fetchall()}
-
-    cursor.execute("PRAGMA table_info(job_cards)")
-    jc_cols = {row[1] for row in cursor.fetchall()}
-
-    if "delay_reason" not in dl_cols:
-        cursor.execute("ALTER TABLE department_logs ADD COLUMN delay_reason TEXT")
-        print("[migration] Added: department_logs.delay_reason")
-
-    if "delay_reason_at" not in dl_cols:
-        cursor.execute("ALTER TABLE department_logs ADD COLUMN delay_reason_at DATETIME")
-        print("[migration] Added: department_logs.delay_reason_at")
-
-    if "box_type" not in jc_cols:
-        cursor.execute("ALTER TABLE job_cards ADD COLUMN box_type VARCHAR(256)")
-        print("[migration] Added: job_cards.box_type")
-
-    conn.commit()
-    conn.close()
 
 
 def get_db():
