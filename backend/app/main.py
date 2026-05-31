@@ -312,9 +312,9 @@ def advance(
                 .first()
             )
             if log:
-                log.operator_name = body.operator_name.strip()
+                log.operator_name = body.operator_name.strip().title() #type:ignore
                 if dept == "PRINTING" and body.under_whom:
-                    log.under_whom = body.under_whom.strip()
+                    log.under_whom = body.under_whom.strip().title() #type:ignore
                 db.commit()
     elif action == "complete":
         if current != "IN_PROGRESS":
@@ -510,6 +510,23 @@ def operator_stats(
         })
     return result
 
+
+@app.get("/api/operators/known")
+def get_known_operators(
+    dept: str = Query(...),
+    db:   Session = Depends(get_db),
+):
+    rows = (
+        db.query(DepartmentLog.operator_name)
+        .filter(
+            DepartmentLog.department    == dept.upper(),
+            DepartmentLog.operator_name != None,  # noqa
+        )
+        .distinct()
+        .all()
+    )
+    names = sorted({r[0].strip().title() for r in rows if r[0]})
+    return {"names": names}
 
 @app.get("/api/stats/albums")
 def album_stats(

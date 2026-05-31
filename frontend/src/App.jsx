@@ -2003,14 +2003,32 @@ function OperatorStatsPanel() {
 
 
 function OperatorIdentityModal({ dept, onConfirm, onCancel }) {
-  const [name,     setName]  = useState("");
-  const [underWhom, setUnder] = useState("");
+  const [name,       setName]      = useState("");
+  const [underWhom,  setUnder]     = useState("");
+  const [knownNames, setKnown]     = useState([]);
+  const [showNew,    setShowNew]   = useState(false);
   const isPrinting = dept === "PRINTING";
 
+  useEffect(() => {
+    apiFetch(`/api/operators/known?dept=${dept}`)
+      .then(d => setKnown(d.names || []))
+      .catch(() => {});
+  }, [dept]);
+
+  // capitalize on every keystroke
+  function handleName(e) {
+    setName(e.target.value.replace(/\b\w/g, c => c.toUpperCase()));
+  }
+  function handleUnder(e) {
+    setUnder(e.target.value.replace(/\b\w/g, c => c.toUpperCase()));
+  }
+
   function submit() {
-    if (!name.trim()) return;
-    if (isPrinting && !underWhom.trim()) return;
-    onConfirm({ operator_name: name.trim(), under_whom: underWhom.trim() || undefined });
+    const finalName  = name.trim().replace(/\b\w/g, c => c.toUpperCase());
+    const finalUnder = underWhom.trim().replace(/\b\w/g, c => c.toUpperCase());
+    if (!finalName) return;
+    if (isPrinting && !finalUnder) return;
+    onConfirm({ operator_name: finalName, under_whom: finalUnder || undefined });
   }
 
   return (
@@ -2019,21 +2037,68 @@ function OperatorIdentityModal({ dept, onConfirm, onCancel }) {
       <div style={{ background: "var(--bg1)", border: "1px solid var(--border)",
         borderRadius: 12, padding: 28, width: "100%", maxWidth: 400,
         display: "flex", flexDirection: "column", gap: 16 }}>
+
         <div style={{ fontSize: 13, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".1em" }}>
           Before you start
         </div>
+
+        {/* Name field — dropdown if known names exist */}
         <div>
           <label>Your name *</label>
-          <input value={name} onChange={e => setName(e.target.value)}
-            placeholder="Enter your name" autoFocus />
+          {knownNames.length > 0 && !showNew ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <select
+                value={name}
+                onChange={e => {
+                  if (e.target.value === "__new__") { setShowNew(true); setName(""); }
+                  else setName(e.target.value);
+                }}
+                style={{ margin: 0 }}
+              >
+                <option value="">-- Select your name --</option>
+                {knownNames.map(n => <option key={n} value={n}>{n}</option>)}
+                <option value="__new__">+ Type a new name</option>
+              </select>
+            </div>
+          ) : (
+            <div style={{ display: "flex", gap: 6 }}>
+              <input
+                value={name}
+                onChange={handleName}
+                placeholder="Enter your name"
+                autoFocus
+                style={{ flex: 1 }}
+              />
+              {knownNames.length > 0 && (
+                <button
+                  onClick={() => { setShowNew(false); setName(""); }}
+                  style={{ padding: "0 10px", background: "var(--bg3)", color: "var(--text-sec)",
+                    border: "1px solid var(--border)", borderRadius: 6, fontSize: 12 }}>
+                  ← Back
+                </button>
+              )}
+            </div>
+          )}
         </div>
+ {/* if some one want to change supervisor name,change here options */}
         {isPrinting && (
           <div>
             <label>Under whom are you printing? *</label>
-            <input value={underWhom} onChange={e => setUnder(e.target.value)}
-              placeholder="Supervisor / manager name" />
+            <select
+              value={underWhom}
+              onChange={e => setUnder(e.target.value)}
+              style={{ margin: 0 }}
+            >
+              <option value="">-- Select supervisor --</option>
+              <option value="Jeewan">Jeewan</option>
+              <option value="Hirusha">Hirusha</option>
+              <option value="Suresh">Suresh</option>
+              <option value="Boss">Boss</option>
+              
+            </select>
           </div>
         )}
+
         <div style={{ display: "flex", gap: 8 }}>
           <button
             onClick={submit}
