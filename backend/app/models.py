@@ -12,6 +12,7 @@ DATABASE_URL = os.environ.get(
     "DATABASE_URL",
     "postgresql://localhost/ilab_prod"   # used only on your local machine
 )
+print(f"Database_url: {DATABASE_URL}")
 
 # Railway gives a URL starting with postgres:// but SQLAlchemy
 # requires postgresql:// — this one line fixes that.
