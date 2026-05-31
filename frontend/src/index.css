@@ -1,0 +1,168 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+    --font-sans: sans-serif;
+    --color-border: var(--border);
+    --color-background: var(--background);
+    --radius-md: 8px;
+    --radius-lg: 12px;
+}
+
+/* ── i Lab dark theme variables (used by App.jsx) ── */
+:root {
+    --bg0:       #0a0a0a;
+    --bg1:       #111111;
+    --bg2:       #1a1a1a;
+    --bg3:       #242424;
+    --border:    #2e2e2e;
+    --amber:     #f5a623;
+    --red:       #e53e3e;
+    --green:     #38a169;
+    --blue:      #3b82f6;
+    --cyan:      #06b6d4;
+    --purple:    #a855f7;
+    --text-pri:  #f0f0f0;
+    --text-sec:  #d0d0d0;
+    --text-dim:  #888888;
+    --muted:     #666666;
+    --fd:        'Courier New', monospace;
+    --fm:        'Courier New', monospace;
+    --background: var(--bg0);
+    --foreground: var(--text-pri);
+}
+
+/* ── Reset & base ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    background: var(--bg0);
+    color: var(--text-pri);
+    font-family: system-ui, -apple-system, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+/* ── Buttons ── */
+button {
+    cursor: pointer;
+    border: none;
+    background: none;
+    font-family: inherit;
+    font-size: inherit;
+    transition: opacity 0.15s, background 0.15s;
+}
+button:hover:not(:disabled) { opacity: 0.85; }
+button:disabled { cursor: not-allowed; }
+
+/* ── Inputs / selects / textareas ── */
+input, select, textarea {
+    width: 100%;
+    background: var(--bg1);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-pri);
+    font-family: inherit;
+    font-size: 14px;
+    padding: 9px 12px;
+    outline: none;
+    transition: border-color 0.15s;
+    display: block;
+    margin-top: 5px;
+}
+input:focus, select:focus, textarea:focus {
+    border-color: var(--amber);
+}
+input::placeholder, textarea::placeholder {
+    color: #606060;
+}
+textarea {
+    resize: vertical;
+    min-height: 80px;
+}
+select {
+    appearance: none;
+    cursor: pointer;
+}
+
+/* ── Labels ── */
+label {
+    display: block;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: #dddddd;
+    margin-bottom: 2px;
+}
+
+/* ── Grid helpers ── */
+.g2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.g3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+@media (max-width: 640px) {
+    .g2, .g3 { grid-template-columns: 1fr; }
+}
+
+/* ── Pills ── */
+.pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 20px;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: .07em;
+}
+
+/* ── Slide-in animation ── */
+.si {
+    animation: slideIn 0.18s ease;
+}
+@keyframes slideIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Blink ── */
+.blink { animation: blink 1s step-start infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+
+/* ── Pulse ── */
+.pulse { animation: pulse 2s ease-in-out infinite; }
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.7; }
+}
+
+/* ── Delayed card border ── */
+.card-delayed {
+    border-color: var(--red) !important;
+    box-shadow: 0 0 12px rgba(229,62,62,.15);
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg1); }
+::-webkit-scrollbar-thumb { background: var(--bg3); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+/* Change calendar icon color to white */
+input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  cursor: pointer;
+}
+
+@keyframes delayedCardBlink {
+  0%, 100% {
+    background: #444343e0;
+  }
+  50% {
+    background: #5a0000;
+  }
+}
+
+.delayed-card {
+  animation: delayedCardBlink 1s infinite;
+}
