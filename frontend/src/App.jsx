@@ -882,7 +882,7 @@ function EntryPage() {
     } catch {}
     try {
       const ds = await api.deptStats();
-      setTodayCount(ds?.ENTRY ?? 0);
+      setTodayCount(ds?.daily?.ENTRY ?? 0);
     } catch {}
   }, []);
  

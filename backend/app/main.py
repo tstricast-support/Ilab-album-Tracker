@@ -475,7 +475,7 @@ def get_dept_stats(db: Session = Depends(get_db)):
         .filter(func.date(JobCard.created_at) == today)
         .scalar() or 0
     )
-    result["ENTRY"] = entry_count
+    daily["ENTRY"] = entry_count
 
     return {"monthly": result, "daily": daily}
 
