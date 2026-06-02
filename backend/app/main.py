@@ -439,25 +439,37 @@ def get_stats(db: Session = Depends(get_db)):
 
 @app.get("/api/stats/departments")
 def get_dept_stats(db: Session = Depends(get_db)):
-    """
-    Returns per-department completed counts (all-time) + today's entry count.
-    Used by station pages and entry page header.
-    """
     from sqlalchemy import func, cast, Date
-    from datetime import date
+    from datetime import date, datetime, timezone, timedelta
 
     today = date.today()
+    TZ_OFFSET = timedelta(hours=5, minutes=30)  # Sri Lanka time
+    day_start = datetime(today.year, today.month, today.day) - TZ_OFFSET
+    day_end   = day_start + timedelta(days=1)
 
-    # Per-department: how many times has each dept log been completed (exited)
+    # All-time per-department completed count (monthly)
     rows = (
         db.query(DepartmentLog.department, func.count(DepartmentLog.id))
-        .filter(DepartmentLog.exited_at != None)  # noqa
+        .filter(DepartmentLog.exited_at != None)
         .group_by(DepartmentLog.department)
         .all()
     )
     result = {str(r[0]).split(".")[-1]: r[1] for r in rows}
 
-    # ENTRY count: jobs created today
+    # TODAY's per-department completed count (daily)
+    daily_rows = (
+        db.query(DepartmentLog.department, func.count(DepartmentLog.id))
+        .filter(
+            DepartmentLog.exited_at != None,
+            DepartmentLog.exited_at >= day_start,
+            DepartmentLog.exited_at <  day_end,
+        )
+        .group_by(DepartmentLog.department)
+        .all()
+    )
+    daily = {str(r[0]).split(".")[-1]: r[1] for r in daily_rows}
+
+    # Entry count today
     entry_count = (
         db.query(func.count(JobCard.id))
         .filter(func.date(JobCard.created_at) == today)
@@ -465,7 +477,8 @@ def get_dept_stats(db: Session = Depends(get_db)):
     )
     result["ENTRY"] = entry_count
 
-    return result
+    return {"monthly": result, "daily": daily}
+
 
 @app.get("/api/stats/operators")
 def operator_stats(

@@ -359,7 +359,7 @@ function Shell({ title, accent = "var(--amber)", topRight, children }) {
       <header style={{
         background: "var(--bg1)", borderBottom: "1px solid var(--border)",
         padding: isMobile ? "0 10px" : "0 20px",
-        height: isMobile ? 50 : 50,
+        height: isMobile ? 60 : 60,
         display: "flex", alignItems: "center",
         gap: isMobile ? 8 : 14,
         position: "sticky", top: 0, zIndex: 100,
@@ -417,6 +417,29 @@ function Shell({ title, accent = "var(--amber)", topRight, children }) {
       <main className="r-main-pad" style={{ flex: 1, padding: 20, maxWidth: 1400, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
         {children}
       </main>
+        <footer style={{
+            borderTop: "1px solid var(--border)",
+            background: "var(--bg1)",
+            padding: "10px 20px",
+            textAlign: "center",
+            fontSize: 11,
+            color: "var(--text-dim)",
+            letterSpacing: ".08em",
+            fontFamily: "var(--fd)",
+            fontWeight: 600,
+          }}>
+            <span style={{
+              fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 99,
+              background: "var(--bg3)", border: "1px solid var(--border)",
+              color: "var(--text-dim)", letterSpacing: ".04em",
+            }}>v1.1</span>
+            <span>{" "}2026{" "}</span>
+            
+            <span style={{ color: "var(--amber)", fontWeight: 700 }}>
+              Yasith Wijesuriya
+            </span>
+            {" "}— All rights reserved
+        </footer>
     </div>
   );
 }
@@ -2172,13 +2195,16 @@ function StationPage({ deptKey }) {
   // NEW: track if modal was opened specifically to unblock a completion
   const [pendingCompleteJob, setPendingCompleteJob] = useState(null);
   const [identityPending, setIdentityPending] = useState(null);
+  const [deptDailyCount, setDeptDailyCount] = useState(null);
+
   const isMobile = useIsMobile();
 
   const reload = useCallback(async () => {
     try {
       const [q, ds] = await Promise.all([api.queue(deptKey), api.deptStats()]);
       setQueue(q);
-      setDeptCompletedCount(ds?.[cfg.dept] ?? 0);
+      setDeptCompletedCount(ds?.monthly?.[cfg.dept] ?? 0);  // monthly
+      setDeptDailyCount(ds?.daily?.[cfg.dept] ?? 0);         // daily
     } catch {}
   }, [deptKey]);
 
@@ -2267,9 +2293,9 @@ function StationPage({ deptKey }) {
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {/* Queue count */}
           <div style={{
-            display: "flex", alignItems: "center", gap: isMobile ? 6 : 10,
+            display: "flex", alignItems: "center", gap: isMobile ? 2 : 10,
             background: "#000", border: "1px solid var(--border)",
-            borderRadius: 8, padding: isMobile ? "2px 8px 2px 6px" : "2px 10px 2px 8px",
+            borderRadius: 8, padding: isMobile ? "2px 6px 2px 6px" : "2px 10px 2px 8px",
           }}>
             <span className="r-station-queue-num" style={{
               fontFamily: "var(--fd)",
@@ -2278,18 +2304,36 @@ function StationPage({ deptKey }) {
               color: queue.length > 0 ? "var(--green)" : "var(--text-dim)",
             }}>{queue.length}</span>
             <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-              <span style={{ fontSize: isMobile ? 10 : 12, fontWeight: 800, color: "#fff", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>{queue.length !== 1 ? "JOBS" : "JOB"}</span>
-              <span style={{ fontSize: isMobile ? 8 : 10, fontWeight: 600, color: "#dad2d2", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>IN QUEUE</span>
+              <span style={{ fontSize: isMobile ? 9 : 12, fontWeight: 800, color: "#fff", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>{queue.length !== 1 ? "JOBS" : "JOB"}</span>
+              <span style={{ fontSize: isMobile ? 7 : 10, fontWeight: 600, color: "#dad2d2", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>IN QUEUE</span>
             </div>
           </div>
+
+          {/* Daily Done */}
+        <div style={{
+          display: "flex", alignItems: "center", gap: isMobile ? 2 : 8,
+          background: "#020015", border: "1px solid #1a1c3a",
+          borderRadius: 8, padding: isMobile ? "2px 6px 2px 6px" : "2px 10px 2px 8px",
+        }}>
+          <span style={{
+            fontFamily: "var(--fd)",
+            fontSize: isMobile ? 36 : 50,
+            fontWeight: 900, lineHeight: 1,
+            color: deptDailyCount > 0 ? "#4749c2" : "var(--text-dim)",
+          }}>{deptDailyCount ?? "—"}</span>
+          <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+            <span style={{ fontSize: isMobile ? 9 : 12, fontWeight: 800, color: "#4749c2)", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>Daily</span>
+            <span style={{ fontSize: isMobile ? 7 : 10, fontWeight: 600, color: "#4749c2", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>Done</span>
+          </div>
+        </div>
 
            
           {/* Completed count (24h) */}
           
           <div style={{
-            display: "flex", alignItems: "center", gap: isMobile ? 5 : 8,
-            background: "#001a00", border: "1px solid #1a4a1a",
-            borderRadius: 8, padding: isMobile ? "2px 8px 2px 6px" : "2px 10px 2px 8px",
+            display: "flex", alignItems: "center", gap: isMobile ? 2 : 8,
+            background: "#021b09", border: "1px solid #1a3a2e",
+            borderRadius: 8, padding: isMobile ? "2px 6px 2px 6px" : "2px 10px 2px 8px",
           }}>
             <span style={{
               fontFamily: "var(--fd)",
@@ -2298,8 +2342,8 @@ function StationPage({ deptKey }) {
               color: deptCompletedCount > 0 ? "var(--green)" : "var(--text-dim)",
             }}>{deptCompletedCount ?? "—"}</span>
             <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-              <span style={{ fontSize: isMobile ? 10 : 12, fontWeight: 800, color: "var(--green)", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>Monthly</span>
-              <span style={{ fontSize: isMobile ? 8 : 10, fontWeight: 600, color: "#6aaa6a", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>Done</span>
+              <span style={{ fontSize: isMobile ? 9 : 12, fontWeight: 800, color: "#ffffff", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>Monthly</span>
+              <span style={{ fontSize: isMobile ? 7 : 10, fontWeight: 600, color: "#6aaa6a", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>Done</span>
             </div>
           </div>
         </div>
@@ -3165,7 +3209,6 @@ export default function App() {
       {page === "entry"     ? <EntryPage /> :
        page === "station"   ? <StationPage deptKey={dept} /> :
        page === "history"   ? <HistoryPage /> :
-       page === "analytics" ? <AnalyticsPage /> :
        <DashboardPage />}
     </>
   );
