@@ -359,7 +359,7 @@ function Shell({ title, accent = "var(--amber)", topRight, children }) {
       <header style={{
         background: "var(--bg1)", borderBottom: "1px solid var(--border)",
         padding: isMobile ? "0 10px" : "0 20px",
-        height: isMobile ? 50 : 56,
+        height: isMobile ? 50 : 50,
         display: "flex", alignItems: "center",
         gap: isMobile ? 8 : 14,
         position: "sticky", top: 0, zIndex: 100,
@@ -2282,7 +2282,10 @@ function StationPage({ deptKey }) {
               <span style={{ fontSize: isMobile ? 8 : 10, fontWeight: 600, color: "#dad2d2", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>IN QUEUE</span>
             </div>
           </div>
+
+           
           {/* Completed count (24h) */}
+          
           <div style={{
             display: "flex", alignItems: "center", gap: isMobile ? 5 : 8,
             background: "#001a00", border: "1px solid #1a4a1a",
@@ -2295,8 +2298,8 @@ function StationPage({ deptKey }) {
               color: deptCompletedCount > 0 ? "var(--green)" : "var(--text-dim)",
             }}>{deptCompletedCount ?? "—"}</span>
             <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-              <span style={{ fontSize: isMobile ? 10 : 12, fontWeight: 800, color: "var(--green)", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>DONE</span>
-              <span style={{ fontSize: isMobile ? 8 : 10, fontWeight: 600, color: "#6aaa6a", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>TODAY</span>
+              <span style={{ fontSize: isMobile ? 10 : 12, fontWeight: 800, color: "var(--green)", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>Monthly</span>
+              <span style={{ fontSize: isMobile ? 8 : 10, fontWeight: 600, color: "#6aaa6a", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>Done</span>
             </div>
           </div>
         </div>
