@@ -425,7 +425,7 @@ function Shell({ title, accent = "var(--amber)", topRight, children }) {
             fontSize: 11,
             color: "var(--text-dim)",
             letterSpacing: ".08em",
-            fontFamily: "var(--fd)",
+            fontFamily: "Inter, sans-serif",
             fontWeight: 600,
           }}>
             <span style={{
@@ -1691,7 +1691,7 @@ function DailyGoalRing({ active, done }) {
               ? "Excellent"
               : rate >= 50
               ? "Steady"
-              : "අවදානය දිය යුතුයි"}
+              : "Pay Attention!"}
           </div>
         </div>
       </div>
