@@ -35,7 +35,7 @@ deactivate () {
 # unset irrelevant variables
 deactivate nondestructive
 
-VIRTUAL_ENV="C:\ilab-server\backend\venv"
+VIRTUAL_ENV="E:\I Lab album-tracker\Ilab-album-Tracker\backend\venv"
 export VIRTUAL_ENV
 
 _OLD_VIRTUAL_PATH="$PATH"

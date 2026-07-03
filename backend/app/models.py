@@ -1,28 +1,39 @@
 import enum
-import os
-from dotenv import load_dotenv
 from datetime import datetime
 from sqlalchemy import (
     Boolean, Column, DateTime, Enum, ForeignKey,
     Integer, String, Text, create_engine)
 from sqlalchemy.orm import DeclarativeBase, relationship, sessionmaker
-load_dotenv()  # Load environment variables from .env file
+from .config import settings
+from datetime import timedelta
 
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "postgresql://localhost/ilab_prod"   # used only on your local machine
+
+SL_TZ_OFFSET = timedelta(hours=5, minutes=30)
+db_url = settings.DATABASE_URL
+
+if not db_url:
+    raise RuntimeError("DATABASE_URL is missing.")
+
+if db_url.startswith("postgres://"):
+    db_url = db_url.replace("postgres://", "postgresql://", 1)
+
+connect_args = {}
+
+if db_url.startswith("sqlite"):
+    connect_args = {
+        "check_same_thread": False
+    }
+
+engine = create_engine(
+    db_url,
+    connect_args=connect_args
 )
-print(f"Database_url: {DATABASE_URL}")
 
-# Railway gives a URL starting with postgres:// but SQLAlchemy
-# requires postgresql:// — this one line fixes that.
-if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
-
-engine = create_engine(DATABASE_URL, echo=False)
-
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
+SessionLocal = sessionmaker(
+    bind=engine,
+    autoflush=False,
+    autocommit=False
+)
 
 class Base(DeclarativeBase):
     pass
@@ -121,12 +132,17 @@ class JobCard(Base):
     bind_rexing_no   = Column(String(128), nullable=True)
     box_type         = Column(String(256), nullable=True)   # ← NEW
 
+    payment_by         = Column(String(128), nullable=True)
+    payment_updated_at = Column(DateTime,    nullable=True)
+    box_pouch_status    = Column(String(32),  nullable=True)
+
     status_printing      = Column(Enum(StageStatusEnum), nullable=False, default=StageStatusEnum.PENDING)
     status_laminating    = Column(Enum(StageStatusEnum), nullable=False, default=StageStatusEnum.PENDING)
     status_laser_cutting = Column(Enum(StageStatusEnum), nullable=False, default=StageStatusEnum.PENDING)
     status_binding       = Column(Enum(StageStatusEnum), nullable=False, default=StageStatusEnum.PENDING)
 
     is_fully_completed = Column(Boolean, nullable=False, default=False)
+    completed_at = Column(DateTime, nullable=True)
 
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow,
@@ -163,6 +179,9 @@ class DepartmentLog(Base):
     delay_reason_at  = Column(DateTime, nullable=True)
     operator_name = Column(String(128), nullable=True)   # for PRINTING + LASER_CUTTING
     under_whom    = Column(String(128), nullable=True)   # for PRINTING only
+    machine       = Column(String(32),  nullable=True)
+    is_story      = Column(Boolean, nullable=False, default=False)
+    is_rebind     = Column(Boolean, nullable=False, default=False)    
 
     job = relationship("JobCard", back_populates="logs")
 
@@ -173,42 +192,81 @@ class DepartmentLog(Base):
         )
 
 
-def init_db() -> None:
+def init_db():
     Base.metadata.create_all(bind=engine)
 
 
-def run_migration() -> None:
-    """
-    PostgreSQL-safe migration. Runs on startup, safe to run multiple times.
-    ADD COLUMN IF NOT EXISTS means it will never crash even if columns already exist.
-    """
+def run_migration():
     from sqlalchemy import text
+
+    # SQLite doesn't support the PostgreSQL syntax used below.
+    if db_url.startswith("sqlite"):#type: ignore
+        return
+
     with engine.connect() as conn:
         conn.execute(text("""
             ALTER TABLE department_logs
             ADD COLUMN IF NOT EXISTS delay_reason TEXT;
         """))
+
         conn.execute(text("""
             ALTER TABLE department_logs
             ADD COLUMN IF NOT EXISTS delay_reason_at TIMESTAMP;
         """))
+
         conn.execute(text("""
             ALTER TABLE department_logs
             ADD COLUMN IF NOT EXISTS operator_name VARCHAR(128);
         """))
+
         conn.execute(text("""
             ALTER TABLE department_logs
             ADD COLUMN IF NOT EXISTS under_whom VARCHAR(128);
         """))
+
         conn.execute(text("""
             ALTER TABLE job_cards
             ADD COLUMN IF NOT EXISTS box_type VARCHAR(256);
         """))
-        conn.commit()
 
+        conn.execute(text("""
+            ALTER TABLE department_logs
+            ADD COLUMN IF NOT EXISTS machine VARCHAR(32);
+        """))
+
+        conn.execute(text("""
+            ALTER TABLE job_cards
+            ADD COLUMN IF NOT EXISTS payment_by VARCHAR(128);
+        """))
+
+        conn.execute(text("""
+            ALTER TABLE job_cards
+            ADD COLUMN IF NOT EXISTS payment_updated_at TIMESTAMP;
+        """))
+
+        conn.execute(text("""
+            ALTER TABLE job_cards
+            ADD COLUMN IF NOT EXISTS box_pouch_status VARCHAR(32);
+        """))
+        conn.execute(text("""
+            ALTER TABLE job_cards
+            ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP;
+        """))
+        conn.execute(text("""
+            ALTER TABLE department_logs
+            ADD COLUMN IF NOT EXISTS is_story BOOLEAN DEFAULT FALSE;
+        """))
+
+        conn.execute(text("""
+            ALTER TABLE department_logs
+            ADD COLUMN IF NOT EXISTS is_rebind BOOLEAN DEFAULT FALSE;
+        """))
+
+        conn.commit()
 
 def get_db():
     db = SessionLocal()
+
     try:
         yield db
     finally:

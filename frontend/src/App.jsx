@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { API_BASE, POLL_INTERVAL_MS, APP_NAME } from "./config.js";
-import {ArrowRight, Calendar,Pen,SquareX, Trash,Printer,TriangleAlert,Flame,Activity, Speech, Scissors,BookOpen}from "lucide-react";
+import { API_BASE, POLL_INTERVAL_MS, APP_NAME,MACHINES  } from "./config.js";
+import {ArrowRight, Calendar,Pen,SquareX, Trash,Printer,TriangleAlert,Flame,Activity, Speech, Scissors,BookOpen,Plus, Timer,ChevronDown ,Search}from "lucide-react";
 import logo from "./assets/logo.jpg";
 
 // ── API ───────────────────────────────────────────────────────────────────────
@@ -30,12 +30,27 @@ const api = {
   }),
   stats:         ()             => apiFetch("/api/stats"),
   deptStats: () => apiFetch("/api/stats/departments"),
+  printingSection: () => apiFetch("/api/stats/printing-section"),
   setReason:     (id, dept, reason) => apiFetch(`/api/jobs/${id}/delay-reason/${dept}`, {
     method: "POST", body: JSON.stringify({ reason }),
   }),
   presetReasons: (dept)         => apiFetch(`/api/delay-reasons/${dept}`),
-  analytics:     (from, to)     => apiFetch(`/api/analytics?from=${from}&to=${to}`),
+  updatePayment: (id, payment_by) => apiFetch(`/api/jobs/${id}/payment`, {
+    method: "PATCH", body: JSON.stringify({ payment_by }),
+  }),
+  knownPaymentNames: () => apiFetch(`/api/payment/known-names`),  analytics:     (from, to)     => apiFetch(`/api/analytics?from=${from}&to=${to}`),
+  stationHistory: (dept, search = "", page = 1) =>
+  apiFetch(`/api/station/${dept}/history?search=${encodeURIComponent(search)}&page=${page}&page_size=15`),
+
+  updateBoxPouch: (id, status) => apiFetch(`/api/jobs/${id}/box-pouch`, {
+  method: "PATCH", body: JSON.stringify({ box_pouch_status: status }),
+}),
 };
+
+function parseUTC(s) {
+  if (!s) return null;
+  return new Date(s.endsWith("Z") ? s : s + "Z");
+}
 
 // ── Role management ───────────────────────────────────────────────────────────
 function initRole() {
@@ -69,6 +84,15 @@ function getDeptLabel() {
   };
   return map[ROLE] || "Station";
 }
+
+function slDateStr(date) {
+  // Shift any Date into Sri Lanka's calendar day (UTC+5:30), regardless
+  // of what timezone the viewing device is set to.
+  const SL_OFFSET_MS = (5 * 60 + 30) * 60000;
+  return new Date(date.getTime() + SL_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+
 
 // ── Router ────────────────────────────────────────────────────────────────────
 function getPage() {
@@ -137,7 +161,7 @@ function ExpiryBadge({ completedAt }) {
     return () => clearInterval(t);
   }, []);
   if (!completedAt) return null;
-  const remaining = new Date(completedAt).getTime() + 24 * 3600000 - Date.now();
+  const remaining = parseUTC(completedAt).getTime() + 24 * 3600000 - Date.now();
   if (remaining <= 0) return null;
   const h = Math.floor(remaining / 3600000);
   const m = Math.floor((remaining % 3600000) / 60000);
@@ -178,7 +202,7 @@ function DelayReasonModal({ job, dept, onClose, onSaved, addToast }) {
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9000 }} onClick={onClose}>
       <div onClick={e => e.stopPropagation()} style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 12, padding: 24, width: "100%", maxWidth: 480, display: "flex", flexDirection: "column", gap: 16 }}>
         <div>
-          <div style={{ fontFamily: "var(--fd)", fontSize: 12, color: "var(--red)", letterSpacing: ".1em", textTransform: "uppercase", marginBottom: 4 }}>⏱ DELAY REASON — {deptLabel}</div>
+          <div style={{  fontSize: 12, color: "var(--red)", letterSpacing: ".1em", textTransform: "uppercase", marginBottom: 4 }}>DELAY REASON - {deptLabel}</div>
           <div style={{ fontSize: 18, fontWeight: 700, color: "var(--amber)" }}>{job.job_no}</div>
           <div style={{ fontSize: 14, color: "var(--text-sec)" }}>{job.customer}</div>
         </div>
@@ -199,6 +223,135 @@ function DelayReasonModal({ job, dept, onClose, onSaved, addToast }) {
           <button onClick={onClose} style={{ padding: "11px 18px", fontWeight: 700, fontSize: 14, borderRadius: 6, background: "var(--bg3)", color: "var(--text-sec)", border: "1px solid var(--border)" }}>Cancel</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+
+// ── Payment edit modal ────────────────────────────────────────────────────────
+function PaymentEditModal({ job, onClose, onSaved, addToast }) {
+  const [name,       setName]      = useState(job.payment_by || "");
+  const [knownNames, setKnown]     = useState([]);
+  const [showNew,    setShowNew]   = useState(!job.payment_by);
+  const [saving,     setSaving]    = useState(false);
+
+  useEffect(() => {
+    api.knownPaymentNames().then(d => setKnown(d.names || [])).catch(() => {});
+  }, []);
+
+  function handleName(e) {
+    setName(e.target.value.replace(/\b\w/g, c => c.toUpperCase()));
+  }
+
+  async function save() {
+    const finalName = name.trim();
+    if (!finalName) return;
+    setSaving(true);
+    try {
+      await api.updatePayment(job.id, finalName);
+      addToast?.(`✓ Payment recorded for #${job.job_no}`, "success");
+      onSaved?.(finalName.replace(/\b\w/g, c => c.toUpperCase()));
+      onClose();
+    } catch (err) { addToast?.(err.message, "error"); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9100 }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: 12, padding: 24, width: "100%", maxWidth: 420, display: "flex", flexDirection: "column", gap: 16 }}>
+        <div>
+          <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 4 }}>Payment Taken By</div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "var(--amber)" }}>{job.job_no}</div>
+          <div style={{ fontSize: 14, color: "var(--text-sec)" }}>{job.customer}</div>
+        </div>
+        <div>
+          <label>Payment taken by *</label>
+          {knownNames.length > 0 && !showNew ? (
+            <select
+              value={knownNames.includes(name) ? name : ""}
+              onChange={e => {
+                if (e.target.value === "__new__") { setShowNew(true); setName(""); }
+                else setName(e.target.value);
+              }}
+              style={{ margin: 0 }}
+            >
+              <option value="">-- Select name --</option>
+              {knownNames.map(n => <option key={n} value={n}>{n}</option>)}
+              <option value="__new__">+ Type a new name</option>
+            </select>
+          ) : (
+            <div style={{ display: "flex", gap: 6 }}>
+              <input value={name} onChange={handleName} placeholder="Enter name" autoFocus style={{ flex: 1 }} />
+              {knownNames.length > 0 && (
+                <button onClick={() => { setShowNew(false); setName(""); }} style={{ padding: "0 10px", background: "var(--bg3)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 12 }}>← Back</button>
+              )}
+            </div>
+          )}
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={save} disabled={saving || !name.trim()} style={{ flex: 1, padding: "12px 0", background: name.trim() ? "var(--amber)" : "var(--bg3)", color: name.trim() ? "#000" : "var(--text-dim)", borderRadius: 8, fontWeight: 800, fontSize: 15 }}>
+            {saving ? "Saving…" : "✓ Save Payment"}
+          </button>
+          <button onClick={onClose} style={{ padding: "12px 18px", background: "var(--bg3)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 8, fontWeight: 700 }}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Payment field (display + edit — ENTRY role only) ────────────────────────
+function PaymentField({ job, addToast }) {
+  const [editing, setEditing] = useState(false);
+  const [local,   setLocal]   = useState(job.payment_by || "");
+
+  useEffect(() => { setLocal(job.payment_by || ""); }, [job.payment_by]);
+
+  const hasPayment = !!local;
+
+  if (ROLE !== "ENTRY") {
+    if (!hasPayment) return null;
+    return <Chip label="Payment" value={local} accent="#16a34a" />;
+  }
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+      <Chip label="Payment" value={hasPayment ? local : "Not Taken"} accent={hasPayment ? "#16a34a" : "#e53e3e"} />
+      <button onClick={() => setEditing(true)} style={{
+        padding: "3px 12px", fontSize: 12, fontWeight: 700, borderRadius: 5,
+        background: hasPayment ? "var(--amber)" : "#035702", 
+        color:hasPayment? "#ff0000":"#ffffff",
+        border: `1px solid ${hasPayment ? "var(--border)" : "#00ff3c"}`,
+      }}>{hasPayment ? "EDIT PAYMENT" : "ADD PAYMENT"}</button>
+      {editing && (
+        <PaymentEditModal
+          job={job}
+          onClose={() => setEditing(false)}
+          onSaved={setLocal}
+          addToast={addToast}
+        />
+      )}
+    </div>
+  );
+}
+
+function BoxPouchField({ job, addToast }) {
+  const [editing, setEditing] = useState(false);
+  const [local, setLocal] = useState(job.box_pouch_status || "");
+  useEffect(() => { setLocal(job.box_pouch_status || ""); }, [job.box_pouch_status]);
+  if (!local) return null;
+  const canEdit = ROLE === "BINDING";   // only the binding station can edit this
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+      <Chip label="Box/Pouch" value={boxPouchLabel(local)} accent={boxPouchAccent(local)} />
+      {canEdit && (
+        <button onClick={() => setEditing(true)} style={{
+          padding: "5px 12px", fontSize: 12, fontWeight: 700, borderRadius: 5,
+          background: "var(--amber)", color: "var(--red)", border: "1px solid var(--border)",
+        }}>EDIT</button>
+      )}
+      {editing && (
+        <BoxPouchEditModal job={{ ...job, box_pouch_status: local }} onClose={() => setEditing(false)} onSaved={setLocal} addToast={addToast} />
+      )}
     </div>
   );
 }
@@ -336,7 +489,196 @@ function GlobalResponsiveStyles() {
   }, []);
   return null;
 }
- 
+ // ── Search bar ────────────────────────────────────────────────────────────────
+function SearchBar({ value, onChange, placeholder = "Search Job No / Studio / Couple…" }) {
+  return (
+    <div style={{ position: "relative", marginBottom: 12 }}>
+      <input
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder}
+        style={{ width: "100%", paddingLeft: 34, boxSizing: "border-box" }}
+      />
+      <span style={{ position: "absolute", left: 10, top: "55%", transform: "translateY(-50%)", color: "var(--text-dim)", fontSize: 14 }}><Search size={18} /></span>
+      {value && (
+        <button onClick={() => onChange("")} style={{
+          position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)",
+          background: "transparent", border: "none", color: "var(--text-dim)",
+          fontSize: 13, minHeight: "unset", padding: "4px 8px", cursor: "pointer",
+        }}>✕</button>
+      )}
+    </div>
+  );
+}
+
+function matchesSearch(job, term) {
+  if (!term || !term.trim()) return true;
+  const t = term.trim().toLowerCase();
+  return (
+    job.job_no?.toLowerCase().includes(t) ||
+    job.customer?.toLowerCase().includes(t) ||
+    job.couple_name?.toLowerCase().includes(t)
+  );
+}
+
+// ── Compact row for completed/dispatched list ───────────────────────────────────
+function CompactHistoryRow({ job, onView }) {
+  return (
+    <button onClick={() => onView(job)} style={{
+      display: "flex", alignItems: "center", gap: 10, width: "100%",
+      background: "var(--bg2)", border: "1px solid var(--border)",
+      borderRadius: 6, padding: "8px 10px", textAlign: "left", cursor: "pointer",
+    }}>
+      <span style={{ fontFamily: "var(--fm)", fontSize: 12, color: "var(--amber)", fontWeight: 800, minWidth: 62, flexShrink: 0 }}>
+        {job.job_no}
+      </span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-pri)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {job.customer}
+        </div>
+        {job.couple_name && (
+          <div style={{ fontSize: 10, color: "var(--text-sec)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {job.couple_name}
+          </div>
+        )}
+      </div>
+      <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+        {job.print_size  && <Chip label="Size"  value={job.print_size}  accent="#3b82f6" />}
+        {job.print_pages && <Chip label="Pages" value={job.print_pages} accent="#3b82f6" />}
+      </div>
+    </button>
+  );
+}
+
+// ── Full job card viewer modal (click a compact row to see everything) ──────────
+function JobCardViewModal({ job, onClose, addToast }) {
+  const isMobile = useIsMobile();
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,.9)",
+      display: "flex", alignItems: isMobile ? "stretch" : "center", justifyContent: "center",
+      zIndex: 9500, overflowY: "auto",
+      padding: isMobile ? 0 : "24px 16px",
+    }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{
+        width: "100%",
+        maxWidth: isMobile ? "100%" : 640,
+        minHeight: isMobile ? "100vh" : "auto",
+        position: "relative",
+        background: isMobile ? "var(--bg0)" : "transparent",
+        padding: isMobile ? "0 0 40px" : 0,
+      }}>
+        <button onClick={onClose} style={{
+          position: isMobile ? "sticky" : "absolute",
+          top: 0, right: isMobile ? 0 : -6,
+          marginLeft: isMobile ? "auto" : 0,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          gap: 6, width: isMobile ? "100%" : 30, height: isMobile ? "auto" : 30,
+          padding: isMobile ? "12px 14px" : 0,
+          background: "var(--red)", color: "#fff",
+          border: "none", borderRadius: isMobile ? 0 : "50%",
+          fontWeight: 800, zIndex: 5, cursor: "pointer",
+        }}>✕{isMobile && " Close"}</button>
+        <div style={{ padding: isMobile ? "10px 10px 0" : 0 }}>
+         <JobCardFull job={job} showExpiry={false} addToast={addToast} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Completed / Dispatched dropdown (lives in the header topRight space) ────────
+function DeptCompletedDropdown({ deptKey, title = "Dispatched", accent = "var(--amber)", mrb="0px", addToast }) {
+  const [open,            setOpen]            = useState(false);
+  const [search,          setSearch]          = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [page,            setPage]            = useState(1);
+  const [data,            setData]            = useState(null);
+  const [loading,         setLoading]         = useState(false);
+  const [error,           setError]           = useState("");
+  const [viewJob,         setViewJob]         = useState(null);
+  const wrapRef  = useRef(null);
+  const isMobile = useIsMobile();
+
+  useEffect(() => {
+    const t = setTimeout(() => { setDebouncedSearch(search); setPage(1); }, 350);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    setError("");
+    api.stationHistory(deptKey, debouncedSearch, page)
+      .then(d => { setData(d); setLoading(false); })
+      .catch(err => { setError(err.message || "Failed to load"); setLoading(false); });
+  }, [deptKey, debouncedSearch, page, open]);
+
+  useEffect(() => {
+    function handler(e) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    }
+    if (open) document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  return (
+    <div ref={wrapRef} style={{ position: "relative", width: isMobile ? "100%" : "auto" }}>
+     <button onClick={() => setOpen(p => !p)} style={{
+        display: "flex", alignItems: "center", gap: 6,
+        padding: isMobile ? "6px 10px" : "8px 14px",
+        background: "var(--bg3)", color: accent,
+        marginBottom:mrb,
+        border: `1px solid ${accent}`, borderRadius: 6, fontWeight: 700, cursor: "pointer",
+        fontSize: isMobile ? 11 : 13,
+      }}>
+        {isMobile ? "" : title}{data ? ` (${data.total})` : ""}
+      </button>
+
+      {open && (
+        <div className="si" style={{
+          position: isMobile ? "fixed" : "absolute",
+          top: isMobile ? 70 : "calc(100% + 8px)",
+          left: isMobile ? "3vw" : "auto",
+          right: isMobile ? "3vw" : 0,
+          zIndex: 500,
+          width: isMobile ? "94vw" : 380,
+          maxWidth: "94vw",
+          background: "var(--bg1)", border: `1px solid ${accent}`, borderRadius: 10,
+          boxShadow: "0 8px 30px rgba(0,0,0,.6)", padding: 12,
+          display: "flex", flexDirection: "column", gap: 10,
+          maxHeight: "80vh", overflowY: "auto",
+        }}>
+          <SearchBar value={search} onChange={setSearch} placeholder="Job No / Studio / Couple…" />
+
+          {error && <div style={{ fontSize: 12, color: "var(--red)", padding: "4px 0" }}>⚠ {error}</div>}
+          {loading && <div style={{ textAlign: "center", padding: "16px 0", color: "var(--text-dim)", fontSize: 12, letterSpacing: ".08em" }}>LOADING…</div>}
+          {!loading && !error && data?.jobs?.length === 0 && (
+            <div style={{ textAlign: "center", padding: "20px 0", color: "var(--text-dim)", fontSize: 12, letterSpacing: ".06em" }}>
+              NO {search ? "MATCHING " : ""}JOBS
+            </div>
+          )}
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {data?.jobs?.map(job => (
+              <CompactHistoryRow key={job.id} job={job} onView={setViewJob} />
+            ))}
+          </div>
+
+          {data && data.pages > 1 && (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+              <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} style={{ padding: "5px 10px", background: "var(--bg2)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 4, fontSize: 12, fontWeight: 700 }}>◀</button>
+              <span style={{ fontSize: 12, color: "var(--text-dim)", fontFamily: "var(--fm)" }}>{page} / {data.pages}</span>
+              <button onClick={() => setPage(p => Math.min(data.pages, p + 1))} disabled={page === data.pages} style={{ padding: "5px 10px", background: "var(--bg2)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 4, fontSize: 12, fontWeight: 700 }}>▶</button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {viewJob && <JobCardViewModal job={viewJob} onClose={() => setViewJob(null)} addToast={addToast} />}
+    </div>
+  );
+}
 
 
 // ── Shell ─────────────────────────────────────────────────────────────────────
@@ -358,10 +700,10 @@ function Shell({ title, accent = "var(--amber)", topRight, children }) {
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", background: "var(--bg0)" }}>
       <header style={{
         background: "var(--bg1)", borderBottom: "1px solid var(--border)",
-        padding: isMobile ? "0 10px" : "0 20px",
-        height: isMobile ? 60 : 60,
-        display: "flex", alignItems: "center",
-        gap: isMobile ? 8 : 14,
+        padding: isMobile ? "8px 10px" : "0 20px",
+        minHeight: 60,
+        display: "flex", flexWrap: "wrap", alignItems: "center",
+        rowGap: 8, gap: isMobile ? 8 : 14,
         position: "sticky", top: 0, zIndex: 100,
         boxShadow: "0 2px 16px rgba(0,0,0,.45)",
       }}>
@@ -374,7 +716,12 @@ function Shell({ title, accent = "var(--amber)", topRight, children }) {
           overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
         }}>{title}</span>
  
-        <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+       <div style={{
+          display: "flex", alignItems: "center", gap: 6, flexShrink: 0,
+          flexWrap: "wrap", justifyContent: "flex-end",
+          width: isMobile ? "100%" : "auto",
+          order: isMobile ? 3 : 0,
+        }}>
           {IS_ADMIN && !onDashboard && (
             <button onClick={() => navigate("/")} style={{
               padding: isMobile ? "6px 10px" : "8px 14px",
@@ -458,11 +805,22 @@ function Sec({ title, accent = "var(--amber)", children }) {
 
 // ── STEPS config ──────────────────────────────────────────────────────────────
 const STEPS = [
-  { label: "PRINT", field: "status_printing",      color: "#3b82f6", dept: "PRINTING"      },
-  { label: "LASER", field: "status_laser_cutting",  color: "#a855f7", dept: "LASER_CUTTING" },
-  { label: "LAM",   field: "status_laminating",     color: "#06b6d4", dept: "LAMINATING"    },
-  { label: "BIND",  field: "status_binding",        color: "#22c55e", dept: "BINDING"       },
+  { label: "PRINT", field: "status_printing",      color: "#0058e6", dept: "PRINTING" },
+  { label: "LASER", field: "status_laser_cutting",  color: "#8100fa", dept: "LASER_CUTTING"},
+  { label: "LAMINATING",   field: "status_laminating",     color: "#00d9ff", dept: "LAMINATING"},
+  { label: "BIND",  field: "status_binding",        color: "#00ff5e", dept: "BINDING"},
 ];
+
+function boxPouchLabel(status) {
+  if (status === "COMPLETE")   return "Complete";
+  if (status === "NOT_NEEDED") return "Not Needed";
+  return "Processing";
+}
+function boxPouchAccent(status) {
+  if (status === "COMPLETE")   return "#22c55e";
+  if (status === "NOT_NEEDED") return "#888";
+  return "#f59e0b";
+}
 
 // ── Chip ──────────────────────────────────────────────────────────────────────
 function Chip({ label, value, accent = "#555" }) {
@@ -472,10 +830,11 @@ function Chip({ label, value, accent = "#555" }) {
       display: "inline-flex", alignItems: "center", gap: 0,
       fontSize: 12, borderRadius: 6, overflow: "hidden",
       border: `1px solid ${accent}33`, borderLeft: `3px solid ${accent}`,
+      alignSelf: "flex-start",
     }}>
       <span style={{
         padding: "4px 7px", background: "#111111",
-        color: "rgba(255,255,255,0.55)", fontSize: 10, fontWeight: 600,
+        color: "rgba(255, 255, 255, 0.55)", fontSize: 10, fontWeight: 600,
         textTransform: "uppercase", letterSpacing: ".07em",
         borderRight: `1px solid ${accent}33`,
       }}>{label}</span>
@@ -507,26 +866,23 @@ function SpecialNote({ note }) {
 // ── Operator tag ──────────────────────────────────────────────────────────────
 function OperatorTag({ log, dept }) {
   if (!log?.operator_name) return null;
-  const showUnder = dept === "PRINTING" && log.under_whom;
+  const showUnder    = dept === "PRINTING" && log.under_whom;
+  const showMachine   = dept === "PRINTING" && log.machine;
+  const isLaminating  = dept === "LAMINATING";
+  const machineLabel = { GREEN_2: "Green 2", GREEN_3: "Green 3" }[log.machine] || log.machine;
   return (
-    <div style={{
-      display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", marginTop: 3,
-    }}>
-      <span style={{
-        display: "inline-flex", alignItems: "center", gap: 4,
-        fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 4,
-        background: "#0a0a1a", border: "1px solid #2a2a4a",
-        color: "#a0a8ff",
-      }}>
-        👤 {log.operator_name}
+    <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", marginTop: 3 }}>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 4, background: isLaminating ? "#0a0a1a" : "#0a0a1a", border: `1px solid ${isLaminating ? "#06b6d4" : "#837f7f"}`, color: "#ffffff", letterSpacing: ".08em" }}>
+        {isLaminating ? <span style={{color: "#a24d4d"}}>ACCU. BY </span> : "👤"}{log.operator_name}
       </span>
       {showUnder && (
-        <span style={{
-          fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 4,
-          background: "#0a1500", border: "1px solid #2a3a00",
-          color: "#8abf50",
-        }}>
-          under {log.under_whom}
+        <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 4, background: "#0a0a1a", border: "1px solid #837f7f", color: "#ffffff", letterSpacing: ".08em" }}>
+          <span style={{ color: "#a24d4d" }}>SUPERVISED </span> {log.under_whom}
+        </span>
+      )}
+      {showMachine && (
+        <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 4, background: "#0a0a1a", border: "1px solid #06b6d4", color: "#ffffff", letterSpacing: ".08em" }}>
+          🖨 {machineLabel}
         </span>
       )}
     </div>
@@ -542,10 +898,10 @@ function StageRow({ job }) {
   return (
     <div style={{
       background: "var(--bg1)", borderRadius: 6, overflow: "hidden",
-      border: `1px solid ${delayed ? "var(--red)" : "var(--border)"}`,
+      border: `1px solid ${delayed ? "var(--red)" : "#ffffff"}`,
     }}>
-      <div style={{ padding: "6px 12px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span style={{ fontSize: 10, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".1em", fontWeight: 700 }}>Production Pipeline</span>
+      <div style={{ padding: "6px 12px", borderBottom: "1px solid #ffffff", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <span style={{ fontSize: 10, color: "#ffffff", textTransform: "uppercase", letterSpacing: ".1em", fontWeight: 700 }}>Production Pipeline</span>
         {delayed && <span className="blink" style={{ fontSize: 10, color: "var(--red)", fontWeight: 700 }}>⚠ DELAYED</span>}
         {job.is_fully_completed && <span style={{ fontSize: 10, color: "var(--green)", fontWeight: 700 }}>✓ ALL DONE</span>}
       </div>
@@ -557,37 +913,99 @@ function StageRow({ job }) {
           const activeLog    = job.logs?.find(l => l.department === st.dept && !l.exited_at);
           const reason       = activeLog?.delay_reason || completedLog?.delay_reason;
           const isDelayed    = activeLog?.is_delayed || completedLog?.is_delayed;
-          let bg, textClr, icon, statusLabel;
-          if      (sv === "COMPLETED")   { bg = st.color + "22"; textClr = st.color;          icon = "✓"; statusLabel = "Done"; }
-          else if (sv === "IN_PROGRESS") { bg = "#1a1400";       textClr = "var(--amber)";    icon = "●"; statusLabel = "In Progress"; }
-          else if (sv === "SKIPPED")     { bg = "transparent";   textClr = "var(--text-dim)"; icon = "—"; statusLabel = "Skipped"; }
-          else                           { bg = "transparent";   textClr = "var(--text-dim)"; icon = "○"; statusLabel = "Pending"; }
+          const log = activeLog || completedLog;
+          let bg, textClr, icon, statusLabel,fontSize;
+          if      (sv === "COMPLETED")   { bg = st.color + "30"; textClr = st.color; statusLabel = "Done";}
+          else if (sv === "IN_PROGRESS") { bg = "#101501";       textClr = "var(--amber)";  fontSize = "10px";   statusLabel = "IN PROGRESS. . ."; }
+          else if (sv === "SKIPPED")     { bg = "transparent";   textClr = "#ffffff"; fontSize = "10px"; statusLabel = "Skipped"; }
+          else                           { bg = "transparent";   textClr = "#ffffff";fontSize = "10px";  statusLabel = "Pending"; }
           return (
             <div key={st.label} style={{
+              fontWeight: 700,
+              letterSpacing: ".04em",
               padding: "10px 12px", background: bg,
-              borderRight: i < 3 ? "1px solid var(--border)" : "none",
+              borderRight: i < 3 ? "1px solid #ffffff" : "none",
               display: "flex", flexDirection: "column", gap: 4,
               borderTop: sv === "IN_PROGRESS" ? `2px solid ${st.color}` : "2px solid transparent",
+              
             }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <span style={{ fontSize: 10, fontWeight: 800, color: textClr, textTransform: "uppercase", letterSpacing: ".08em" }}>{icon} {st.label}</span>
+                <span style={{ fontSize: 14, fontWeight: 800, color:"#c7c6c8", textTransform: "uppercase", letterSpacing: ".08em" }}>{icon} {st.label}</span>
                 {sv === "COMPLETED" && (
-                  <span style={{ width: 16, height: 16, borderRadius: "50%", background: st.color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, color: "#000", fontWeight: 900 }}>✓</span>
+                  <span style={{  display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: "#00ff48", fontWeight: 900 }}>DONE</span>
                 )}
               </div>
               <span style={{ fontSize: 10, color: textClr, opacity: 0.75 }}>{statusLabel}</span>
-              {sv === "COMPLETED" && completedLog?.duration_minutes && (
-                <span style={{ fontSize: 10, fontWeight: 700, color: isDelayed ? "var(--red)" : "var(--green)", background: isDelayed ? "rgba(255,50,50,.1)" : "rgba(34,197,94,.1)", borderRadius: 3, padding: "1px 5px", alignSelf: "flex-start" }}>
-                  {completedLog.duration_minutes} min {isDelayed ? "⚠" : "✓"}
-                </span>
-              )}
-              {sv === "IN_PROGRESS" && <span style={{ fontSize: 10, color: "var(--amber)", fontWeight: 600 }}>Running…</span>}
+              
+              {sv === "IN_PROGRESS" && <span style={{ fontSize: 10, color: "var(--amber)", fontWeight: 600 }}>RUNNING</span>}
               {reason && (
                   <div style={{ fontSize: 10, color: isDelayed ? "#ffaa60" : "var(--text-dim)", background: isDelayed ? "rgba(255,100,0,.08)" : "rgba(255,255,255,.03)", borderRadius: 3, padding: "3px 6px", lineHeight: 1.4, borderLeft: `2px solid ${isDelayed ? "#ff6030" : "var(--border)"}` }}>
                     {reason}
                   </div>
                 )}
-                <OperatorTag log={activeLog || completedLog} dept={st.dept} />
+               <OperatorTag log={activeLog || completedLog} dept={st.dept} />
+
+{log && (log.entered_at || log.exited_at || log.duration_minutes) && (
+  <div style={{
+    marginTop: 6,
+    background: "var(--bg0)",
+    border: "1px #ffffff solid",
+    borderRadius: 6,
+    overflow: "hidden",
+  }}>
+    <div style={{
+      padding: "4px 8px",
+      background: "rgba(255,255,255,.04)",
+      borderBottom: "1px solid var(--border)",
+      fontSize: 10,
+      fontWeight: 700,
+      letterSpacing: ".11em",
+      textTransform: "uppercase",
+      color: "#ff0404",
+    }}>
+      Time Log
+    </div>
+
+    <div style={{ padding: "6px 8px", display: "flex", flexDirection: "column", gap: 4 }}>
+      {log.entered_at && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#ebeaea" }}>
+            Start
+          </span>
+          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-pri)" }}>
+            {parseUTC(log.entered_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+          </span>
+        </div>
+      )}
+
+      {log.exited_at && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#ebeaea" }}>
+            End
+          </span>
+          <span style={{  fontSize: 11, fontWeight: 700, color: "var(--text-pri)" }}>
+            {parseUTC(log.exited_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+          </span>
+        </div>
+      )}
+
+      {log.duration_minutes && (
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          marginTop: 2, paddingTop: 4, borderTop: "1px dashed var(--border)",
+        }}>
+          <span style={{ fontSize: 11, color: "var(--green)", fontWeight: 700 }}>Duration</span>
+          <span style={{
+             fontSize: 11, fontWeight: 800,
+            color: log.is_delayed ? "var(--red)" : "var(--green)",letterSpacing: ".04em", textTransform: "uppercase",
+          }}>
+            {log.duration_minutes} min
+          </span>
+        </div>
+      )}
+    </div>
+  </div>
+)}
             </div>
           );
         })}
@@ -603,35 +1021,153 @@ function DelayReasonsList({ logs }) {
   const deptLabel = { PRINTING: "Printing", LAMINATING: "Laminating", LASER_CUTTING: "Laser Cutting", BINDING: "Binding" };
   const deptColor = { PRINTING: "#3b82f6", LAMINATING: "#06b6d4", LASER_CUTTING: "#a855f7", BINDING: "#22c55e" };
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      <div style={{ fontSize: 10, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".1em", fontWeight: 700 }}>Delay Log</div>
-      {delayed.map(l => (
-        <div key={l.id} style={{ background: "var(--bg1)", borderRadius: 6, padding: "8px 12px", borderLeft: `3px solid ${deptColor[l.department] || "var(--red)"}`, display: "flex", flexDirection: "column", gap: 3 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 10, fontWeight: 700, color: deptColor[l.department] || "var(--red)", textTransform: "uppercase", letterSpacing: ".06em" }}>{deptLabel[l.department] || l.department}</span>
-            {l.delay_reason_at && <span style={{ fontSize: 10, color: "var(--text-dim)" }}>{new Date(l.delay_reason_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}</span>}
-            {l.duration_minutes && <span style={{ fontSize: 10, color: "var(--text-dim)", marginLeft: "auto" }}>⏱ {l.duration_minutes} min</span>}
-          </div>
-          <div style={{ fontSize: 13, color: "#ffcc80", fontWeight: 500 }}>"{l.delay_reason}"</div>
-          {l.operator_name && (
-            <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 3, flexWrap: "wrap" }}>
-              <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 4, background: "#0a0a1a", border: "1px solid #2a2a4a", color: "#a0a8ff" }}>
-                👤 {l.operator_name}
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+  
+        {/* Section title */}
+        <div
+          style={{
+            fontSize: 10,
+            color: "#ffffff",
+            textTransform: "uppercase",
+            letterSpacing: ".16em",
+            fontWeight: 700,
+            paddingLeft: 2,
+          }}
+        >
+          Delay Log
+        </div>
+
+        {delayed.map((l) => (
+          <div
+            key={l.id}
+            style={{
+              background: "linear-gradient(180deg, #353538 0%, #000000 100%)",
+              borderRadius: 10,
+              padding: "12px 12px",
+              border: "1px solid #ffffff",
+              boxShadow: "0 1px 2px rgba(0,0,0,0.35)",
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+            }}
+          >
+
+            {/* TOP ROW */}
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+
+              <span
+                style={{
+                  fontSize: 14,
+                  fontWeight: 700,
+                  letterSpacing: ".1em",
+                  textTransform: "uppercase",
+                  color: deptColor[l.department] || "#EF4444",
+                }}
+              >
+                {deptLabel[l.department] || l.department}
               </span>
-              {l.under_whom && l.department === "PRINTING" && (
-                <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 4, background: "#0a1500", border: "1px solid #2a3a00", color: "#8abf50" }}>
-                  under {l.under_whom}
+
+          
+
+              {l.duration_minutes && (
+                <span
+                  style={{
+                    marginLeft: "auto",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    fontSize: 11,
+                    color: "#D4D4D8",
+                    fontWeight: 500,
+                    background: "#000000",
+                    padding: "3px 8px",
+                    borderRadius: 999,
+                    border: "1px solid #2F2F37",
+                  }}
+                >
+                  <Timer size={12} />
+                  {l.duration_minutes}m
                 </span>
               )}
             </div>
-          )}
-        </div>
-      ))}
-    </div>
+
+            {/* REASON */}
+            <div
+              style={{
+                fontSize: 13,
+                fontWeight: 500,
+              
+              }}
+            >
+              <span style={{ color: "#F59E0B" ,display: "inline-flex", alignItems: "center", gap: 4,textTransform: "uppercase" }}>
+                {l.delay_reason}
+
+                  {l.delay_reason_at && (
+                <span
+                  style={{
+                    fontSize: 9,
+                    color: "#979797",
+                    marginTop:"5px",  
+                    fontWeight: 600,
+                  }}
+                >
+                  {parseUTC(l.delay_reason_at).toLocaleTimeString("en-GB", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </span>
+              )}
+                </span>
+            </div>
+
+            {/* BOTTOM META */}
+            {l.operator_name && (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  flexWrap: "wrap",
+                  marginTop: 2,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    padding: "4px 10px",
+                    borderRadius: 999,
+                    background: "#000000",
+                    border: "1px solid #32323A",
+                    color: "#E5E7EB",
+                  }}
+                >
+                  👤 {l.operator_name}
+                </span>
+
+                {l.under_whom && l.department === "PRINTING" && (
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 500,
+                      padding: "4px 10px",
+                      borderRadius: 999,
+                      background: "#000000",
+                      border: "1px solid #32323A",
+                      color: "#E5E7EB",
+                    }}
+                  >
+                    <span style={{color:"#a24d4d"}}>SUPERVISED</span> {l.under_whom}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
   );
 }
 
-// ── CompactCard (LivePanel) ───────────────────────────────────────────────────
 function CompactCard({ job }) {
   const delayed = job.logs?.some(l => l.is_delayed && !l.exited_at);
   const days    = Math.ceil((new Date(job.dele_date) - new Date()) / 86400000);
@@ -666,12 +1202,17 @@ function CompactCard({ job }) {
         <Chip label="Rexing"  value={job.bind_rexing_no}   accent="#22c55e" />
         <Chip label="Box"     value={job.box_type}         accent="#f59e0b" />
         <Chip label="Deliver" value={job.delivery_type}    accent="#888"    />
+        {job.payment_by && <Chip label="Payment" value={job.payment_by} accent="#16a34a" />}
+        {job.box_pouch_status && (
+          <Chip label="Box/Pouch" value={job.box_pouch_status === "COMPLETE" ? "Complete" : "Processing"} accent={job.box_pouch_status === "COMPLETE" ? "#22c55e" : "#f59e0b"} />
+        )}
       </div>
       <SpecialNote note={job.special_note} />
       <StageRow job={job} />
     </div>
   );
 }
+
 
 // ── LivePanel ─────────────────────────────────────────────────────────────────
 function LivePanel() {
@@ -686,7 +1227,7 @@ function LivePanel() {
   const active = jobs.filter(j => !j.is_fully_completed);
   return (
     <div style={{ marginTop: 28 }}>
-      <button onClick={() => setOpen(p => !p)} style={{ background: "var(--bg0)", color: "var(--text-pri)", border: "1px solid var(--amber)", borderRadius: 8, padding: "7px 14px", fontSize: 14, fontWeight: 900, display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+      <button onClick={() => setOpen(p => !p)} style={{ background: "var(--bg0)", color: "var(--text-pri)", border: "1px solid var(--amber)", borderRadius: 8, padding: "7px 14px", fontSize: 14, fontWeight: 700, display: "flex", alignItems: "center", gap: 8, marginBottom: 8 ,letterSpacing: ".04em"}}>
         <span className="blink" style={{ color: "var(--green)", fontSize: 10 }}>●</span>
         LIVE FACTORY PIPELINE <ArrowRight size={14} fontWeight={700} /> {active.length} ACTIVE JOB{active.length !== 1 ? "s" : ""}
         <span>{open ? "▲" : "▼"}</span>
@@ -704,7 +1245,7 @@ function LivePanel() {
 }
 
 // ── Full Job Card ─────────────────────────────────────────────────────────────
-function JobCardFull({ job, actionLabel, onAction, acting, actionBlocked = false, showExpiry = false, onAddReason, reasonDept }) {
+function JobCardFull({ job, actionLabel, onAction, acting, actionBlocked = false, showExpiry = false, onAddReason, reasonDept, addToast = () => {} }) {
   const isMobile = useIsMobile();
   const delayed = job.logs?.some(l => l.is_delayed && !l.exited_at);
   const days    = Math.ceil((new Date(job.dele_date) - new Date()) / 86400000);
@@ -734,7 +1275,7 @@ function JobCardFull({ job, actionLabel, onAction, acting, actionBlocked = false
             </div>
             <div style={{ fontSize: isMobile ? 17 : 16, fontWeight: 700, color: "var(--text-pri)", lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis" }}>{job.customer}</div>
             {job.couple_name && <div style={{ fontSize: 13, color: "var(--text-sec)", marginTop: 2 }}>{job.couple_name}</div>}
-            {job.order_no    && <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 2 }}>Order: {job.order_no}</div>}
+            {job.order_no    && <div style={{ fontSize: 11, color: "#ffffff", marginTop: 2 }}>Order: {job.order_no}</div>}
           </div>
           {/* Delivery date box */}
           <div className="r-job-date-box" style={{
@@ -761,7 +1302,10 @@ function JobCardFull({ job, actionLabel, onAction, acting, actionBlocked = false
           <Chip label="Rexing"      value={job.bind_rexing_no}   accent="#22c55e" />
           <Chip label="Box Type"    value={job.box_type}         accent="#f59e0b" />
           <Chip label="Delivery"    value={job.delivery_type}    accent="#910e5f"    />
+         
         </div>
+        <PaymentField job={job} addToast={addToast} />
+        <BoxPouchField job={job} addToast={addToast} />
         <SpecialNote note={job.special_note} />
         <StageRow job={job} />
         <DelayReasonsList logs={job.logs} />
@@ -772,13 +1316,13 @@ function JobCardFull({ job, actionLabel, onAction, acting, actionBlocked = false
                               actionLabel.toLowerCase().includes("bound");
             // blocked = delay reason missing, shown in red-orange
             const bg        = acting        ? "var(--bg3)"
-                            : actionBlocked ? "#3a0000"
+                            : actionBlocked ? "#e58787"
                             : isDone        ? "#16a34a"
                             :                 "var(--amber)";
             const clr       = acting        ? "var(--text-dim)"
-                            : actionBlocked ? "var(--red)"
+                            : actionBlocked ? "#ffffff"
                             :                 "#000";
-            const border    = actionBlocked ? "1px solid var(--red)" : "none";
+            const border    = actionBlocked ? "1px solid #a3a3a3" : "none";
             const shadow    = actionBlocked ? "0 2px 12px rgba(229,62,62,.25)"
                             : isDone        ? "0 2px 12px rgba(22,163,74,.35)"
                             :                 "0 2px 12px rgba(245,166,35,.22)";
@@ -788,7 +1332,7 @@ function JobCardFull({ job, actionLabel, onAction, acting, actionBlocked = false
                 border, borderRadius: 8, fontSize: 16, fontWeight: 800,
                 letterSpacing: ".08em", boxShadow: shadow, width: "100%",
               }}>
-                {acting ? "Working…" : actionLabel}
+                {acting ? "Working..." : actionLabel}
               </button>
             );
           })()}
@@ -798,11 +1342,12 @@ function JobCardFull({ job, actionLabel, onAction, acting, actionBlocked = false
           if (!thisLog) return null;
           return (
             <button onClick={() => onAddReason(job)} style={{
-              padding: "9px 16px", borderRadius: 6, fontSize: 13, fontWeight: 700,
-              background: "var(--bg3)", color: "var(--red)",
-              border: "1px solid var(--red)", letterSpacing: ".05em",
+              padding: "9px 16px", borderRadius: 6, fontSize: 13, fontWeight: 900,
+              background: thisLog.delay_reason? "#000000" : "#035702", 
+              color: "#ffffff",
+              border: "1px solid #00ff3c", letterSpacing: ".05em",
             }}>
-              ⏱ {thisLog.delay_reason ? "✎ Edit Delay Reason" : "+ Add Delay Reason"}
+              {thisLog.delay_reason ? "EDIT DELAY REASON" : "ADD DELAY REASON"}
             </button>
           );
         })()}
@@ -813,31 +1358,137 @@ function JobCardFull({ job, actionLabel, onAction, acting, actionBlocked = false
 
 // ── Shared field sections (used in both create & edit forms) ────────
 function JobFields({ job }) {
+  const [laserEnabled, setLaserEnabled] = useState(
+  !!job?.laser_cover_type
+);
+
   return (
     <>
       <div className="r-grid-entry">
+        {/* ───────────────── PRINTING ───────────────── */}
         <Sec title="1 – Printing" accent="var(--blue)">
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <div><label>Print Size</label><input name="print_size" placeholder="12×30" defaultValue={job?.print_size || ""} /></div>
-            <div><label>Number of Pages</label><input name="print_pages" placeholder="40" defaultValue={job?.print_pages || ""} /></div>
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 10,
+            }}
+          >
+            <div>
+              <label>Print Size</label>
+              <input
+                name="print_size"
+                placeholder="12×30"
+                defaultValue={job?.print_size || ""}
+              />
+            </div>
+
+            <div>
+              <label>Number of Pages</label>
+              <input
+                name="print_pages"
+                placeholder="40"
+                defaultValue={job?.print_pages || ""}
+              />
+            </div>
           </div>
         </Sec>
-        <Sec title="2 – Laser Cutting  (blank = skip)" accent="var(--purple)">
-          <div><label>Cover Type / Description</label><input name="laser_cover_type" placeholder="Leave blank to skip laser stage" defaultValue={job?.laser_cover_type || ""} /></div>
-          <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 7 }}>ℹ Filling this activates the Laser track.</div>
+
+        {/* ───────────────── LASER CUTTING ───────────────── */}
+        <Sec title="2 – Laser Cutting" accent="var(--purple)">
+          <div style={{ marginBottom: 12 }}>
+            <label>Laser Cutting Required?</label>
+
+            <select
+              value={laserEnabled ? "YES" : "NO"}
+                onChange={(e) => {
+                  const enabled = e.target.value === "YES";
+                  setLaserEnabled(enabled);
+
+                  if (!enabled) {
+                    const input = document.querySelector(
+                      'input[name="laser_cover_type"]'
+                    );
+                    if (input) input.value = "";
+                  }
+                }}
+              >
+                <option value="NO">No</option>
+                <option value="YES">Yes</option>
+            </select>
+          </div>
+
+          <div
+            style={{
+                  display: laserEnabled ? "block" : "none",
+                }}
+              >
+                <div>
+                  <label>Cover Type / Description</label>
+                  <input
+                    name="laser_cover_type"
+                    placeholder="Wood / Acrylic"
+                    defaultValue={job?.laser_cover_type || ""}
+                  />
+                </div>
+
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: "var(--text-dim)",
+                    marginTop: 7,
+                  }}
+                >
+                  ℹ Filling this activates the Laser track.
+                </div>
+          </div>
         </Sec>
+
+        {/* ───────────────── LAMINATING ───────────────── */}
         <Sec title="3 – Laminating" accent="var(--cyan)">
-          <div><label>Laminate Type</label><input name="laminate_type" placeholder="Silky / Gloss / Matt" defaultValue={job?.laminate_type || ""} /></div>
+          <div>
+            <label>Laminate Type</label>
+            <input
+              name="laminate_type"
+              placeholder="Silky / Gloss / Matt"
+              defaultValue={job?.laminate_type || ""}
+            />
+          </div>
         </Sec>
+
+        {/* ───────────────── BINDING ───────────────── */}
         <Sec title="4 – Binding" accent="var(--green)">
-          <div><label>Rexing No / Type</label><input name="bind_rexing_no" placeholder="SF10" defaultValue={job?.bind_rexing_no || ""} /></div>
+          <div>
+            <label>Rexing No / Type</label>
+            <input
+              name="bind_rexing_no"
+              placeholder="SF10"
+              defaultValue={job?.bind_rexing_no || ""}
+            />
+          </div>
         </Sec>
+
+        {/* ───────────────── BOX ───────────────── */}
         <Sec title="5 – Box" accent="#f59e0b">
-          <div><label>Box Type</label><input name="box_type" placeholder="SF10 - 12x 24" defaultValue={job?.box_type || ""} /></div>
+          <div>
+            <label>Box Type</label>
+            <input
+              name="box_type"
+              placeholder="SF10 - 12x24"
+              defaultValue={job?.box_type || ""}
+            />
+          </div>
         </Sec>
+
+        {/* ───────────────── DELIVERY ───────────────── */}
         <Sec title="Delivery Type" accent="#ff009d">
-          <div><label>Delivery Type</label>
-            <select name="delivery_type" defaultValue={job?.delivery_type || "PRONTO"}>
+          <div>
+            <label>Delivery Type</label>
+
+            <select
+              name="delivery_type"
+              defaultValue={job?.delivery_type || "PRONTO"}
+            >
               <option value="PRONTO">PRONTO</option>
               <option value="CUSTOMER">CUSTOMER</option>
               <option value="PICKME">PICKME</option>
@@ -846,9 +1497,16 @@ function JobFields({ job }) {
           </div>
         </Sec>
       </div>
+
       <Sec title="Special Instructions">
-        <div><label>Notes for all departments</label>
-          <textarea name="special_note" placeholder="Any special instructions…" defaultValue={job?.special_note || ""} />
+        <div>
+          <label>Notes for all departments</label>
+
+          <textarea
+            name="special_note"
+            placeholder="Any special instructions…"
+            defaultValue={job?.special_note || ""}
+          />
         </div>
       </Sec>
     </>
@@ -861,13 +1519,18 @@ function EntryPage() {
   const [jobs,       setJobs]       = useState([]);
   const [editJob,    setEditJob]    = useState(null);
   const [deleteJob,  setDeleteJob]  = useState(null);
-  const [printJob,   setPrintJob]   = useState(null);   // ← NEW
+  const [printJob,   setPrintJob]   = useState(null);
+  const [paymentJob, setPaymentJob] = useState(null);
   const [todayCount, setTodayCount] = useState(null);
+  const [paymentBy, setPaymentBy]           = useState("");
+  const [knownPayments, setKnownPayments]   = useState([]);
+  const [showNewPayment, setShowNewPayment] = useState(false);
+  const [search, setSearch] = useState("");
   const [now,        setNow]        = useState(Date.now());
   const formRef = useRef(null);
   const editRef = useRef(null);
   const isMobile = useIsMobile();
-  const LOCK_MS = 120_000;
+  const LOCK_MS = 240_000;
  
   // ── UTC-safe helper — SQLite omits "Z", JS then parses as LOCAL time ────────
   function parseCreated(job) {
@@ -883,6 +1546,10 @@ function EntryPage() {
     try {
       const ds = await api.deptStats();
       setTodayCount(ds?.daily?.ENTRY ?? 0);
+    } catch {}
+    try {
+      const pn = await api.knownPaymentNames();
+      setKnownPayments(pn?.names || []);
     } catch {}
   }, []);
  
@@ -935,7 +1602,7 @@ function EntryPage() {
   }
  
   // ── Create ────────────────────────────────────────────────────────────
-  async function handleSubmit(e) {
+async function handleSubmit(e) {
     e.preventDefault();
     const fd        = new FormData(e.currentTarget);
     const job_no    = (fd.get("job_no")    || "").trim();
@@ -960,9 +1627,12 @@ function EntryPage() {
         laminate_type:    fd.get("laminate_type")    || "",
         bind_rexing_no:   fd.get("bind_rexing_no")   || "",
         box_type:         fd.get("box_type")         || "",
+        payment_by:       paymentBy.trim()           || "",
       });
       add(`✓ Job #${job_no} created.`, "success");
       formRef.current?.reset();
+      setPaymentBy("");
+      setShowNewPayment(false);
       reload();
     } catch (err) { add(err.message, "error"); }
     finally { setBusy(false); }
@@ -1020,6 +1690,7 @@ function EntryPage() {
     <>
       <Shell title="JOB ENTRY" accent="var(--amber)" topRight={
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          
           <div style={{
             display: "flex", alignItems: "center", gap: isMobile ? 5 : 8,
             background: "#001a00", border: "1px solid #1a4a1a",
@@ -1037,7 +1708,7 @@ function EntryPage() {
           </div>
         </div>
       }>
- 
+       <DeptCompletedDropdown deptKey="ENTRY" title="Dispatched Today" accent="var(--amber)" mrb="10px" addToast={add} />
         {/* ── Create form ── */}
         <form ref={formRef} onSubmit={handleSubmit} autoComplete="off"
           style={{ maxWidth: 900, display: "flex", flexDirection: "column", gap: 14, marginBottom: 32 }}>
@@ -1059,6 +1730,41 @@ function EntryPage() {
             </div>
           </Sec>
           <JobFields job={null} />
+
+          <Sec title="Payment (Optional)" accent="#16a34a">
+            <div>
+              <label>Payment Taken By <span style={{ color: "var(--text-dim)", fontWeight: 400 }}>(leave blank if not paid yet)</span></label>
+              {knownPayments.length > 0 && !showNewPayment ? (
+                <select
+                  value={paymentBy}
+                  onChange={e => {
+                    if (e.target.value === "__new__") { setShowNewPayment(true); setPaymentBy(""); }
+                    else setPaymentBy(e.target.value);
+                  }}
+                  style={{ margin: 0 }}
+                >
+                  <option value="">-- Not taken yet --</option>
+                  {knownPayments.map(n => <option key={n} value={n}>{n}</option>)}
+                  <option value="__new__">+ Type a new name</option>
+                </select>
+              ) : (
+                <div style={{ display: "flex", gap: 6 }}>
+                  <input
+                    value={paymentBy}
+                    onChange={e => setPaymentBy(e.target.value.replace(/\b\w/g, c => c.toUpperCase()))}
+                    placeholder="Leave blank if not paid yet"
+                  />
+                  {knownPayments.length > 0 && (
+                    <button type="button" onClick={() => { setShowNewPayment(false); setPaymentBy(""); }}
+                      style={{ padding: "0 10px", background: "var(--bg3)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 12 }}>
+                      ← Back
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </Sec>
+
           <button type="submit" disabled={busy} style={{
             padding: isMobile ? "14px 24px" : "16px 32px",
             background: busy ? "var(--bg3)" : "var(--amber)",
@@ -1078,19 +1784,21 @@ function EntryPage() {
             gap: 8, border: "1px solid var(--amber)", borderRadius: 8,
             padding: "4px 12px", width: "fit-content",
           }}>
-            RECENT JOB CARDS — EDIT / DELETE
+            RECENT JOB CARDS - EDIT / DELETE
           </div>
+
+          <SearchBar value={search} onChange={setSearch} placeholder="Search recent job cards…" />
  
-          {editableJobs.length === 0 ? (
+          {editableJobs.filter(j => matchesSearch(j, search)).length === 0 ? (
             <div style={{
               textAlign: "center", padding: "32px 0",
               color: "var(--text-dim)", fontFamily: "var(--fd)", letterSpacing: ".06em",
             }}>
-              NO EDITABLE JOBS
+              {search ? "NO MATCHING JOBS" : "NO EDITABLE JOBS"}
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {editableJobs.map(job => {
+              {editableJobs.filter(j => matchesSearch(j, search)).map(job => {
                 const days    = Math.ceil((new Date(job.dele_date) - new Date()) / 86400000);
                 const elapsed = now - parseCreated(job);
                 const secs    = Math.ceil(Math.max(0, LOCK_MS - elapsed) / 1000);
@@ -1111,9 +1819,12 @@ function EntryPage() {
                         {job.priority === "URGENT" && (
                           <span style={{ fontSize: 10, padding: "2px 6px", borderRadius: 3, background: "var(--red)", color: "#000", fontWeight: 800 }}><Flame  size ={18} color={"#ffa600"}/> URGENT</span>
                         )}
-                        <span style={{ fontSize: 13, color: "var(--text-pri)", fontWeight: 600 }}>{job.customer}</span>
+                       <span style={{ fontSize: 13, color: "var(--text-pri)", fontWeight: 600 }}>{job.customer}</span>
                         {job.couple_name && (
                           <span style={{ fontSize: 11, color: "var(--text-sec)" }}>{job.couple_name}</span>
+                        )}
+                        {job.payment_by && (
+                          <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 4, background: "#062", color: "#fff", fontWeight: 700 }}>💰 {job.payment_by}</span>
                         )}
                       </div>
                       <div style={{
@@ -1149,10 +1860,19 @@ function EntryPage() {
                       }}><Pen size={14} /></button>
  
                       {/* Print ← NEW */}
+                      {/* Print ← NEW */}
                       <button onClick={() => setPrintJob(job)} style={{
                         padding: "7px 14px", fontSize: 12, fontWeight: 700, borderRadius: 5,
                         background: "var(--bg3)", color: "var(--cyan)", border: "1px solid var(--cyan)",
                       }}><Printer size={14} /></button>
+
+                      <button onClick={() => setPaymentJob(job)} style={{
+                        padding: "7px 14px", fontSize: 12, fontWeight: 700, borderRadius: 5,
+                        background: job.payment_by ? "var(--bg3)" : "#035702",
+                        color: job.payment_by ? "#16a34a" : "#fff",
+                        border: `1px solid ${job.payment_by ? "#16a34a" : "#00ff3c"}`,
+                      }}>💰</button>
+ 
  
                       {/* Delete */}
                       <button onClick={() => setDeleteJob(job)} style={{
@@ -1167,7 +1887,6 @@ function EntryPage() {
             </div>
           )}
         </div>
- 
         <LivePanel />
       </Shell>
  
@@ -1310,6 +2029,16 @@ function EntryPage() {
  
       {/* ── Print modal ← NEW ── */}
       {printJob && <PrintJobCardModal job={printJob} onClose={() => setPrintJob(null)} />}
+
+      {/* ── Payment modal ← NEW ── */}
+      {paymentJob && (
+        <PaymentEditModal
+          job={paymentJob}
+          onClose={() => setPaymentJob(null)}
+          onSaved={() => { setPaymentJob(null); reload(); }}
+          addToast={add}
+        />
+      )}
       <ToastStack toasts={toasts} />
     </>
   );
@@ -1320,16 +2049,16 @@ const STATION_CFG = {
   printing: {
     label: "PRINTING", dept: "PRINTING", accent: "var(--blue)",
     getAction(job) {
-      if (job.status_printing === "PENDING")     return { action: "start",    label: "▶ START PRINTING" };
-      if (job.status_printing === "IN_PROGRESS") return { action: "complete", label: "✓ MARK PRINTED — DONE" };
+      if (job.status_printing === "PENDING")     return { action: "start",    label: " START PRINTING" };
+      if (job.status_printing === "IN_PROGRESS") return { action: "complete", label: " MARK PRINTED - DONE" };
       return null;
     },
   },
   laminating: {
     label: "LAMINATING", dept: "LAMINATING", accent: "var(--cyan)",
     getAction(job) {
-      if (job.status_laminating === "PENDING")     return { action: "start",    label: "▶ START LAMINATING" };
-      if (job.status_laminating === "IN_PROGRESS") return { action: "complete", label: "✓ MARK LAMINATED — DONE" };
+      if (job.status_laminating === "PENDING")     return { action: "start",    label: " START LAMINATING" };
+      if (job.status_laminating === "IN_PROGRESS") return { action: "complete", label: " MARK LAMINATED - DONE" };
       return null;
     },
   },
@@ -1337,8 +2066,8 @@ const STATION_CFG = {
     label: "LASER CUTTING", dept: "LASER_CUTTING", accent: "var(--purple)",
     getAction(job) {
       if (job.status_laser_cutting === "SKIPPED")     return null;
-      if (job.status_laser_cutting === "PENDING")     return { action: "start",    label: "▶ START LASER CUT" };
-      if (job.status_laser_cutting === "IN_PROGRESS") return { action: "complete", label: "✓ MARK CUT DONE" };
+      if (job.status_laser_cutting === "PENDING")     return { action: "start",    label: " START LASER CUT" };
+      if (job.status_laser_cutting === "IN_PROGRESS") return { action: "complete", label: " MARK CUT DONE" };
       return null;
     },
   },
@@ -1346,8 +2075,8 @@ const STATION_CFG = {
     label: "BINDING", dept: "BINDING", accent: "var(--green)",
     getAction(job) {
       if (!job.binding_unlocked)                return null;
-      if (job.status_binding === "PENDING")     return { action: "start",    label: "▶ START BINDING" };
-      if (job.status_binding === "IN_PROGRESS") return { action: "complete", label: "✓ MARK BOUND — JOB COMPLETE" };
+      if (job.status_binding === "PENDING")     return { action: "start",    label: "START BINDING" };
+      if (job.status_binding === "IN_PROGRESS") return { action: "complete", label: "MARK BOUND - JOB COMPLETE" };
       return null;
     },
   },
@@ -1368,10 +2097,10 @@ const STATION_CFG = {
 // Uses only the `active` jobs array already fetched by DashboardPage.
 
 const DEPT_META = [
-  { key: "PRINTING",      label: "Printing",   accent: "#005ef5", field: "status_printing"      },
-  { key: "LAMINATING",    label: "Laminating", accent: "#06b6d4", field: "status_laminating"    },
-  { key: "LASER_CUTTING", label: "Laser Cut",  accent: "#a855f7", field: "status_laser_cutting" },
-  { key: "BINDING",       label: "Binding",    accent: "#22c55e", field: "status_binding"       },
+  { key: "PRINTING",      label: "Printing",   accent: "#0004ff", field: "status_printing"      },
+  { key: "LAMINATING",    label: "LAMINATING", accent: "#00d9ff", field: "status_laminating"    },
+  { key: "LASER_CUTTING", label: "Laser Cut",  accent: "#8000f8", field: "status_laser_cutting" },
+  { key: "BINDING",       label: "Binding",    accent: "#00f65a", field: "status_binding"       },
 ];
 
 function BottleneckRadar({ active }) {
@@ -1400,8 +2129,8 @@ function BottleneckRadar({ active }) {
           <span style={{ fontFamily: "var(--fd)", fontSize: 14, fontWeight: 1000, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--text-pri)", textShadow: '2px 2px 4px rgba(0,0,0,0.9)' }}>Bottleneck Radar</span>
         </div>
         {hasBottleneck && worstDept.delayed > 0 ? (
-          <span className="blink" style={{ fontSize: 9, fontWeight: 800, padding: "2px 7px", borderRadius: 4, background: "#3a0000", color: "var(--red)", border: "1px solid var(--red)" }}>
-            ⚠ {worstDept.label.toUpperCase()}
+          <span className="blink" style={{ fontSize: 9,display:"flex", fontWeight: 600, gap:"2px",padding: "2px 7px", borderRadius: 4, background: "#ff0000", color: "#ffffff", border: "1px solid #ffffff",letterSpacing:"0.08em" }}>
+             <TriangleAlert size={12}/>{worstDept.label.toUpperCase()}
           </span>
         ) : (
           <span></span>
@@ -1414,7 +2143,7 @@ function BottleneckRadar({ active }) {
           return (
 <div key={dept.key} style={{
             background: "#000000",
-            border: `1px solid ${dept.delayed > 0 ? dept.accent + "44" : "var(--bg0)"}`,
+            border: `1px solid ${dept.delayed > 0 ? "var(--red)" : "#787777"}`,
             boxShadow: '3px 4px 5px #181717',
             borderLeft: `3px solid ${dept.delayed > 0 ? "var(--red)" : dept.accent}`,
             borderRadius: 5, padding: "8px 10px",
@@ -1422,18 +2151,18 @@ function BottleneckRadar({ active }) {
           }}>
             {/* TOP ROW: label + counts, never wrap */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, marginBottom: 6, flexWrap: "nowrap", minWidth: 0 }}>
-              <span style={{ fontSize: 12, fontWeight: 800, color: dept.accent, textTransform: "uppercase", letterSpacing: ".06em", whiteSpace: "nowrap", flexShrink: 0 }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: dept.accent, textTransform: "uppercase", letterSpacing: ".07em", whiteSpace: "nowrap", flexShrink: 0 }}>
                 {dept.label}
               </span>
               <div style={{ display: "flex", gap: 4, flexShrink: 0, flexWrap: "nowrap", alignItems: "center" }}>
                 {dept.inProgress > 0 && (
-                  <span style={{ fontSize: 11, fontWeight: 700, padding: "1px 6px", borderRadius: 4, background: "#1a1400", color: "var(--amber)", border: "1px solid #4a3800", whiteSpace: "nowrap" }}>● {dept.inProgress}</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, padding: "1px 6px", borderRadius: 4, background: "#d7a40b", color: "#000000", border: "1px solid #ffffff", whiteSpace: "nowrap" }}>RUNNING : {dept.inProgress}</span>
                 )}
                 {dept.pending > 0 && (
-                  <span style={{ fontSize: 11, fontWeight: 800, padding: "1px 6px", borderRadius: 4, background: "var(--bg3)", color: "var(--text-pri)", whiteSpace: "nowrap" }}>{dept.pending}</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, padding: "1px 6px", borderRadius: 4, background: "var(--bg3)", color: "#ffffff",border: "1px solid #ffffff", whiteSpace: "nowrap" }}>PENDING : {dept.pending}</span>
                 )}
                 {dept.delayed > 0 && (
-                  <span style={{ fontSize: 11, fontWeight: 800, padding: "1px 6px", borderRadius: 4, background: "#3a0000", color: "var(--red)", border: "1px solid rgba(229,62,62,.4)", whiteSpace: "nowrap" }}>⏱ {dept.delayed}</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, padding: "1px 6px", borderRadius: 4, background: "#a12d2d", color: "#000000", border: "1px solid #ffffff", whiteSpace: "nowrap" }}>DELAYED : {dept.delayed}</span>
                 )}
                 {dept.total === 0 && dept.delayed === 0 && (
                   <span style={{ fontSize: 12, color: "var(--text-pri)" }}>idle</span>
@@ -1882,8 +2611,6 @@ function OperatorStatsPanel() {
         }}>
           <div style={{
             width: 28, height: 28, borderRadius: 6,
-            background: accent + "22",
-            border: `1px solid ${accent}44`,
             display: "flex", alignItems: "center", justifyContent: "center",
             flexShrink: 0,
           }}>
@@ -2042,13 +2769,13 @@ function OperatorStatsPanel() {
           gap: 12,
         }}>
           <Section
-            icon={<Printer size={14} color="#3b82f6" />}
+            icon={<Printer size={16} color="#3b82f6" />}
             label="Printing"
             accent="#3b82f6"
             rows={data.PRINTING}
           />
           <Section
-            icon={<Scissors size={14} color="#a855f7" />}
+            icon={<Scissors size={16} color="#a855f7" />}
             label="Laser Cutting"
             accent="#a855f7"
             rows={data.LASER_CUTTING}
@@ -2073,9 +2800,14 @@ function OperatorStatsPanel() {
 function OperatorIdentityModal({ dept, onConfirm, onCancel }) {
   const [name,       setName]      = useState("");
   const [underWhom,  setUnder]     = useState("");
+  const [machine,    setMachine]   = useState("");
+  const [isStory,    setIsStory]   = useState(false);   
+  const [isRebind,   setIsRebind]  = useState(false);
   const [knownNames, setKnown]     = useState([]);
   const [showNew,    setShowNew]   = useState(false);
-  const isPrinting = dept === "PRINTING";
+  const isPrinting   = dept === "PRINTING";
+  const isLaminating = dept === "LAMINATING";
+  const nameLabel = isLaminating ? "Accubind by? *" : "Your name *";
 
   useEffect(() => {
     apiFetch(`/api/operators/known?dept=${dept}`)
@@ -2083,7 +2815,6 @@ function OperatorIdentityModal({ dept, onConfirm, onCancel }) {
       .catch(() => {});
   }, [dept]);
 
-  // capitalize on every keystroke
   function handleName(e) {
     setName(e.target.value.replace(/\b\w/g, c => c.toUpperCase()));
   }
@@ -2096,7 +2827,14 @@ function OperatorIdentityModal({ dept, onConfirm, onCancel }) {
     const finalUnder = underWhom.trim().replace(/\b\w/g, c => c.toUpperCase());
     if (!finalName) return;
     if (isPrinting && !finalUnder) return;
-    onConfirm({ operator_name: finalName, under_whom: finalUnder || undefined });
+    if (isPrinting && !machine) return;   
+    onConfirm({
+      operator_name: finalName,
+      under_whom: finalUnder || undefined,
+      machine: isPrinting ? machine : undefined,
+      is_story:  isPrinting ? isStory  : undefined,   
+      is_rebind: isPrinting ? isRebind : undefined,   
+    });
   }
 
   return (
@@ -2110,67 +2848,94 @@ function OperatorIdentityModal({ dept, onConfirm, onCancel }) {
           Before you start
         </div>
 
-        {/* Name field — dropdown if known names exist */}
         <div>
-          <label>Your name *</label>
+          <label>{nameLabel}</label>
           {knownNames.length > 0 && !showNew ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <select
-                value={name}
-                onChange={e => {
-                  if (e.target.value === "__new__") { setShowNew(true); setName(""); }
-                  else setName(e.target.value);
-                }}
-                style={{ margin: 0 }}
-              >
-                <option value="">-- Select your name --</option>
-                {knownNames.map(n => <option key={n} value={n}>{n}</option>)}
-                <option value="__new__">+ Type a new name</option>
-              </select>
-            </div>
+            <select
+              value={name}
+              onChange={e => {
+                if (e.target.value === "__new__") { setShowNew(true); setName(""); }
+                else setName(e.target.value);
+              }}
+              style={{ margin: 0 }}
+            >
+              <option value="">-- Select your name --</option>
+              {knownNames.map(n => <option key={n} value={n}>{n}</option>)}
+              <option value="__new__">+ Type a new name</option>
+            </select>
           ) : (
             <div style={{ display: "flex", gap: 6 }}>
-              <input
-                value={name}
-                onChange={handleName}
-                placeholder="Enter your name"
-                autoFocus
-                style={{ flex: 1 }}
-              />
+              <input value={name} onChange={handleName} placeholder="Enter your name" autoFocus style={{ flex: 1 }} />
               {knownNames.length > 0 && (
-                <button
-                  onClick={() => { setShowNew(false); setName(""); }}
-                  style={{ padding: "0 10px", background: "var(--bg3)", color: "var(--text-sec)",
-                    border: "1px solid var(--border)", borderRadius: 6, fontSize: 12 }}>
-                  ← Back
-                </button>
+                <button onClick={() => { setShowNew(false); setName(""); }} style={{ padding: "0 10px", background: "var(--bg3)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 12 }}>← Back</button>
               )}
             </div>
           )}
         </div>
- {/* if some one want to change supervisor name,change here options */}
+
         {isPrinting && (
           <div>
             <label>Under whom are you printing? *</label>
-            <select
-              value={underWhom}
-              onChange={e => setUnder(e.target.value)}
-              style={{ margin: 0 }}
-            >
+            <select value={underWhom} onChange={e => setUnder(e.target.value)} style={{ margin: 0 }}>
               <option value="">-- Select supervisor --</option>
               <option value="Jeewan">Jeewan</option>
               <option value="Hirusha">Hirusha</option>
               <option value="Suresh">Suresh</option>
               <option value="Boss">Boss</option>
-              
             </select>
+          </div>
+        )}
+
+        {/* ── NEW: Machine select ── */}
+        {isPrinting && (
+          <div>
+            <label>Which machine? *</label>
+            <select value={machine} onChange={e => setMachine(e.target.value)} style={{ margin: 0 }}>
+              <option value="">-- Select machine --</option>
+              {MACHINES.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+            </select>
+          </div>
+        )}
+        {/* ── NEW: Story / Rebind toggles ── */}
+        {isPrinting && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div>
+              <label>Is this Story printing?</label>
+              <div style={{ display: "flex", gap: 8 }}>
+                {["NO", "YES"].map(opt => (
+                  <button key={opt} type="button"
+                    onClick={() => setIsStory(opt === "YES")}
+                    style={{
+                      flex: 1, padding: "6px 0", borderRadius: 6, fontWeight: 800, fontSize: 13,
+                      background: (isStory ? "YES" : "NO") === opt ? "var(--green)" : "var(--bg3)",
+                      color: (isStory ? "YES" : "NO") === opt ? "#000" : "var(--text-sec)",
+                      border: `1px solid ${(isStory ? "YES" : "NO") === opt ? "#00f82d" : "var(--border)"}`,
+                    }}>{opt}</button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label>Is this Rebind printing?</label>
+              <div style={{ display: "flex", gap: 8 }}>
+                {["NO", "YES"].map(opt => (
+                  <button key={opt} type="button"
+                    onClick={() => setIsRebind(opt === "YES")}
+                    style={{
+                      flex: 1, padding: "6px 0", borderRadius: 6, fontWeight: 800, fontSize: 13,
+                      background: (isRebind ? "YES" : "NO") === opt ? "var(--green)" : "var(--bg3)",
+                      color: (isRebind ? "YES" : "NO") === opt ? "#000" : "var(--text-sec)",
+                      border: `1px solid ${(isRebind ? "YES" : "NO") === opt ? "#00f82d" : "var(--border)"}`,
+                    }}>{opt}</button>
+                ))}
+              </div>
+            </div>
           </div>
         )}
 
         <div style={{ display: "flex", gap: 8 }}>
           <button
             onClick={submit}
-            disabled={!name.trim() || (isPrinting && !underWhom.trim())}
+            disabled={!name.trim() || (isPrinting && !underWhom.trim()) || (isPrinting && !machine)}
             style={{ flex: 1, padding: "12px 0", background: "var(--amber)", color: "#000",
               borderRadius: 8, fontWeight: 800, fontSize: 15 }}>
             Confirm &amp; Start
@@ -2185,18 +2950,67 @@ function OperatorIdentityModal({ dept, onConfirm, onCancel }) {
   );
 }
 
+function BoxPouchModal({ job, onConfirm, onCancel }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9100 }}>
+      <div style={{ background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: 12, padding: 28, width: "100%", maxWidth: 400, display: "flex", flexDirection: "column", gap: 16 }}>
+        <div style={{ fontSize: 13, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".1em" }}>Before completing</div>
+        <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-pri)" }}>Is Box or Pouch complete?</div>
+        <div style={{ fontSize: 13, color: "var(--text-sec)" }}>{job.job_no} - {job.customer}</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <button onClick={() => onConfirm("COMPLETE")} style={{ padding: "12px 0", background: "var(--green)", color: "#000", borderRadius: 8, fontWeight: 800, fontSize: 15 }}>Yes, Complete</button>
+          <button onClick={() => onConfirm("NOT_NEEDED")} style={{ padding: "12px 0", background: "#000000", color: "var(--text-pri)", border: "1px solid var(--border)", borderRadius: 8, fontWeight: 800, fontSize: 15 }}>Box/Pouch Not Needed</button>
+          <button onClick={() => onConfirm("PROCESSING")} style={{ padding: "12px 0", background: "var(--amber)", color: "#000", borderRadius: 8, fontWeight: 800, fontSize: 15 }}>Still Processing</button>
+        </div>
+        <button onClick={onCancel} style={{ padding: "10px 0", background: "var(--red)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 8, fontWeight: 700 }}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+function BoxPouchEditModal({ job, onClose, onSaved, addToast }) {
+  const [saving, setSaving] = useState(false);
+  async function set(status) {
+    setSaving(true);
+    try {
+      await api.updateBoxPouch(job.id, status);
+      addToast?.(`✓ Box/Pouch updated for #${job.job_no}`, "success");
+      onSaved?.(status);
+      onClose();
+    } catch (err) { addToast?.(err.message, "error"); }
+    finally { setSaving(false); }
+  }
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9200 }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: 12, padding: 24, width: "100%", maxWidth: 400, display: "flex", flexDirection: "column", gap: 14 }}>
+        <div>
+          <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 4 }}>Update Box / Pouch Status</div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "var(--amber)" }}>{job.job_no}</div>
+          <div style={{ fontSize: 13, color: "var(--text-sec)" }}>{job.customer}</div>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <button disabled={saving} onClick={() => set("COMPLETE")} style={{ padding: "11px 0", background: "var(--green)", color: "#000", borderRadius: 8, fontWeight: 800, fontSize: 14 }}> Complete</button>
+          <button disabled={saving} onClick={() => set("NOT_NEEDED")} style={{ padding: "11px 0", background: "#000000", color: "var(--text-pri)", border: "1px solid var(--border)", borderRadius: 8, fontWeight: 800, fontSize: 14 }}> Not Needed</button>
+          <button disabled={saving} onClick={() => set("PROCESSING")} style={{ padding: "11px 0", background: "var(--amber)", color: "#000", borderRadius: 8, fontWeight: 800, fontSize: 14 }}> Still Processing</button>
+        </div>
+        <button onClick={onClose} style={{ padding: "10px 0", background: "var(--red)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 8, fontWeight: 700 }}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
 function StationPage({ deptKey }) {
   const cfg = STATION_CFG[deptKey];
   const { toasts, add } = useToast();
   const [queue,              setQueue]              = useState([]);
+  const [search, setSearch] = useState("");
   const [deptCompletedCount, setDeptCompletedCount] = useState(null);
   const [actingId,           setActingId]           = useState(null);
   const [reasonJob,          setReasonJob]          = useState(null);
-  // NEW: track if modal was opened specifically to unblock a completion
   const [pendingCompleteJob, setPendingCompleteJob] = useState(null);
   const [identityPending, setIdentityPending] = useState(null);
+  const [boxPouchPending, setBoxPouchPending] = useState(null);
   const [deptDailyCount, setDeptDailyCount] = useState(null);
-
   const isMobile = useIsMobile();
 
   const reload = useCallback(async () => {
@@ -2224,8 +3038,8 @@ function StationPage({ deptKey }) {
       const a = cfg.getAction(job);
       if (!a) return;
 
-      // ── Intercept START for PRINTING and LASER_CUTTING ──
-      if (a.action === "start" && (cfg.dept === "PRINTING" || cfg.dept === "LASER_CUTTING")) {
+      // ── Intercept START for PRINTING, LASER_CUTTING, and LAMINATING ──
+      if (a.action === "start" && (cfg.dept === "PRINTING" || cfg.dept === "LASER_CUTTING" || cfg.dept === "LAMINATING")) {
         setIdentityPending(job);
         return;
       }
@@ -2241,6 +3055,12 @@ function StationPage({ deptKey }) {
           setReasonJob(job);
           return;
         }
+      }
+
+      // ── Intercept COMPLETE for BINDING — ask box/pouch status ──
+      if (a.action === "complete" && cfg.dept === "BINDING") {
+        setBoxPouchPending(job);
+        return;
       }
 
       setActingId(job.id);
@@ -2260,14 +3080,29 @@ function StationPage({ deptKey }) {
       }
     }
 
-    async function handleIdentityConfirm({ operator_name, under_whom }) {
+    async function handleIdentityConfirm({ operator_name, under_whom, machine, is_story, is_rebind }) {
       const job = identityPending;
       setIdentityPending(null);
       const a = cfg.getAction(job);
       setActingId(job.id);
       try {
-        await api.advance(job.id, cfg.dept, a.action, { operator_name, under_whom });
+        await api.advance(job.id, cfg.dept, a.action, { operator_name, under_whom, machine, is_story, is_rebind });
         add(`Job #${job.job_no} started at ${cfg.label}.`, "success");
+        await reload();
+      } catch (err) {
+        add(err.message, "error");
+      } finally {
+        setActingId(null);
+  }
+}
+
+    async function handleBoxPouchConfirm(status) {
+      const job = boxPouchPending;
+      setBoxPouchPending(null);
+      setActingId(job.id);
+      try {
+        await api.advance(job.id, cfg.dept, "complete", { box_pouch_status: status });
+        add(`Job #${job.job_no} ✓ completed!`, "success");
         await reload();
       } catch (err) {
         add(err.message, "error");
@@ -2291,6 +3126,7 @@ function StationPage({ deptKey }) {
     <>
       <Shell title={`${cfg.label} STATION`} accent={cfg.accent} topRight={
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <DeptCompletedDropdown deptKey={cfg.dept} title={`Done Today - ${cfg.label}`} accent={cfg.accent} addToast={add} />
           {/* Queue count */}
           <div style={{
             display: "flex", alignItems: "center", gap: isMobile ? 2 : 10,
@@ -2348,10 +3184,14 @@ function StationPage({ deptKey }) {
           </div>
         </div>
       }>
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          {queue.length === 0
-            ? <div style={{ textAlign: "center", padding: isMobile ? "40px 16px" : "60px 20px", color: "var(--text-dim)", fontFamily: "var(--fd)", fontSize: isMobile ? 15 : 20, letterSpacing: ".06em" }}>✓ QUEUE CLEAR</div>
-            : queue.map(job => {
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <SearchBar value={search} onChange={setSearch} />
+
+          {queue.filter(j => matchesSearch(j, search)).length === 0
+            ? <div style={{ textAlign: "center", padding: isMobile ? "40px 16px" : "60px 20px", color: "var(--text-dim)", fontFamily: "var(--fd)", fontSize: isMobile ? 15 : 20, letterSpacing: ".06em" }}>
+                {search ? "NO MATCHING JOBS" : "✓ QUEUE CLEAR"}
+              </div>
+            : queue.filter(j => matchesSearch(j, search)).map(job => {
                 const a = cfg.getAction(job);
 
                 // ── Determine if this job is blocked (delayed + no reason) ──
@@ -2366,30 +3206,16 @@ function StationPage({ deptKey }) {
                       job={job}
                       actionLabel={
                         isBlocked
-                          ? "⏱ Fill Delay Reason to Complete"
+                          ? "Fill Delay Reason to Complete"
                           : a?.label
                       }
                       onAction={act}
                       acting={actingId === job.id}
-                      // Override button style via a new prop when blocked
                       actionBlocked={isBlocked}
                       onAddReason={setReasonJob}
                       reasonDept={cfg.dept}
+                      addToast={add}
                     />
-                    {/* Inline warning strip shown under blocked cards */}
-                    {isBlocked && (
-                      <div style={{
-                        background: "#2a0000",
-                        border: "1px solid var(--red)",
-                        borderTop: "none",
-                        borderRadius: "0 0 8px 8px",
-                        padding: "9px 16px",
-                        display: "flex", alignItems: "center", gap: 8,
-                        fontSize: 12, fontWeight: 700, color: "var(--red)",
-                      }}>
-                        ⚠ Delay reason required — tap the ⏱ button above to unlock completion
-                      </div>
-                    )}
                   </div>
                 );
               })
@@ -2403,6 +3229,14 @@ function StationPage({ deptKey }) {
           dept={cfg.dept}
           onConfirm={handleIdentityConfirm}
           onCancel={() => setIdentityPending(null)}
+        />
+      )}
+
+      {boxPouchPending && (
+        <BoxPouchModal
+          job={boxPouchPending}
+          onConfirm={handleBoxPouchConfirm}
+          onCancel={() => setBoxPouchPending(null)}
         />
       )}
 
@@ -2502,7 +3336,7 @@ function ThroughputTicker({ done }) {
   done.forEach(j => {
     const raw = j.completed_at ?? j.updated_at;
     if (!raw) return;
-    const h   = new Date(toMs(raw)).getHours();
+    const h = parseUTC(raw)?.getHours();
     const idx = Math.floor(h / 4);
     if (idx >= 0 && idx < 6) counts[idx]++;
   });
@@ -2528,7 +3362,7 @@ function ThroughputTicker({ done }) {
           letterSpacing: ".12em", textTransform: "uppercase",
           color: "var(--text-pri)", textShadow: "2px 2px 4px rgba(0,0,0,0.9)",
         }}>
-          Throughput — Today
+          Throughput - Today
         </span>
         {/* Total badge */}
         <div style={{
@@ -2660,6 +3494,273 @@ function ThroughputTicker({ done }) {
   );
 }
 
+function MachineStatsPanel() {
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    const load = () => api.deptStats().then(setData).catch(() => {});
+    load();
+    const t = setInterval(load, POLL_INTERVAL_MS);
+    return () => clearInterval(t);
+  }, []);
+
+  const machines = data?.machines || { monthly: {}, daily: {} };
+  const rows = [
+    { key: "GREEN_2", label: "Green II", accent: "#dcdcdc" },
+    { key: "GREEN_3", label: "Green III", accent: "#dcdcdc" },
+  ];
+
+  return (
+<div
+  style={{
+    background: "#444343e0",
+    border: "1px solid #2E2E2E",
+    borderRadius: 16,
+    padding: 20,
+    boxShadow: "0 8px 30px rgba(0,0,0,0.35)",
+  }}
+>
+  {/* Header */}
+  <div
+    style={{
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      marginBottom: 18,
+    }}
+  >
+    <div>
+      <div
+        style={{
+          fontSize: 18,
+          fontWeight: 700,
+          color: "#fff",
+          fontFamily: "var(--fd)",
+          letterSpacing: ".04em",
+          textShadow: "2px 2px 4px rgba(0,0,0,0.9)",
+        }}
+      >
+        Printing Machines
+      </div>
+
+    </div>
+  </div>
+
+  <div
+    style={{
+      display: "flex",
+      flexDirection: "column",
+      gap: 12,
+    }}
+  >
+    {rows.map((r) => (
+      <div
+        key={r.key}
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          background: "#000000",
+          border: "1px solid #2A2A2A",
+          borderLeft: `5px solid ${r.accent}`,
+          borderRadius: 12,
+          padding: "14px 18px",
+          transition: ".25s",
+        }}
+      >
+        {/* Machine Name */}
+        <div>
+          <div
+            style={{
+              color: r.accent,
+              fontWeight: 700,
+              fontSize: 15,
+              letterSpacing: ".05em",
+            }}
+          >
+            {r.label}
+          </div>
+        </div>
+
+        {/* Stats */}
+        <div
+          style={{
+            display: "flex",
+            gap: 28,
+          }}
+        >
+          <div style={{ textAlign: "right" }}>
+            <div
+              style={{
+                fontSize: 11,
+                color: "#FFFFFF",
+                textTransform: "uppercase",
+              }}
+            >
+              Today
+            </div>
+
+            <div
+              style={{
+                fontSize: 24,
+                fontWeight: 700,
+                color: "#3c24a5",
+              }}
+            >
+              {machines.daily[r.key] ?? 0}
+            </div>
+          </div>
+
+          <div
+            style={{
+              width: 1,
+              background: "#2D2D2D",
+            }}
+          />
+
+          <div style={{ textAlign: "right" }}>
+            <div
+              style={{
+                fontSize: 11,
+                color: "#FFFFFF",
+                textTransform: "uppercase",
+              }}
+            >
+              Monthly
+            </div>
+
+            <div
+              style={{
+                fontSize: 24,
+                fontWeight: 700,
+                color: "#2ECC71",
+              }}
+            >
+              {machines.monthly[r.key] ?? 0}
+            </div>
+          </div>
+        </div>
+      </div>
+    ))}
+  </div>
+</div>
+  );
+}
+
+function PrintingSectionPanel() {
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    const load = () => api.printingSection().then(setData).catch(() => {});
+    load();
+    const t = setInterval(load, POLL_INTERVAL_MS);
+    return () => clearInterval(t);
+  }, []);
+
+  const rows = [
+    { key: "normal",         label: "Normal Prints",  accent: "#ffffff" },
+    { key: "story",          label: "Story Albums",   accent: "#ffffff" },
+    { key: "rebind",         label: "Rebinds",        accent: "#ffffff" },
+  ];
+
+  const m = data?.monthly || {};
+  const d = data?.daily   || {};
+
+  return (
+    <div
+      style={{
+        background: "#444343e0",
+        border: "1px solid #2E2E2E",
+        borderRadius: 16,
+        padding: 20,
+        boxShadow: "0 8px 30px rgba(0,0,0,0.35)",
+      }}
+    >
+      {/* Header */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 18,
+        }}
+      >
+        <div
+          style={{
+            fontSize: 18,
+            fontWeight: 700,
+            color: "#fff",
+            fontFamily: "var(--fd)",
+            letterSpacing: ".04em",
+            textShadow: "2px 2px 4px rgba(0,0,0,0.9)",
+          }}
+        >
+          Printing Section
+        </div>
+      </div>
+
+      {!data ? (
+        <div style={{ textAlign: "center", padding: "24px 0", color: "var(--text-dim)", fontFamily: "var(--fd)", fontSize: 13, letterSpacing: ".08em" }}>
+          LOADING…
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {rows.map((r) => (
+            <div
+              key={r.key}
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                background: "#000000",
+                border: "1px solid #2A2A2A",
+                borderLeft: `5px solid ${r.accent}`,
+                borderRadius: 12,
+                padding: "14px 18px",
+                transition: ".25s",
+              }}
+            >
+              {/* Metric name */}
+              <div>
+                <div
+                  style={{
+                    color: r.accent,
+                    fontWeight: 700,
+                    fontSize: 15,
+                    letterSpacing: ".05em",
+                  }}
+                >
+                  {r.label}
+                </div>
+              </div>
+
+              {/* Stats */}
+              <div style={{ display: "flex", gap: 28 }}>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontSize: 11, color: "#FFFFFF", textTransform: "uppercase" }}>
+                    Today
+                  </div>
+                  <div style={{ fontSize: 24, fontWeight: 700, color: "#3c24a5" }}>
+                    {d[r.key] ?? 0}
+                  </div>
+                </div>
+
+                <div style={{ width: 1, background: "#2D2D2D" }} />
+
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontSize: 11, color: "#FFFFFF", textTransform: "uppercase" }}>
+                    Monthly
+                  </div>
+                  <div style={{ fontSize: 24, fontWeight: 700, color: "#2ECC71" }}>
+                    {m[r.key] ?? 0}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function DashboardPage() {
   const { toasts, add } = useToast();
@@ -2674,12 +3775,11 @@ const reload = useCallback(async () => {
   try {
     const [a, c, s] = await Promise.all([api.jobs(false), api.jobs(true), api.stats()]);
     
-    const todayStr = new Date().toISOString().slice(0, 10); 
+    const todayStr = slDateStr(new Date());
     const todayDone = c.filter(job => {
       const completedAt = job.completed_at ?? job.updated_at;
       if (!completedAt) return false;
-      // Normalize to local date string
-      return new Date(completedAt).toLocaleDateString("en-CA") === todayStr;
+      return slDateStr(parseUTC(completedAt)) === todayStr;
     });
 
     setActive(a);
@@ -2790,6 +3890,8 @@ const reload = useCallback(async () => {
         <div className="r-grid-intelligence" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
           <BottleneckRadar active={active} />
           <DailyGoalRing   active={active} done={done} />
+          <MachineStatsPanel />
+          <PrintingSectionPanel /> 
           <AlbumCountPanel />
           <OperatorStatsPanel />
         </div>
@@ -2824,7 +3926,7 @@ const reload = useCallback(async () => {
               </div>
             : list.map(job => (
               <div key={job.id} style={{ position: "relative" }}>
-                <JobCardFull job={job} showExpiry={tab === "done"} />
+                <JobCardFull job={job} showExpiry={tab === "done"} addToast={add} />
                 <button onClick={() => del(job)} title="Delete" style={{
                   position: "absolute", top: 12, right: 12,
                   background: "rgba(0, 0, 0, 0.6)", color: "var(--red)",
@@ -2842,7 +3944,7 @@ const reload = useCallback(async () => {
   );
 }
 
-function HistoryList({ data, loading, search, selectedDate, fmtDate, fmtTime, setPrintJob, page, setPage }) {
+function HistoryList({ data, loading, search, selectedDate, fmtDate, fmtTime, setPrintJob, page, setPage, addToast }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       {loading && <div style={{ textAlign: "center", padding: "40px 0", color: "var(--text-dim)", fontFamily: "var(--fd)", letterSpacing: ".08em" }}>LOADING…</div>}
@@ -2852,8 +3954,9 @@ function HistoryList({ data, loading, search, selectedDate, fmtDate, fmtTime, se
         </div>
       )}
       {!loading && data?.jobs?.map(job => (
-        <HistoryCard key={job.id} job={job} fmtDate={fmtDate} fmtTime={fmtTime} onPrint={() => setPrintJob(job)} />
+        <HistoryCard key={job.id} job={job} fmtDate={fmtDate} fmtTime={fmtTime} onPrint={() => setPrintJob(job)} addToast={addToast} />
       ))}
+
       {data && data.pages > 1 && (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 8 }}>
           <button onClick={() => setPage(p => Math.max(1, p-1))} disabled={page===1} style={{ padding: "7px 14px", background: "var(--bg2)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, fontWeight: 700 }}>◀ Prev</button>
@@ -2882,7 +3985,8 @@ function HistoryPage() {
   const [calMonth,        setCalMonth]        = useState(new Date().getMonth() + 1);
   const [printJob,        setPrintJob]        = useState(null);
   const [showCal,         setShowCal]         = useState(!isMobile); // on mobile cal is collapsed by default
- 
+  const [machineFilter, setMachineFilter] = useState(""); 
+  const [open, setOpen] = useState(false);
   useEffect(() => {
     const t = setTimeout(() => { setDebouncedSearch(search); setPage(1); }, 400);
     return () => clearTimeout(t);
@@ -2893,14 +3997,17 @@ function HistoryPage() {
       .then(setDotDays).catch(() => {});
   }, [calYear, calMonth]);
  
+ 
+
   useEffect(() => {
     setLoading(true);
     const params = new URLSearchParams({ date: selectedDate, page: String(page), page_size: "20" });
     if (debouncedSearch) params.set("search", debouncedSearch);
+    if (machineFilter)   params.set("machine", machineFilter);
     apiFetch(`/api/history?${params}`)
       .then(d => { setData(d); setLoading(false); })
       .catch(err => { add(err.message, "error"); setLoading(false); });
-  }, [selectedDate, debouncedSearch, page]);
+  }, [selectedDate, debouncedSearch, machineFilter, page]);
  
   function MiniCalendar() {
     const DAYS = ["Su","Mo","Tu","We","Th","Fr","Sa"];
@@ -2910,7 +4017,9 @@ function HistoryPage() {
     for (let i = 0; i < startDay; i++) cells.push(null);
     for (let d = 1; d <= daysInMonth; d++) cells.push(d);
     const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
- 
+   
+
+    
     function selectDay(d) {
       const mm = String(calMonth).padStart(2, "0");
       const dd = String(d).padStart(2, "0");
@@ -2959,7 +4068,7 @@ function HistoryPage() {
   }
  
   const fmtDate = iso => new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
-  const fmtTime = iso => new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+  const fmtTime = iso => parseUTC(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
  
   const selectedLabel = new Date(selectedDate + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
  
@@ -2992,6 +4101,11 @@ function HistoryPage() {
                 {selectedDate.slice(5).replace("-", "/")}
               </button>
             </div>
+
+              <select value={machineFilter} onChange={e => { setMachineFilter(e.target.value); setPage(1); }} style={{ margin: 0 }}>
+                <option value="">All Machines</option>
+                {MACHINES.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+              </select>
             {search && <button onClick={() => { setSearch(""); setPage(1); }} style={{ fontSize: 12, color: "var(--red)", textAlign: "left" }}>Clear search</button>}
             {showCal && <MiniCalendar />}
             {data && (
@@ -3000,7 +4114,7 @@ function HistoryPage() {
                 <span style={{ fontFamily: "var(--fd)", fontSize: 24, fontWeight: 900, color: "var(--cyan)" }}>{data.total}</span>
               </div>
             )}
-            <HistoryList data={data} loading={loading} search={search} selectedDate={selectedDate} fmtDate={fmtDate} fmtTime={fmtTime} setPrintJob={setPrintJob} page={page} setPage={setPage} />
+            <HistoryList data={data} loading={loading} search={search} selectedDate={selectedDate} fmtDate={fmtDate} fmtTime={fmtTime} setPrintJob={setPrintJob} page={page} setPage={setPage} addToast={add} />
           </div>
         ) : (
           /* Desktop: sidebar + list */
@@ -3011,6 +4125,52 @@ function HistoryPage() {
                 <div style={{ fontSize: 10, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".1em", fontWeight: 700, marginBottom: 6 }}>Search</div>
                 <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Job no / Studio / Couple…" style={{ margin: 0 }} />
                 {search && <button onClick={() => { setSearch(""); setPage(1); }} style={{ marginTop: 6, fontSize: 12, color: "var(--red)", width: "100%", textAlign: "center" }}>✕ Clear</button>}
+
+<div
+  style={{
+    position: "relative",
+    width: "100%",
+  }}
+>
+  <select
+    value={machineFilter}
+    onFocus={() => setOpen(true)}
+    onBlur={() => setOpen(false)}
+    onChange={(e) => {
+      setMachineFilter(e.target.value);
+      setPage(1);
+      setOpen(false);
+    }}
+    style={{
+      width: "100%",
+      paddingRight: "40px",
+      appearance: "none",
+      WebkitAppearance: "none",
+      MozAppearance: "none",
+    }}
+  >
+    <option value="">All Machines</option>
+    {MACHINES.map((m) => (
+      <option key={m.value} value={m.value}>
+        {m.label}
+      </option>
+    ))}
+  </select>
+
+    <ChevronDown
+      size={18}
+      style={{
+        position: "absolute",
+        right: 12,
+        top: "50%",
+        transform: `translateY(-50%) rotate(${open ? 180 : 0}deg)`,
+        transition: "transform 0.2s ease",
+        pointerEvents: "none",
+        color: "#888",
+      }}
+    />
+    
+                </div>
               </div>
               {data && (
                 <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 8, padding: 12 }}>
@@ -3022,7 +4182,7 @@ function HistoryPage() {
                 </div>
               )}
             </div>
-            <HistoryList data={data} loading={loading} search={search} selectedDate={selectedDate} fmtDate={fmtDate} fmtTime={fmtTime} setPrintJob={setPrintJob} page={page} setPage={setPage} />
+           <HistoryList data={data} loading={loading} search={search} selectedDate={selectedDate} fmtDate={fmtDate} fmtTime={fmtTime} setPrintJob={setPrintJob} page={page} setPage={setPage} addToast={add} />
           </div>
         )}
       </Shell>
@@ -3033,7 +4193,7 @@ function HistoryPage() {
 }
 
 // ── History card ──────────────────────────────────────────────────────────────
-function HistoryCard({ job, fmtDate, fmtTime, onPrint }) {
+function HistoryCard({ job, fmtDate, fmtTime, onPrint, addToast }) {
   const [expanded, setExpanded] = useState(false);
   const isMobile    = useIsMobile();
   const totalMinutes = job.logs?.filter(l => l.duration_minutes).reduce((s, l) => s + l.duration_minutes, 0) || 0;
@@ -3043,15 +4203,15 @@ function HistoryCard({ job, fmtDate, fmtTime, onPrint }) {
     <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden", borderLeft: hadDelay ? "4px solid var(--red)" : "4px solid var(--green)" }}>
       <div onClick={() => setExpanded(p => !p)} style={{ padding: "12px 14px", cursor: "pointer" }}>
         <div className="r-history-card-header" style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ fontFamily: "var(--fm)", fontSize: 14, color: "var(--amber)", fontWeight: 800, minWidth: isMobile ? 70 : 90, flexShrink: 0 }}>{job.job_no}</span>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-pri)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{job.customer}</div>
-            {job.couple_name && <div style={{ fontSize: 11, color: "var(--text-sec)" }}>{job.couple_name}</div>}
+          <span style={{ fontFamily: "var(--fm)", fontSize: 22, color: "var(--amber)", fontWeight: 800, minWidth: isMobile ? 70 : 90, flexShrink: 0 }}>{job.job_no}</span>
+          <div style={{ flex:1, minWidth: 0,display:"inline-flex",gap:15 }}>
+            <div style={{fontSize:19, fontWeight: 700, color: "var(--text-pri)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{job.customer}</div>
+            {job.couple_name && <div style={{ fontSize: 14, color: "var(--text-sec)",marginTop :"5px" }}>{job.couple_name}</div>}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0, flexWrap: "wrap", justifyContent: "flex-end" }}>
             <span style={{ fontSize: 9, padding: "2px 7px", borderRadius: 4, fontWeight: 700, background: hadDelay ? "#3a0000" : "#001a00", color: hadDelay ? "var(--red)" : "var(--green)", border: `1px solid ${hadDelay ? "var(--red)" : "var(--green)"}` }}>{hadDelay ? "LATE" : "✓"}</span>
             {totalMinutes > 0 && !isMobile && (
-              <span style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: "var(--fm)" }}>{Math.floor(totalMinutes/60)}h{totalMinutes%60}m</span>
+              <span style={{ fontSize: 13, color: "#ffffff", fontFamily: "var(--fm)" }}>{Math.floor(totalMinutes/60)}h{totalMinutes%60}m</span>
             )}
             <span style={{ color: "var(--text-dim)", fontSize: 11 }}>{expanded ? "▲" : "▼"}</span>
           </div>
@@ -3067,7 +4227,15 @@ function HistoryCard({ job, fmtDate, fmtTime, onPrint }) {
             <Chip label="Rexing"  value={job.bind_rexing_no}   accent="#22c55e" />
             <Chip label="Box"     value={job.box_type}         accent="#f59e0b" />
             <Chip label="Deliver" value={job.delivery_type}    accent="#888"    />
+            {job.box_pouch_status && (
+            <Chip
+                label="Box/Pouch"
+                value={job.box_pouch_status === "COMPLETE" ? "Complete" : "Processing"}
+                accent={job.box_pouch_status === "COMPLETE" ? "#22c55e" : "#f59e0b"}
+              />
+            )}
           </div>
+          <PaymentField job={job} addToast={addToast} />
           <StageRow job={job} />
           {job.special_note && <SpecialNote note={job.special_note} />}
           <DelayReasonsList logs={job.logs} />
@@ -3093,7 +4261,7 @@ function buildPrintHTML(job) {
   const stageRows = [
     ["Printing",     job.status_printing],
     ["Laser Cutting",job.status_laser_cutting],
-    ["Laminating",   job.status_laminating],
+    ["Laminating",  job.status_laminating],
     ["Binding",      job.status_binding],
   ];
 
@@ -3120,7 +4288,7 @@ function buildPrintHTML(job) {
   </style></head><body>
   <div class="header">
     <div>
-      <div class="job-no">${job.job_no}${job.priority === "URGENT" ? '<span class="urgent"><Flame size={18} color={"#ff5100"}/> URGENT</span>' : ""}</div>
+     <div class="job-no">${job.job_no}${job.priority === "URGENT" ? '<span class="urgent">🔥 URGENT</span>' : ""}</div>
       <div class="customer">${job.customer}</div>
       ${job.couple_name ? `<div class="couple">${job.couple_name}</div>` : ""}
       ${job.order_no ? `<div style="font-size:12px;color:#888;margin-top:2px">Order: ${job.order_no}</div>` : ""}

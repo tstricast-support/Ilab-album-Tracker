@@ -19,6 +19,7 @@ def get_history(
     date_from:  Optional[str] = Query(None),
     date_to:    Optional[str] = Query(None),
     search:     Optional[str] = Query(None, description="job_no / customer / couple_name"),
+    machine:    Optional[str] = Query(None, description="GREEN_2 / GREEN_3"),   # ← NEW
     page:       int = Query(1, ge=1),
     page_size:  int = Query(20, ge=1, le=100),
 ):
@@ -26,10 +27,9 @@ def get_history(
 
     # ── Date filters ──────────────────────────────────────────────
     if date:
-        # User selects "June 1" in LK time → shift to UTC window
-        day_start = datetime.strptime(date, "%Y-%m-%d") - TZ_OFFSET        # May 31 18:30 UTC
-        day_end   = day_start + timedelta(days=1)                           # Jun 01 18:30 UTC
-        q = q.filter(JobCard.updated_at >= day_start, JobCard.updated_at < day_end)
+        day_start = datetime.strptime(date, "%Y-%m-%d") - TZ_OFFSET
+        day_end   = day_start + timedelta(days=1)
+        q = q.filter(JobCard.completed_at >= day_start, JobCard.completed_at < day_end)
 
     elif date_from or date_to:
         if date_from:
@@ -40,6 +40,17 @@ def get_history(
             q = q.filter(
                 JobCard.updated_at < datetime.strptime(date_to, "%Y-%m-%d") + timedelta(days=1) - TZ_OFFSET
             )
+        # ── Machine filter ───────────────────────────────────────────
+    if machine:
+        q = q.filter(
+            db.query(DepartmentLog.id)
+              .filter(
+                  DepartmentLog.job_id     == JobCard.id,
+                  DepartmentLog.department == DepartmentEnum.PRINTING,
+                  DepartmentLog.machine    == machine.strip().upper(),
+              )
+              .exists()
+        )
 
     # ── Search filter ─────────────────────────────────────────────
     if search and search.strip():

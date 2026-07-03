@@ -46,6 +46,8 @@ Desktop.ini
 # ── ngrok / secrets ───────────────────────────────────────────
 .env
 .env.local
+.env.production
+.env.local
 .env.*.local
 ngrok.yml
 ngrok.log

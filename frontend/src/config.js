@@ -20,6 +20,11 @@ export const DEPARTMENTS = {
   binding:      "BINDING",
 };
 
+export const MACHINES = [
+  { value: "GREEN_2", label: "Green 2" },
+  { value: "GREEN_3", label: "Green 3" },
+];
+
 export const TIMEOUT_MINUTES = {
   PRINTING:      75,
   LAMINATING:    60,

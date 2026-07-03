@@ -29,6 +29,7 @@ class DepartmentLogOut(BaseModel):
     delay_reason_at: Optional[datetime]
     operator_name: Optional[str] = None   
     under_whom: Optional[str] = None
+    machine: Optional[str] = None 
 
     model_config = {"from_attributes": True}
 
@@ -50,6 +51,9 @@ class JobCardOut(BaseModel):
     laminate_type: Optional[str]
     bind_rexing_no: Optional[str]
     box_type: Optional[str]
+    payment_by: Optional[str] = None
+    payment_updated_at: Optional[datetime] = None
+    box_pouch_status: Optional[str] = None
 
     status_printing: str
     status_laminating: str
@@ -95,11 +99,7 @@ def _refresh_delays(job: JobCard, db: Session):
 def _out(job: JobCard, db: Session) -> JobCardOut:
     _refresh_delays(job, db)
 
-    completed_at = (
-        job.updated_at
-        if job.is_fully_completed
-        else None
-    )
+    completed_at = job.completed_at
 
     hours_since = (
         round(
