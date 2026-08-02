@@ -56,3 +56,5 @@ ngrok.log
 {backend/app,frontend/src/
 {backend/app,frontend/src/components,frontend/
 {backend/app,frontend/src/components,frontend/public}/
+
+frontend/dist/

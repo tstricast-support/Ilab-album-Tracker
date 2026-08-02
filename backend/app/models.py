@@ -64,10 +64,14 @@ class DepartmentEnum(str, enum.Enum):
     LASER_CUTTING = "LASER_CUTTING"
     BINDING       = "BINDING"
 
+class DamageDeptEnum(str, enum.Enum):
+    PRINTING   = "PRINTING"
+    LAMINATING = "LAMINATING"
+    BINDING    = "BINDING"
 
 TIMEOUT_MINUTES: dict[str, int] = {
-    "PRINTING":      75,
-    "LAMINATING":    60,
+    "PRINTING":     75,
+    "LAMINATING":    75,
     "LASER_CUTTING": 45,
     "BINDING":       90,
 }
@@ -109,12 +113,15 @@ PRESET_DELAY_REASONS: dict[str, list[str]] = {
     ],
 }
 
+PAPER_SIZES = ["9x13", "10x16", "12x16", "13x19"]
+LOW_STOCK_THRESHOLD = 5
 
 class JobCard(Base):
     __tablename__ = "job_cards"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
 
+    album_type = Column(String(16), nullable=True)  # NORMAL / STORY / REBIND
     job_no        = Column(String(64),  nullable=False, unique=True, index=True)
     customer      = Column(String(256), nullable=False)
     couple_name   = Column(String(256), nullable=True)
@@ -130,7 +137,7 @@ class JobCard(Base):
     laser_cover_type = Column(String(256), nullable=True)
     laminate_type    = Column(String(256), nullable=True)
     bind_rexing_no   = Column(String(128), nullable=True)
-    box_type         = Column(String(256), nullable=True)   # ← NEW
+    box_type         = Column(String(256), nullable=True)  
 
     payment_by         = Column(String(128), nullable=True)
     payment_updated_at = Column(DateTime,    nullable=True)
@@ -191,16 +198,162 @@ class DepartmentLog(Base):
             f"dept={self.department} delayed={self.is_delayed}>"
         )
 
+class PaperPrice(Base):
+    __tablename__ = "paper_prices"
+
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    label      = Column(String(64), nullable=False, unique=True)   # "9x13 One Side"
+    size       = Column(String(16), nullable=False)                # "9x13"
+    side_type  = Column(String(4),  nullable=False)                # "OS" / "DS"
+    unit_price = Column(Integer,    nullable=False, default=0)
+    updated_at = Column(DateTime,   nullable=False, default=datetime.utcnow,
+                         onupdate=datetime.utcnow)
+
+    def __repr__(self) -> str:
+        return f"<PaperPrice {self.label}: {self.unit_price}>"
+
+
+class DamageEntry(Base):
+    __tablename__ = "damage_entries"
+
+    id                  = Column(Integer, primary_key=True, autoincrement=True)
+    department          = Column(Enum(DamageDeptEnum), nullable=False)
+    paper_price_id      = Column(Integer, ForeignKey("paper_prices.id"), nullable=False)
+    job_no              = Column(String(64),  nullable=True)   # ADD
+    customer            = Column(String(256), nullable=True)   # ADD
+    operator_name       = Column(String(128), nullable=False)
+    reason              = Column(Text, nullable=False)
+    quantity            = Column(Integer, nullable=False)
+    unit_price_snapshot = Column(Integer, nullable=False)
+    total_value         = Column(Integer, nullable=False)
+
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow,
+                         onupdate=datetime.utcnow)
+
+    paper_price = relationship("PaperPrice")
+
+    def __repr__(self) -> str:
+        return f"<DamageEntry id={self.id} dept={self.department} qty={self.quantity}>"
+
+
+DEFAULT_PAPER_PRICES = [
+    ("9x13",  "OS", 125),
+    ("9x13",  "DS", 250),
+    ("10x16", "OS", 200),
+    ("10x16", "DS", 400),
+    ("12x16", "OS", 250),
+    ("12x16", "DS", 500),
+    ("13x16", "OS", 250),
+    ("13x16", "DS", 500),
+    ("13x19", "OS", 300),
+    ("13x19", "DS", 600),
+]
+
+SIDE_LABEL = {"OS": "One Side", "DS": "Double Side"}
+
+
+def seed_paper_prices():
+    db = SessionLocal()
+    try:
+        existing = {p.size + p.side_type for p in db.query(PaperPrice).all()}
+        for size, side, price in DEFAULT_PAPER_PRICES:
+            key = size + side
+            if key in existing:
+                continue
+            label = f"{size} {SIDE_LABEL[side]}"
+            db.add(PaperPrice(label=label, size=size, side_type=side, unit_price=price))
+        db.commit()
+    finally:
+        db.close()
+
+class PaperStock(Base):
+    __tablename__ = "paper_stock"
+
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    size       = Column(String(16), nullable=False, unique=True)
+    balance    = Column(Integer, nullable=False, default=0)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow,
+                         onupdate=datetime.utcnow)
+
+    def __repr__(self) -> str:
+        return f"<PaperStock {self.size}: {self.balance}>"
+
+
+class PaperPacketLog(Base):
+    __tablename__ = "paper_packet_logs"
+
+    id           = Column(Integer, primary_key=True, autoincrement=True)
+    size         = Column(String(16), nullable=False)
+    sheets_added = Column(Integer, nullable=False, default=100)
+    created_at   = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at   = Column(DateTime, nullable=False, default=datetime.utcnow,
+                           onupdate=datetime.utcnow)
+
+    def __repr__(self) -> str:
+        return f"<PaperPacketLog {self.size} +{self.sheets_added}>"
+
+
+class PaperUsageEntry(Base):
+    __tablename__ = "paper_usage_entries"
+
+    id            = Column(Integer, primary_key=True, autoincrement=True)
+    job_no        = Column(String(64),  nullable=False)
+    operator_name = Column(String(128), nullable=False)
+    paper_size    = Column(String(16),  nullable=False)
+    ok_pages      = Column(Integer, nullable=False, default=0)
+    print_damage  = Column(Integer, nullable=False, default=0)
+    accu_rp       = Column(Integer, nullable=False, default=0)
+    bind_rp       = Column(Integer, nullable=False, default=0)
+    total_used    = Column(Integer, nullable=False, default=0)
+
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow,
+                         onupdate=datetime.utcnow)
+
+    def __repr__(self) -> str:
+        return f"<PaperUsageEntry job={self.job_no} used={self.total_used}>"
+
+
+def seed_paper_stock():
+    db = SessionLocal()
+    try:
+        existing = {s.size for s in db.query(PaperStock).all()}
+        for size in PAPER_SIZES:
+            if size in existing:
+                continue
+            db.add(PaperStock(size=size, balance=0))
+        db.commit()
+    finally:
+        db.close()
+
 
 def init_db():
     Base.metadata.create_all(bind=engine)
+    seed_paper_prices()
+    seed_paper_stock()
 
 
 def run_migration():
-    from sqlalchemy import text
+    from sqlalchemy import text, inspect
 
-    # SQLite doesn't support the PostgreSQL syntax used below.
-    if db_url.startswith("sqlite"):#type: ignore
+    if db_url.startswith("sqlite"):  # type: ignore
+        inspector = inspect(engine)
+
+        job_cols = {c["name"] for c in inspector.get_columns("job_cards")}
+        with engine.connect() as conn:
+            if "album_type" not in job_cols:
+                conn.execute(text("ALTER TABLE job_cards ADD COLUMN album_type VARCHAR(16)"))
+                conn.commit()
+
+        damage_cols = {c["name"] for c in inspector.get_columns("damage_entries")}
+        with engine.connect() as conn:
+            if "job_no" not in damage_cols:
+                conn.execute(text("ALTER TABLE damage_entries ADD COLUMN job_no VARCHAR(64)"))
+                conn.commit()
+            if "customer" not in damage_cols:
+                conn.execute(text("ALTER TABLE damage_entries ADD COLUMN customer VARCHAR(256)"))
+                conn.commit()
         return
 
     with engine.connect() as conn:
@@ -260,6 +413,19 @@ def run_migration():
         conn.execute(text("""
             ALTER TABLE department_logs
             ADD COLUMN IF NOT EXISTS is_rebind BOOLEAN DEFAULT FALSE;
+        """))
+        conn.execute(text("""
+            ALTER TABLE job_cards
+            ADD COLUMN IF NOT EXISTS album_type VARCHAR(16);
+        """))
+        conn.execute(text("""
+            ALTER TABLE damage_entries
+            ADD COLUMN IF NOT EXISTS job_no VARCHAR(64);
+        """))
+
+        conn.execute(text("""
+            ALTER TABLE damage_entries
+            ADD COLUMN IF NOT EXISTS customer VARCHAR(256);
         """))
 
         conn.commit()

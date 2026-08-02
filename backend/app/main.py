@@ -25,6 +25,14 @@ from .models import (
     get_db,
     init_db,
     run_migration,
+    PaperPrice,          
+    DamageEntry,          
+    DamageDeptEnum,
+    PaperStock,          
+    PaperPacketLog,        
+    PaperUsageEntry,        
+    PAPER_SIZES,              
+    LOW_STOCK_THRESHOLD,
 )
 from .routers import history as history_router
 # from .routers import analytics as analytics_router
@@ -35,6 +43,11 @@ from .schemas import (
     _out,
     _str,
     _refresh_delays,
+    PaperPriceOut,     
+    DamageEntryOut,
+    PaperStockOut,          
+    PaperPacketLogOut,         
+    PaperUsageEntryOut, 
 )
 
 app = FastAPI(
@@ -159,7 +172,7 @@ def _close_log(job: JobCard, dept_enum: DepartmentEnum, db: Session):
         .first()
     )
     if log:
-        log.exited_at        = now #type:igoner
+        log.exited_at        = now #type:ignore
         minutes              = math.ceil((now - log.entered_at).total_seconds() / 60)
         log.duration_minutes = minutes
         log.is_delayed       = minutes > TIMEOUT_MINUTES.get(_str(dept_enum), 9999)
@@ -170,8 +183,8 @@ def _check_full_completion(job: JobCard, db: Session):
     laser_ok = _str(job.status_laser_cutting) in ("COMPLETED", "SKIPPED")
     bind_ok  = _str(job.status_binding)       == "COMPLETED"
     if lam_ok and laser_ok and bind_ok:
-        job.is_fully_completed = True #type:igoner
-        job.completed_at = datetime.utcnow()#type:igoner
+        job.is_fully_completed = True #type:ignore
+        job.completed_at = datetime.utcnow()#type:ignore
         db.commit()
 
 def _job_or_404(job_id: int, db: Session) -> JobCard:
@@ -194,7 +207,7 @@ def create_job(payload: JobCardCreate, db: Session = Depends(get_db)):
 
     has_laser    = bool(payload.laser_cover_type and payload.laser_cover_type.strip())
     laser_status = StageStatusEnum.PENDING if has_laser else StageStatusEnum.SKIPPED
-    payment_name = (payload.payment_by or "").strip() #type:ignore
+    payment_name = (payload.payment_by or "").strip() #type:ignore 
 
     job = JobCard(
         job_no           = payload.job_no,
@@ -235,11 +248,11 @@ def update_job(job_id: int, payload: JobCardUpdate, db: Session = Depends(get_db
     if in_production:
         raise HTTPException(403, "Job is already in production and cannot be edited.")
 
-    if (datetime.utcnow() - job.created_at) > timedelta(minutes=4):
+    if (datetime.utcnow() - job.created_at) > timedelta(minutes=4): #type:ignore 
         raise HTTPException(403, "Edit window has expired. Job can no longer be edited.")
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(job, field, value)
-    job.updated_at = datetime.utcnow()
+    job.updated_at = datetime.utcnow() #type:ignore 
     db.commit()
     db.refresh(job)
     return _out(job, db)
@@ -270,7 +283,7 @@ def delete_job(job_id: int, db: Session = Depends(get_db)):
     if in_production:
         raise HTTPException(403, "Job is already in production and cannot be deleted.")
 
-    if (datetime.utcnow() - job.created_at) > timedelta(minutes=4):#type: ignore
+    if (datetime.utcnow() - job.created_at) > timedelta(minutes=4):#type: ignore 
         raise HTTPException(403, "Edit window has expired. Job can no longer be deleted.")
 
     db.delete(job)
@@ -279,6 +292,246 @@ def delete_job(job_id: int, db: Session = Depends(get_db)):
 class PaymentUpdate(BaseModel):
     payment_by: str
 
+# ── Paper Prices ──────────────────────────────────────────────────────
+
+@app.get("/api/paper-prices", response_model=List[PaperPriceOut])
+def list_paper_prices(db: Session = Depends(get_db)):
+    rows = db.query(PaperPrice).order_by(PaperPrice.size, PaperPrice.side_type).all()
+    return rows
+
+
+class PaperPriceUpdate(BaseModel):
+    unit_price: int
+
+
+@app.patch("/api/paper-prices/{price_id}", response_model=PaperPriceOut)
+def update_paper_price(price_id: int, payload: PaperPriceUpdate, db: Session = Depends(get_db)):
+    row = db.query(PaperPrice).filter(PaperPrice.id == price_id).first()
+    if not row:
+        raise HTTPException(404, "Paper price not found")
+    if payload.unit_price < 0:
+        raise HTTPException(400, "Price cannot be negative")
+    row.unit_price = payload.unit_price #type:ignore
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+# ── Damage Entries ────────────────────────────────────────────────────
+
+DAMAGE_EDIT_WINDOW_HOURS = 24
+
+
+def _damage_out(entry: DamageEntry) -> DamageEntryOut:
+    return DamageEntryOut(
+        id=entry.id, #type:ignore 
+        department=_str(entry.department),
+        paper_price_id=entry.paper_price_id, #type:ignore 
+        paper_label=entry.paper_price.label if entry.paper_price else "—",
+        job_no=entry.job_no,#type:ignore 
+        customer=entry.customer,#type:ignore 
+        operator_name=entry.operator_name, #type:ignore 
+        reason=entry.reason, #type:ignore 
+        quantity=entry.quantity, #type:ignore  
+        unit_price_snapshot=entry.unit_price_snapshot, #type:ignore 
+        total_value=entry.total_value, #type:ignore 
+        created_at=entry.created_at, #type:ignore 
+        updated_at=entry.updated_at, #type:ignore 
+    )
+
+
+class DamageCreate(BaseModel):
+    department: str
+    paper_price_id: int
+    job_no: Optional[str] = None
+    customer: Optional[str] = None
+    operator_name: str
+    reason: str
+    quantity: int
+
+
+
+@app.post("/api/damages", response_model=DamageEntryOut, status_code=201)
+def create_damage(payload: DamageCreate, db: Session = Depends(get_db)):
+    dept = payload.department.upper()
+    if dept not in ("PRINTING", "LAMINATING", "BINDING"):
+        raise HTTPException(400, "department must be PRINTING, LAMINATING, or BINDING")
+    if payload.quantity <= 0:
+        raise HTTPException(400, "Quantity must be greater than 0")
+    if not payload.operator_name.strip():
+        raise HTTPException(400, "Operator name is required")
+    if not payload.reason.strip():
+        raise HTTPException(400, "Reason is required")
+
+    price = db.query(PaperPrice).filter(PaperPrice.id == payload.paper_price_id).first()
+    if not price:
+        raise HTTPException(404, "Paper price not found")
+
+    entry = DamageEntry(
+        department=DamageDeptEnum[dept],
+        paper_price_id=price.id,
+        job_no=(payload.job_no or "").strip() or None,
+        customer=(payload.customer or "").strip() or None,
+        operator_name=payload.operator_name.strip().title(),
+        reason=payload.reason.strip(),
+        quantity=payload.quantity,
+        unit_price_snapshot=price.unit_price,
+        total_value=price.unit_price * payload.quantity,
+    )
+
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+    return _damage_out(entry)
+
+
+@app.get("/api/damages", response_model=dict)
+def list_damages(
+    db: Session = Depends(get_db),
+    department: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+):
+    q = db.query(DamageEntry)
+    if department:
+        dept = department.upper()
+        if dept not in ("PRINTING", "LAMINATING", "BINDING"):
+            raise HTTPException(400, "Unknown department")
+        q = q.filter(DamageEntry.department == DamageDeptEnum[dept])
+
+    total = q.count()
+    rows = (
+        q.order_by(desc(DamageEntry.created_at))
+         .offset((page - 1) * page_size)
+         .limit(page_size)
+         .all()
+    )
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "pages": max(1, -(-total // page_size)),
+        "entries": [_damage_out(e).model_dump() for e in rows],
+    }
+
+
+class DamageUpdate(BaseModel):
+    paper_price_id: Optional[int] = None
+    job_no: Optional[str] = None
+    customer: Optional[str] = None
+    operator_name: Optional[str] = None
+    reason: Optional[str] = None
+    quantity: Optional[int] = None
+
+
+def _damage_or_404(damage_id: int, db: Session) -> DamageEntry:
+    entry = db.query(DamageEntry).filter(DamageEntry.id == damage_id).first()
+    if not entry:
+        raise HTTPException(404, f"Damage entry {damage_id} not found")
+    return entry
+
+
+def _check_damage_editable(entry: DamageEntry):
+    if (datetime.utcnow() - entry.created_at) > timedelta(hours=DAMAGE_EDIT_WINDOW_HOURS): #type:ignore 
+        raise HTTPException(403, "Edit window has expired. This entry can no longer be changed.")
+
+
+@app.patch("/api/damages/{damage_id}", response_model=DamageEntryOut)
+def update_damage(damage_id: int, payload: DamageUpdate, db: Session = Depends(get_db)):
+    entry = _damage_or_404(damage_id, db)
+    _check_damage_editable(entry)
+
+    if payload.paper_price_id is not None:
+        price = db.query(PaperPrice).filter(PaperPrice.id == payload.paper_price_id).first()
+        if not price:
+            raise HTTPException(404, "Paper price not found")
+        entry.paper_price_id = price.id
+        entry.unit_price_snapshot = price.unit_price
+
+    if payload.job_no is not None:
+        entry.job_no = payload.job_no.strip() or None #type:ignore
+
+    if payload.customer is not None:
+        entry.customer = payload.customer.strip() or None #type:ignore 
+
+    if payload.operator_name is not None:
+        if not payload.operator_name.strip():
+            raise HTTPException(400, "Operator name cannot be empty")
+        entry.operator_name = payload.operator_name.strip().title() #type:ignore
+
+    if payload.reason is not None:
+        if not payload.reason.strip():
+            raise HTTPException(400, "Reason cannot be empty")
+        entry.reason = payload.reason.strip() #type:ignore 
+
+    if payload.quantity is not None:
+        if payload.quantity <= 0:
+            raise HTTPException(400, "Quantity must be greater than 0")
+        entry.quantity = payload.quantity #type:ignore
+
+    entry.total_value = entry.unit_price_snapshot * entry.quantity #type:ignore
+    entry.updated_at = datetime.utcnow()  #type:ignore
+    db.refresh(entry)
+    return _damage_out(entry)
+
+
+@app.delete("/api/damages/{damage_id}", status_code=204)
+def delete_damage(damage_id: int, db: Session = Depends(get_db)):
+    entry = _damage_or_404(damage_id, db)
+    _check_damage_editable(entry)
+    db.delete(entry)
+    db.commit()
+
+
+@app.get("/api/damages/known-operators")
+def get_known_damage_operators(
+    department: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    dept = department.upper()
+    if dept not in ("PRINTING", "LAMINATING", "BINDING"):
+        raise HTTPException(400, "Unknown department")
+    rows = (
+        db.query(DamageEntry.operator_name)
+        .filter(DamageEntry.department == DamageDeptEnum[dept])
+        .distinct()
+        .all()
+    )
+    names = sorted({r[0].strip().title() for r in rows if r[0]})
+    return {"names": names}
+
+
+@app.get("/api/stats/damages")
+def damage_stats(db: Session = Depends(get_db)):
+    utc_now = datetime.utcnow()
+    sl_now  = utc_now + SL_TZ_OFFSET
+    day_start = datetime(sl_now.year, sl_now.month, sl_now.day) - SL_TZ_OFFSET
+    day_end   = day_start + timedelta(days=1)
+    month_start = datetime(sl_now.year, sl_now.month, 1) - SL_TZ_OFFSET
+    month_end   = (
+        datetime(sl_now.year + 1, 1, 1) if sl_now.month == 12
+        else datetime(sl_now.year, sl_now.month + 1, 1)
+    ) - SL_TZ_OFFSET
+
+    def summary_for(start, end):
+        q = db.query(DamageEntry).filter(
+            DamageEntry.created_at >= start, DamageEntry.created_at < end,
+        )
+        entries = q.all()
+        total_value = sum(e.total_value for e in entries)
+        total_qty   = sum(e.quantity for e in entries)
+        by_dept: dict[str, dict] = {}
+        for e in entries:
+            key = _str(e.department)
+            by_dept.setdefault(key, {"quantity": 0, "value": 0})
+            by_dept[key]["quantity"] += e.quantity
+            by_dept[key]["value"]    += e.total_value
+        return {"total_value": total_value, "total_quantity": total_qty, "by_department": by_dept}
+
+    return {
+        "monthly": summary_for(month_start, month_end),
+        "daily":   summary_for(day_start, day_end),
+    }
 
 @app.patch("/api/jobs/{job_id}/payment", response_model=JobCardOut)
 def update_payment(job_id: int, payload: PaymentUpdate, db: Session = Depends(get_db)):
@@ -288,8 +541,8 @@ def update_payment(job_id: int, payload: PaymentUpdate, db: Session = Depends(ge
         raise HTTPException(400, "Payment taken by cannot be empty.")
     # No production/time-window checks — payment can be recorded any time,
     # even after the job is fully completed.
-    job.payment_by = name.title()
-    job.payment_updated_at = datetime.utcnow()
+    job.payment_by = name.title() #type:ignore 
+    job.payment_updated_at = datetime.utcnow() #type:ignore 
     db.commit()
     db.refresh(job)
     return _out(job, db)
@@ -303,7 +556,7 @@ def update_box_pouch(job_id: int, payload: BoxPouchUpdate, db: Session = Depends
     status = payload.box_pouch_status.strip().upper()
     if status not in ("COMPLETE", "PROCESSING", "NOT_NEEDED"):
         raise HTTPException(400, "box_pouch_status must be COMPLETE, PROCESSING, or NOT_NEEDED")
-    job.box_pouch_status = status
+    job.box_pouch_status = status #type:ignore 
     db.commit()
     db.refresh(job)
     return _out(job, db)
@@ -319,6 +572,20 @@ def get_known_payment_names(db: Session = Depends(get_db)):
     )
     names = sorted({r[0].strip().title() for r in rows if r[0]})
     return {"names": names}
+
+class AlbumTypeUpdate(BaseModel):
+    album_type: str  # NORMAL / STORY / REBIND
+
+@app.patch("/api/jobs/{job_id}/album-type", response_model=JobCardOut)
+def update_album_type(job_id: int, payload: AlbumTypeUpdate, db: Session = Depends(get_db)):
+    job = _job_or_404(job_id, db)
+    val = payload.album_type.strip().upper()
+    if val not in ("NORMAL", "STORY", "REBIND"):
+        raise HTTPException(400, "album_type must be NORMAL, STORY, or REBIND")
+    job.album_type = val #type:ignore 
+    db.commit()
+    db.refresh(job)
+    return _out(job, db)
 
 
 @app.post("/api/jobs/{job_id}/advance/{department}", response_model=JobCardOut)
@@ -349,7 +616,7 @@ def advance(
             raise HTTPException(409, f"{dept} is {current}. Cannot start again.")
         
         if dept == "PRINTING" and not (body.machine or "").strip():
-            raise HTTPException(400, "Machine (Green 2 / Green 3) is required to start Printing.")
+            raise HTTPException(400, "Machine (Green 2 / Green 3 /Epson) is required to start Printing.")
         
         if dept == "LAMINATING" and not (body.operator_name or "").strip():
             raise HTTPException(400, "Accubind by is required to start Laminating.")
@@ -371,14 +638,14 @@ def advance(
                 .first()
             )
             if log:
-                log.operator_name = body.operator_name.strip().title() #type:ignore
+                log.operator_name = body.operator_name.strip().title() #type:ignore 
                 if dept == "PRINTING" and body.under_whom:
-                    log.under_whom = body.under_whom.strip().title() #type:ignore
+                    log.under_whom = body.under_whom.strip().title() #type:ignore 
                 if dept == "PRINTING" and body.machine:
-                    log.machine = body.machine.strip().upper() #type:ignore
+                    log.machine = body.machine.strip().upper() #type:ignore 
                 if dept == "PRINTING":                          
-                    log.is_story  = bool(body.is_story) #type:ignore         
-                    log.is_rebind = bool(body.is_rebind)#type:ignore
+                    log.is_story  = bool(body.is_story) #type:ignore          
+                    log.is_rebind = bool(body.is_rebind)#type:ignore 
                 
                 db.commit()
     elif action == "complete":
@@ -389,7 +656,7 @@ def advance(
             bp = (body.box_pouch_status or "").strip().upper()
             if bp not in ("COMPLETE", "PROCESSING", "NOT_NEEDED"):
                 raise HTTPException(400, "Please specify whether Box/Pouch is complete, still processing, or not needed.")
-            job.box_pouch_status = bp
+            job.box_pouch_status = bp #type:ignore 
 
         setattr(job, field, StageStatusEnum.COMPLETED)
         _close_log(job, dept_enum, db)
@@ -397,7 +664,7 @@ def advance(
     else:
         raise HTTPException(400, "action must be 'start' or 'complete'")
 
-    job.updated_at = datetime.utcnow()
+    job.updated_at = datetime.utcnow() #type:ignore 
     db.commit()
     db.refresh(job)
     return _out(job, db)
@@ -431,8 +698,8 @@ def set_delay_reason(
     if not log:
         raise HTTPException(404, f"No active log found for {dept} on job {job_id}.")
 
-    log.delay_reason    = body.reason.strip()
-    log.delay_reason_at = datetime.utcnow()
+    log.delay_reason    = body.reason.strip() #type:ignore 
+    log.delay_reason_at = datetime.utcnow() #type:ignore 
     db.commit()
     db.refresh(job)
     return _out(job, db)
@@ -652,10 +919,8 @@ def get_dept_stats(db: Session = Depends(get_db)):
 def printing_section_stats(db: Session = Depends(get_db)):
     utc_now = datetime.utcnow()
     sl_now  = utc_now + SL_TZ_OFFSET
-
     day_start = datetime(sl_now.year, sl_now.month, sl_now.day) - SL_TZ_OFFSET
     day_end   = day_start + timedelta(days=1)
-
     month_start = datetime(sl_now.year, sl_now.month, 1) - SL_TZ_OFFSET
     month_end   = (
         datetime(sl_now.year + 1, 1, 1) if sl_now.month == 12
@@ -663,33 +928,19 @@ def printing_section_stats(db: Session = Depends(get_db)):
     ) - SL_TZ_OFFSET
 
     def counts_for(start, end):
-        base_q = db.query(DepartmentLog).filter(
-            DepartmentLog.department == DepartmentEnum.PRINTING,
-            DepartmentLog.exited_at != None,
-            DepartmentLog.exited_at >= start,
-            DepartmentLog.exited_at <  end,
+        base_q = db.query(JobCard).filter(
+            JobCard.created_at >= start, JobCard.created_at < end,
         )
         raw_total = base_q.count()
-        story  = base_q.filter(
-            DepartmentLog.is_story  == True,    # noqa
-            DepartmentLog.is_rebind == False,   # noqa
-        ).count()
-        rebind = base_q.filter(DepartmentLog.is_rebind == True).count()   # noqa
+        story  = base_q.filter(JobCard.album_type == "STORY").count()
+        rebind = base_q.filter(JobCard.album_type == "REBIND").count()
         normal = base_q.filter(
-            DepartmentLog.is_story  == False,   # noqa
-            DepartmentLog.is_rebind == False,   # noqa
+            or_(JobCard.album_type == "NORMAL", JobCard.album_type.is_(None))
         ).count()
-        return {
-            "raw_total": raw_total,
-            "normal":    normal,
-            "story":     story,
-            "rebind":    rebind,
-        }
+        return {"raw_total": raw_total, "normal": normal, "story": story, "rebind": rebind}
 
-    return {
-        "monthly": counts_for(month_start, month_end),
-        "daily":   counts_for(day_start, day_end),
-    }
+    return {"monthly": counts_for(month_start, month_end), 
+            "daily": counts_for(day_start, day_end)}
 
 @app.get("/api/stats/operators")
 def operator_stats(
@@ -779,6 +1030,343 @@ def album_stats(
         ).scalar() or 0
     )
     return {"year": year, "month": month, "total": count}
+
+# ── Paper Stock Tracking ─────────────────────────────────────────────
+
+PAPER_EDIT_WINDOW_HOURS = 24
+
+
+def _paper_check_editable(created_at: datetime):
+    if (datetime.utcnow() - created_at) > timedelta(hours=PAPER_EDIT_WINDOW_HOURS):
+        raise HTTPException(403, "Edit window has expired. This entry can no longer be changed.")
+
+
+def _get_stock_or_404(size: str, db: Session) -> PaperStock:
+    stock = db.query(PaperStock).filter(PaperStock.size == size).first()
+    if not stock:
+        raise HTTPException(404, f"Unknown paper size: {size}")
+    return stock
+
+
+@app.get("/api/paper-stock", response_model=List[PaperStockOut])
+def list_paper_stock(db: Session = Depends(get_db)):
+    return db.query(PaperStock).order_by(PaperStock.size).all()
+
+
+class AddPacketRequest(BaseModel):
+    size: str
+
+
+@app.post("/api/paper-stock/add-packet", response_model=PaperStockOut, status_code=201)
+def add_paper_packet(payload: AddPacketRequest, db: Session = Depends(get_db)):
+    size = payload.size.strip()
+    if size not in PAPER_SIZES:
+        raise HTTPException(400, f"size must be one of {PAPER_SIZES}")
+
+    stock = _get_stock_or_404(size, db)
+    stock.balance += 100   #type:ignore
+    stock.updated_at = datetime.utcnow() #type:ignore
+
+    log = PaperPacketLog(size=size, sheets_added=100)
+    db.add(log)
+    db.commit()
+    db.refresh(stock)
+    return stock
+
+
+@app.get("/api/paper-packet-logs", response_model=dict)
+def list_packet_logs(
+    db: Session = Depends(get_db),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+):
+    q = db.query(PaperPacketLog)
+    total = q.count()
+    rows = (
+        q.order_by(desc(PaperPacketLog.created_at))
+         .offset((page - 1) * page_size)
+         .limit(page_size)
+         .all()
+    )
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "pages": max(1, -(-total // page_size)),
+        "logs": [PaperPacketLogOut.model_validate(r).model_dump() for r in rows],
+    }
+
+
+class PacketLogUpdate(BaseModel):
+    size: str
+
+
+@app.patch("/api/paper-packet-logs/{log_id}", response_model=PaperPacketLogOut)
+def update_packet_log(log_id: int, payload: PacketLogUpdate, db: Session = Depends(get_db)):
+    log = db.query(PaperPacketLog).filter(PaperPacketLog.id == log_id).first()
+    if not log:
+        raise HTTPException(404, "Packet log not found")
+    _paper_check_editable(log.created_at) #type:ignore
+
+    new_size = payload.size.strip()
+    if new_size not in PAPER_SIZES:
+        raise HTTPException(400, f"size must be one of {PAPER_SIZES}")
+
+    if new_size == log.size:
+        return log
+
+    old_stock = _get_stock_or_404(log.size, db) #type:ignore
+    new_stock = _get_stock_or_404(new_size, db)
+
+    if old_stock.balance - log.sheets_added < 0: #type:ignore
+        raise HTTPException(400, f"Cannot move packet: {log.size} balance would go negative.")
+
+    old_stock.balance -= log.sheets_added #type:ignore
+    new_stock.balance += log.sheets_added #type:ignore
+    old_stock.updated_at = datetime.utcnow() #type:ignore
+    new_stock.updated_at = datetime.utcnow() #type:ignore
+
+    log.size = new_size #type:ignore
+    log.updated_at = datetime.utcnow() #type:ignore
+    db.commit()
+    db.refresh(log)
+    return log
+
+
+@app.delete("/api/paper-packet-logs/{log_id}", status_code=204)
+def delete_packet_log(log_id: int, db: Session = Depends(get_db)):
+    log = db.query(PaperPacketLog).filter(PaperPacketLog.id == log_id).first()
+    if not log:
+        raise HTTPException(404, "Packet log not found")
+    _paper_check_editable(log.created_at) #type:ignore
+
+    stock = _get_stock_or_404(log.size, db)#type:ignore
+    if stock.balance - log.sheets_added < 0: #type:ignore 
+        raise HTTPException(400, f"Cannot delete: {log.size} balance would go negative.")
+
+    stock.balance -= log.sheets_added #type:ignore 
+    stock.updated_at = datetime.utcnow() #type:ignore
+    db.delete(log)
+    db.commit()
+
+
+class PaperUsageCreate(BaseModel):
+    job_no: str
+    operator_name: str
+    paper_size: str
+    ok_pages: int = 0
+    print_damage: int = 0
+    accu_rp: int = 0
+    bind_rp: int = 0
+
+
+@app.post("/api/paper-usage", response_model=PaperUsageEntryOut, status_code=201)
+def create_paper_usage(payload: PaperUsageCreate, db: Session = Depends(get_db)):
+    if not payload.job_no.strip():
+        raise HTTPException(400, "Job No is required")
+    if not payload.operator_name.strip():
+        raise HTTPException(400, "Operator name is required")
+
+    size = payload.paper_size.strip()
+    if size not in PAPER_SIZES:
+        raise HTTPException(400, f"paper_size must be one of {PAPER_SIZES}")
+
+    for field_name, val in [
+        ("ok_pages", payload.ok_pages), ("print_damage", payload.print_damage),
+        ("accu_rp", payload.accu_rp), ("bind_rp", payload.bind_rp),
+    ]:
+        if val < 0:
+            raise HTTPException(400, f"{field_name} cannot be negative")
+
+    total = payload.ok_pages + payload.print_damage + payload.accu_rp + payload.bind_rp
+    if total <= 0:
+        raise HTTPException(400, "Must record at least one sheet used")
+
+    stock = _get_stock_or_404(size, db)
+    if stock.balance - total < 0: #type:ignore 
+        raise HTTPException(400, f"Not enough paper. {size} balance is {stock.balance}, need {total}.")
+
+    stock.balance -= total #type:ignore 
+    stock.updated_at = datetime.utcnow() #type:ignore 
+
+    entry = PaperUsageEntry(
+        job_no=payload.job_no.strip(),
+        operator_name=payload.operator_name.strip().title(),
+        paper_size=size,
+        ok_pages=payload.ok_pages,
+        print_damage=payload.print_damage,
+        accu_rp=payload.accu_rp,
+        bind_rp=payload.bind_rp,
+        total_used=total,
+    )
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+    return entry
+
+
+@app.get("/api/paper-usage", response_model=dict)
+def list_paper_usage(
+    db: Session = Depends(get_db),
+    search: Optional[str] = Query(None, description="job_no / operator_name"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+):
+    q = db.query(PaperUsageEntry)
+    if search and search.strip():
+        term = f"%{search.strip()}%"
+        q = q.filter(or_(
+            PaperUsageEntry.job_no.ilike(term),
+            PaperUsageEntry.operator_name.ilike(term),
+        ))
+
+    total = q.count()
+    rows = (
+        q.order_by(desc(PaperUsageEntry.created_at))
+         .offset((page - 1) * page_size)
+         .limit(page_size)
+         .all()
+    )
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "pages": max(1, -(-total // page_size)),
+        "entries": [PaperUsageEntryOut.model_validate(r).model_dump() for r in rows],
+    }
+
+
+class PaperUsageUpdate(BaseModel):
+    job_no: Optional[str] = None
+    operator_name: Optional[str] = None
+    paper_size: Optional[str] = None
+    ok_pages: Optional[int] = None
+    print_damage: Optional[int] = None
+    accu_rp: Optional[int] = None
+    bind_rp: Optional[int] = None
+
+
+@app.patch("/api/paper-usage/{entry_id}", response_model=PaperUsageEntryOut)
+def update_paper_usage(entry_id: int, payload: PaperUsageUpdate, db: Session = Depends(get_db)):
+    entry = db.query(PaperUsageEntry).filter(PaperUsageEntry.id == entry_id).first()
+    if not entry:
+        raise HTTPException(404, "Paper usage entry not found")
+    _paper_check_editable(entry.created_at) #type:ignore
+
+    new_size = (payload.paper_size or entry.paper_size).strip()
+    if new_size not in PAPER_SIZES:
+        raise HTTPException(400, f"paper_size must be one of {PAPER_SIZES}")
+
+    new_ok     = payload.ok_pages     if payload.ok_pages     is not None else entry.ok_pages
+    new_print  = payload.print_damage if payload.print_damage is not None else entry.print_damage
+    new_accu   = payload.accu_rp      if payload.accu_rp      is not None else entry.accu_rp
+    new_bind   = payload.bind_rp      if payload.bind_rp      is not None else entry.bind_rp
+
+    for field_name, val in [("ok_pages", new_ok), ("print_damage", new_print), ("accu_rp", new_accu), ("bind_rp", new_bind)]:
+        if val < 0: #type:ignore 
+            raise HTTPException(400, f"{field_name} cannot be negative")
+
+    new_total = new_ok + new_print + new_accu + new_bind
+    if new_total <= 0: #type:ignore 
+        raise HTTPException(400, "Must record at least one sheet used")
+
+    old_stock = _get_stock_or_404(entry.paper_size, db) #type:ignore 
+    new_stock = _get_stock_or_404(new_size, db)
+
+    if new_size == entry.paper_size:
+        # same size — just adjust the delta
+        projected = old_stock.balance + entry.total_used - new_total
+        if projected < 0: #type:ignore 
+            raise HTTPException(400, f"Not enough paper. {new_size} balance would go negative.")
+        old_stock.balance = projected  #type:ignore 
+        old_stock.updated_at = datetime.utcnow() #type:ignore 
+    else:
+        # moved to a different size — refund old, deduct new
+        refunded_old = old_stock.balance + entry.total_used
+        if refunded_old < 0: #type:ignore 
+            raise HTTPException(400, f"Cannot move entry: {entry.paper_size} balance would go negative.")
+        projected_new = new_stock.balance - new_total
+        if projected_new < 0: #type:ignore 
+            raise HTTPException(400, f"Not enough paper. {new_size} balance is {new_stock.balance}, need {new_total}.")
+        old_stock.balance = refunded_old #type:ignore
+        new_stock.balance = projected_new #type:ignore
+        old_stock.updated_at = datetime.utcnow() #type:ignore
+        new_stock.updated_at = datetime.utcnow() #type:ignore 
+
+    if payload.job_no is not None:
+        if not payload.job_no.strip():
+            raise HTTPException(400, "Job No cannot be empty")
+        entry.job_no = payload.job_no.strip() #type:ignore
+
+    if payload.operator_name is not None:
+        if not payload.operator_name.strip():
+            raise HTTPException(400, "Operator name cannot be empty")
+        entry.operator_name = payload.operator_name.strip().title() #type:ignore 
+
+    entry.paper_size   = new_size #type:ignore 
+    entry.ok_pages     = new_ok #type:ignore 
+    entry.print_damage = new_print #type:ignore
+    entry.accu_rp      = new_accu #type:ignore
+    entry.bind_rp      = new_bind #type:ignore
+    entry.total_used   = new_total #type:ignore
+    entry.updated_at   = datetime.utcnow() #type:ignore
+
+    db.commit()
+    db.refresh(entry)
+    return entry
+
+
+@app.delete("/api/paper-usage/{entry_id}", status_code=204)
+def delete_paper_usage(entry_id: int, db: Session = Depends(get_db)):
+    entry = db.query(PaperUsageEntry).filter(PaperUsageEntry.id == entry_id).first()
+    if not entry:
+        raise HTTPException(404, "Paper usage entry not found")
+    _paper_check_editable(entry.created_at) #type:ignore
+
+    stock = _get_stock_or_404(entry.paper_size, db) #type:ignore
+    stock.balance += entry.total_used #type:ignore
+    stock.updated_at = datetime.utcnow() #type:ignore
+
+    db.delete(entry)
+    db.commit()
+
+
+@app.get("/api/paper-usage/known-operators")
+def known_paper_operators(db: Session = Depends(get_db)):
+    rows = db.query(PaperUsageEntry.operator_name).distinct().all()
+    names = sorted({r[0].strip().title() for r in rows if r[0]})
+    return {"names": names}
+
+
+@app.get("/api/stats/paper-stock")
+def paper_stock_stats(db: Session = Depends(get_db)):
+    utc_now = datetime.utcnow()
+    sl_now  = utc_now + SL_TZ_OFFSET
+    month_start = datetime(sl_now.year, sl_now.month, 1) - SL_TZ_OFFSET
+    month_end   = (
+        datetime(sl_now.year + 1, 1, 1) if sl_now.month == 12
+        else datetime(sl_now.year, sl_now.month + 1, 1)
+    ) - SL_TZ_OFFSET
+
+    stocks = db.query(PaperStock).order_by(PaperStock.size).all()
+    balances = {s.size: s.balance for s in stocks}
+    low_stock = [s.size for s in stocks if s.balance <= LOW_STOCK_THRESHOLD] #type:ignore
+
+    monthly_rows = (
+        db.query(PaperUsageEntry)
+        .filter(PaperUsageEntry.created_at >= month_start, PaperUsageEntry.created_at < month_end)
+        .all()
+    )
+    monthly_used: dict[str, int] = {size: 0 for size in PAPER_SIZES}
+    for e in monthly_rows:
+        monthly_used[e.paper_size] = monthly_used.get(e.paper_size, 0) + e.total_used
+
+    return {
+        "balances": balances,
+        "low_stock_sizes": low_stock,
+        "low_stock_threshold": LOW_STOCK_THRESHOLD,
+        "monthly_used": monthly_used,
+    }
 
 @app.get("/api/health")
 def health():

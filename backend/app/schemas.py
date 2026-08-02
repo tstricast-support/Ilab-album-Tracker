@@ -38,6 +38,7 @@ class JobCardOut(BaseModel):
     id: int
     job_no: str
     customer: str
+    album_type: Optional[str] = None
     couple_name: Optional[str]
     order_no: Optional[str]
     order_date: datetime
@@ -73,7 +74,68 @@ class JobCardOut(BaseModel):
 
     model_config = {"from_attributes": True}
 
+class PaperPriceOut(BaseModel):
+    id: int
+    label: str
+    size: str
+    side_type: str
+    unit_price: int
+    updated_at: datetime
 
+    model_config = {"from_attributes": True}
+
+
+class DamageEntryOut(BaseModel):
+    id: int
+    department: str
+    paper_price_id: int
+    paper_label: str
+    job_no: Optional[str] = None
+    customer: Optional[str] = None
+    operator_name: str
+    reason: str
+    quantity: int
+    unit_price_snapshot: int
+    total_value: int
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class PaperStockOut(BaseModel):
+    id: int
+    size: str
+    balance: int
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class PaperPacketLogOut(BaseModel):
+    id: int
+    size: str
+    sheets_added: int
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class PaperUsageEntryOut(BaseModel):
+    id: int
+    job_no: str
+    operator_name: str
+    paper_size: str
+    ok_pages: int
+    print_damage: int
+    accu_rp: int
+    bind_rp: int
+    total_used: int
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}    
 # ── Helpers ─────────────────────────────────────────
 
 def _str(val) -> str:
@@ -108,7 +170,7 @@ def _out(job: JobCard, db: Session) -> JobCardOut:
             ).total_seconds() / 3600,
             2,
         )
-        if completed_at
+        if completed_at #type: ignore
         else None
     )
 

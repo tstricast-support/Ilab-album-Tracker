@@ -11,30 +11,72 @@
     --radius-lg: 12px;
 }
 
-/* ── i Lab dark theme variables (used by App.jsx) ── */
+/* ── Default (Dark) theme — overridden at runtime by applyThemeToDocument ── */
 :root {
+    /* Core surfaces */
     --bg0:       #0a0a0a;
     --bg1:       #111111;
     --bg2:       #1a1a1a;
     --bg3:       #242424;
     --border:    #2e2e2e;
+    --border-strong: #ffffff33;
+
+    /* Text */
+    --text-pri:  #f0f0f0;
+    --text-sec:  #d0d0d0;
+    --text-dim:  #ffffff;
+    --muted:     #666666;
+
+    /* Accent */
     --amber:     #f5a623;
+    --amber-2:   #f59e0b;
+    --on-accent: #0a0a0a;
+    --on-surface: #f0f0f0;
+
+    /* Status colors */
+    --green:     #0ce65c;
     --red:       #e53e3e;
-    --green:     #38a169;
     --blue:      #3b82f6;
     --cyan:      #06b6d4;
     --purple:    #a855f7;
-    --text-pri:  #f0f0f0;
-    --text-sec:  #d0d0d0;
-    --text-dim:  #888888;
-    --muted:     #666666;
+    --on-green:  #0a0a0a;
+    --on-red:    #0a0a0a;
+
+    /* Sunken panels (inner boxes inside cards — was hardcoded #000/#0a0a1a etc) */
+    --surface-sunken:        #000000;
+    --surface-sunken-border: #ffffff33;
+
+    /* Semantic status panels (badges/alerts — was hardcoded #2a0000, #001a00 etc) */
+    --danger-bg:     #2a0000;
+    --danger-border: #6a2a00;
+    --danger-text:   #ff9060;
+
+    --success-bg:     #001a00;
+    --success-border: #1a4a1a;
+    --success-text:   #6aaa6a;
+
+    --warn-bg:     #1a1200;
+    --warn-border: #4a3800;
+    --warn-text:   #f5ecd0;
+
+    --info-bg:     #0a0a1a;
+    --info-border: #06b6d455;
+    --info-text:   #7fd4ff;
+
+    /* Fonts */
     --fd:        'Courier New', monospace;
     --fm:        'Courier New', monospace;
+    --font-body: 'Courier New', monospace;
+    --font-size-base: 14px;
     --background: var(--bg0);
     --foreground: var(--text-pri);
+
+    --card-bg:        #1c1c1eE0;
+    --card-inner-bg:  #000000;
+    --overlay:        rgba(0,0,0,.8);
+    --title-shadow: 2px 2px 4px rgba(0,0,0,0.9);
 }
 
-/* ── Reset & base ── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
@@ -43,9 +85,9 @@ body {
     font-family: system-ui, -apple-system, sans-serif;
     font-size: 14px;
     line-height: 1.5;
+    font-variant-numeric: tabular-nums;
 }
 
-/* ── Buttons ── */
 button {
     cursor: pointer;
     border: none;
@@ -57,7 +99,6 @@ button {
 button:hover:not(:disabled) { opacity: 0.85; }
 button:disabled { cursor: not-allowed; }
 
-/* ── Inputs / selects / textareas ── */
 input, select, textarea {
     width: 100%;
     background: var(--bg1);
@@ -72,97 +113,51 @@ input, select, textarea {
     display: block;
     margin-top: 5px;
 }
-input:focus, select:focus, textarea:focus {
-    border-color: var(--amber);
-}
-input::placeholder, textarea::placeholder {
-    color: #606060;
-}
-textarea {
-    resize: vertical;
-    min-height: 80px;
-}
-select {
-    appearance: none;
-    cursor: pointer;
-}
+input:focus, select:focus, textarea:focus { border-color: var(--amber); }
+input::placeholder, textarea::placeholder { color: var(--text-dim); }
+textarea { resize: vertical; min-height: 80px; }
+select { appearance: none; cursor: pointer; }
 
-/* ── Labels ── */
 label {
     display: block;
     font-size: 11px;
     font-weight: 600;
     letter-spacing: .08em;
     text-transform: uppercase;
-    color: #dddddd;
+    color: var(--text-sec);
     margin-bottom: 2px;
 }
 
-/* ── Grid helpers ── */
 .g2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .g3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
-@media (max-width: 640px) {
-    .g2, .g3 { grid-template-columns: 1fr; }
-}
+@media (max-width: 640px) { .g2, .g3 { grid-template-columns: 1fr; } }
 
-/* ── Pills ── */
-.pill {
-    display: inline-flex;
-    align-items: center;
-    padding: 2px 8px;
-    border-radius: 20px;
-    font-size: 10px;
-    font-weight: 800;
-    letter-spacing: .07em;
-}
+.pill { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 20px; font-size: 10px; font-weight: 800; letter-spacing: .07em; }
 
-/* ── Slide-in animation ── */
-.si {
-    animation: slideIn 0.18s ease;
-}
-@keyframes slideIn {
-    from { opacity: 0; transform: translateY(6px); }
-    to   { opacity: 1; transform: translateY(0); }
-}
+.si { animation: slideIn 0.18s ease; }
+@keyframes slideIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 
-/* ── Blink ── */
 .blink { animation: blink 1s step-start infinite; }
 @keyframes blink { 50% { opacity: 0; } }
 
-/* ── Pulse ── */
 .pulse { animation: pulse 2s ease-in-out infinite; }
-@keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50%       { opacity: 0.7; }
-}
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
 
-/* ── Delayed card border ── */
-.card-delayed {
-    border-color: var(--red) !important;
-    box-shadow: 0 0 12px rgba(229,62,62,.15);
-}
+.card-delayed { border-color: var(--red) !important; box-shadow: 0 0 12px rgba(229,62,62,.15); }
 
-/* ── Scrollbar ── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: var(--bg1); }
 ::-webkit-scrollbar-thumb { background: var(--bg3); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
 
-/* Change calendar icon color to white */
 input[type="date"]::-webkit-calendar-picker-indicator {
-  filter: invert(1);
+  filter: invert(var(--date-icon-invert, 1));
   cursor: pointer;
 }
 
 @keyframes delayedCardBlink {
-  0%, 100% {
-    background: #444343e0;
-  }
-  50% {
-    background: #5a0000;
-  }
+  0%, 100% { background: var(--bg3); }
+  50%      { background: var(--danger-bg); }
 }
+.delayed-card { animation: delayedCardBlink 1s infinite; }
 
-.delayed-card {
-  animation: delayedCardBlink 1s infinite;
-}

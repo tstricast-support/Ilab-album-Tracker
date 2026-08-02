@@ -1,7 +1,9 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-import { API_BASE, POLL_INTERVAL_MS, APP_NAME,MACHINES  } from "./config.js";
-import {ArrowRight, Calendar,Pen,SquareX, Trash,Printer,TriangleAlert,Flame,Activity, Speech, Scissors,BookOpen,Plus, Timer,ChevronDown ,Search}from "lucide-react";
+import { useState, useEffect, useCallback, useRef,createContext, useContext } from "react";
+import { API_BASE, POLL_INTERVAL_MS, APP_NAME,MACHINES,ALBUM_TYPES,DAMAGE_DEPTS, PAPER_SIZES, LOW_STOCK_THRESHOLD} from "./config.js";
+import {ArrowRight, Calendar,Pen,SquareX, Trash,Printer,TriangleAlert,Flame,Activity, Speech, Scissors,BookOpen,Plus, Timer,ChevronDown ,Search,Palette}from "lucide-react";
 import logo from "./assets/logo.jpg";
+import "./index.css";
+
 
 // ── API ───────────────────────────────────────────────────────────────────────
 async function apiFetch(path, opts = {}) {
@@ -40,16 +42,52 @@ const api = {
   }),
   knownPaymentNames: () => apiFetch(`/api/payment/known-names`),  analytics:     (from, to)     => apiFetch(`/api/analytics?from=${from}&to=${to}`),
   stationHistory: (dept, search = "", page = 1) =>
-  apiFetch(`/api/station/${dept}/history?search=${encodeURIComponent(search)}&page=${page}&page_size=15`),
-
+    apiFetch(`/api/station/${dept}/history?search=${encodeURIComponent(search)}&page=${page}&page_size=15`),
+  
   updateBoxPouch: (id, status) => apiFetch(`/api/jobs/${id}/box-pouch`, {
-  method: "PATCH", body: JSON.stringify({ box_pouch_status: status }),
-}),
+    method: "PATCH", body: JSON.stringify({ box_pouch_status: status }),
+  }),
+  setAlbumType: (id, album_type) => apiFetch(`/api/jobs/${id}/album-type`, {
+  method: "PATCH", body: JSON.stringify({ album_type }),
+  }),
+  paperPrices: () => apiFetch(`/api/paper-prices`),
+  updatePaperPrice: (id, unit_price) => apiFetch(`/api/paper-prices/${id}`, {
+    method: "PATCH", body: JSON.stringify({ unit_price }),
+  }),
+  createDamage: (body) => apiFetch(`/api/damages`, { method: "POST", body: JSON.stringify(body) }),
+  damages: (department, page = 1) => apiFetch(`/api/damages?${department ? `department=${department}&` : ""}page=${page}&page_size=20`),
+  updateDamage: (id, body) => apiFetch(`/api/damages/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteDamage: (id) => apiFetch(`/api/damages/${id}`, { method: "DELETE" }),
+  knownDamageOperators: (department) => apiFetch(`/api/damages/known-operators?department=${department}`),
+  damageStats: () => apiFetch(`/api/stats/damages`),
+
+  paperStock: () => apiFetch(`/api/paper-stock`),
+  addPaperPacket: (size) => apiFetch(`/api/paper-stock/add-packet`, {
+    method: "POST", body: JSON.stringify({ size }),
+  }),
+  paperPacketLogs: (page = 1) => apiFetch(`/api/paper-packet-logs?page=${page}&page_size=20`),
+  updatePacketLog: (id, size) => apiFetch(`/api/paper-packet-logs/${id}`, {
+    method: "PATCH", body: JSON.stringify({ size }),
+  }),
+  deletePacketLog: (id) => apiFetch(`/api/paper-packet-logs/${id}`, { method: "DELETE" }),
+  createPaperUsage: (body) => apiFetch(`/api/paper-usage`, { method: "POST", body: JSON.stringify(body) }),
+  paperUsage: (search = "", page = 1) =>
+    apiFetch(`/api/paper-usage?search=${encodeURIComponent(search)}&page=${page}&page_size=20`),
+  updatePaperUsage: (id, body) => apiFetch(`/api/paper-usage/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deletePaperUsage: (id) => apiFetch(`/api/paper-usage/${id}`, { method: "DELETE" }),
+  knownPaperOperators: () => apiFetch(`/api/paper-usage/known-operators`),
+  paperStockStats: () => apiFetch(`/api/stats/paper-stock`),
 };
 
 function parseUTC(s) {
   if (!s) return null;
   return new Date(s.endsWith("Z") ? s : s + "Z");
+}
+
+function setIfChanged(setter) {
+  return (newData) => setter(prev =>
+    JSON.stringify(prev) === JSON.stringify(newData) ? prev : newData
+  );
 }
 
 // ── Role management ───────────────────────────────────────────────────────────
@@ -85,6 +123,299 @@ function getDeptLabel() {
   return map[ROLE] || "Station";
 }
 
+// ── Appearance / Theme customization ──────────────────────────────────────────
+const THEME_STORAGE_KEY = `ilab-theme:${ROLE}`;
+
+const DEFAULT_THEME = {
+  name: "dark",
+  bg0: "#0a0a0a", bg1: "#111111", bg2: "#1a1a1a", bg3: "#242424",
+  border: "#4d4d4d", borderStrong: "#ffffff33",
+  textPri: "#f0f0f0", textSec: "#e2e1e1", textDim: "#b3b3b3",
+  accent: "#f5a623",
+  font: "Aptos, \"Segoe UI\", Arial, sans-serif",
+  fontSize: "14",
+  process:"#101501",
+  cardBg: "#1c1c1eE0",
+  cardInnerBg: "#000000",
+  overlay: "rgba(0,0,0,.8)",
+
+  green: "#22c55e", red: "#e53e3e", amber2: "#f59e0b",
+  blue: "#3b82f6", cyan: "#06b6d4", purple: "#a855f7",
+
+  surfaceSunken: "#000000", surfaceSunkenBorder: "#ffffff33",
+  dangerBg: "#2a0000", dangerBorder: "#6a2a00", dangerText: "#ff9060",
+  successBg: "#001a00", successBorder: "#1a4a1a", successText: "#6aaa6a",
+  warnBg: "#1a1200", warnBorder: "#4a3800", warnText: "#f5ecd0",
+  infoBg: "#0a0a1a", infoBorder: "#06b6d455", infoText: "#7fd4ff",
+  dateIconInvert: "1",
+  titleShadow: "var(--title-shadow)",
+};
+
+const LIGHT_THEME = {
+  name: "light",
+  bg0: "#cfcece", bg1: "#aaa8a8", bg2: "#e6e6e6", bg3: "#d4d4d4",
+  border: "#b8b8b8", borderStrong: "#00000026",
+  textPri: "#000000", textSec: "#1a1a1a", textDim: "#4a4a4a",
+  accent: "#052c80",
+  font: "Aptos, \"Segoe UI\", Arial, sans-serif",
+  fontSize: "14",
+
+  cardBg: "#9c9898",
+  cardInnerBg: "#645f5f",
+  overlay: "rgba(0,0,0,.45)",
+  process:"#92913d",
+
+  green: "#12e45f", red: "#dc2626", amber2: "#d97706",
+  blue: "#2563eb", cyan: "#0891b2", purple: "#7c3aed",
+
+  surfaceSunken: "#e6e6e6", surfaceSunkenBorder: "#00000022",
+  dangerBg: "#f79696", dangerBorder: "#f09d9d", dangerText: "#b91c1c",
+  successBg: "#e8f7ec", successBorder: "#a9e6bb", successText: "#15803d",
+  warnBg: "#fff6df", warnBorder: "#f0d68a", warnText: "#7a4e00",
+  infoBg: "#e6f0ff", infoBorder: "#9fc4fb", infoText: "#1d4ed8",
+  dateIconInvert: "0",
+  titleShadow: "none",
+};
+
+function getContrastText(hex) {
+  if (!hex) return "var(--surface-sunken)";
+  let c = hex.replace("#", "");
+  if (c.length === 3) c = c.split("").map(ch => ch + ch).join("");
+  if (c.length !== 6) return "var(--surface-sunken)";
+  const r = parseInt(c.substr(0, 2), 16), g = parseInt(c.substr(2, 2), 16), b = parseInt(c.substr(4, 2), 16);
+  const yiq = (r * 299 + g * 587 + b * 114) / 1000;
+  return yiq >= 150 ? "#0a0a0a" : "#f5f5f5";
+}
+
+const THEME_PRESETS = [
+  { name: "Default Dark", accentPreview: "#f5a623", theme: { ...DEFAULT_THEME } },
+  { name: "Light",        accentPreview: "#2563eb", theme: { ...LIGHT_THEME } },
+];
+
+const FONT_OPTIONS = [
+  { label: "Monospace (Classic)",   value: "'Courier New', monospace" },
+  { label: "Sans Serif (Clean)",    value: "system-ui, -apple-system, sans-serif" },
+  { label: "Serif (Elegant)",       value: "Georgia, 'Times New Roman', serif" },
+  { label: "Rounded (Soft)",        value: "'Trebuchet MS', Verdana, sans-serif" },
+  { label: "Segoe (Modern)",        value: "'Segoe UI', Tahoma, sans-serif" },
+  { label: "Tahoma (Compact)",      value: "Tahoma, Geneva, sans-serif" },
+  { label: "Verdana (Wide)",        value: "Verdana, Geneva, sans-serif" },
+  { label: "Condensed (Technical)", value: "'Arial Narrow', Arial, sans-serif" },
+  { label: "Impact (Bold Display)", value: "Impact, 'Arial Black', sans-serif" },
+];
+
+const FONT_SIZE_OPTIONS = [
+  { label: "Small",  value: "13" },
+  { label: "Medium (Default)", value: "14" },
+  { label: "Large",  value: "15" },
+  { label: "Extra Large", value: "16" },
+];
+
+function loadTheme() {
+  try {
+    const raw = localStorage.getItem(THEME_STORAGE_KEY);
+    if (raw) return { ...DEFAULT_THEME, ...JSON.parse(raw) };
+  } catch {}
+  return { ...DEFAULT_THEME };
+}
+
+function applyThemeToDocument(theme) {
+  const r = document.documentElement.style;
+  r.setProperty("--bg0", theme.bg0);
+  r.setProperty("--bg1", theme.bg1);
+  r.setProperty("--bg2", theme.bg2);
+  r.setProperty("--bg3", theme.bg3);
+  r.setProperty("--border", theme.border);
+  r.setProperty("--border-strong", theme.borderStrong);
+  r.setProperty("--text-pri", theme.textPri);
+  r.setProperty("--text-sec", theme.textSec);
+  r.setProperty("--text-dim", theme.textDim);
+  r.setProperty("--amber", theme.accent);
+  r.setProperty("--fd", theme.font);
+  r.setProperty("--process", theme.process);
+  r.setProperty("--fm", theme.font);
+  r.setProperty("--font-body", theme.font);
+  r.setProperty("--font-size-base", `${theme.fontSize || "14"}px`);
+  r.setProperty("--background", theme.bg0);
+  r.setProperty("--foreground", theme.textPri);
+  r.setProperty("--on-accent", getContrastText(theme.accent));
+  r.setProperty("--on-surface", getContrastText(theme.bg3));
+
+  r.setProperty("--card-bg", theme.cardBg);
+  r.setProperty("--card-inner-bg", theme.cardInnerBg);
+  r.setProperty("--overlay", theme.overlay);
+
+  r.setProperty("--green", theme.green);
+  r.setProperty("--red", theme.red);
+  r.setProperty("--amber-2", theme.amber2);
+  r.setProperty("--blue", theme.blue);
+  r.setProperty("--cyan", theme.cyan);
+  r.setProperty("--purple", theme.purple);
+  r.setProperty("--on-green", getContrastText(theme.green));
+  r.setProperty("--on-red", getContrastText(theme.red));
+
+  r.setProperty("--surface-sunken", theme.surfaceSunken);
+  r.setProperty("--surface-sunken-border", theme.surfaceSunkenBorder);
+  r.setProperty("--danger-bg", theme.dangerBg);
+  r.setProperty("--danger-border", theme.dangerBorder);
+  r.setProperty("--danger-text", theme.dangerText);
+  r.setProperty("--success-bg", theme.successBg);
+  r.setProperty("--success-border", theme.successBorder);
+  r.setProperty("--success-text", theme.successText);
+  r.setProperty("--warn-bg", theme.warnBg);
+  r.setProperty("--warn-border", theme.warnBorder);
+  r.setProperty("--warn-text", theme.warnText);
+  r.setProperty("--info-bg", theme.infoBg);
+  r.setProperty("--info-border", theme.infoBorder);
+  r.setProperty("--info-text", theme.infoText);
+  r.setProperty("--date-icon-invert", theme.dateIconInvert);
+  r.setProperty("--title-shadow", theme.titleShadow);
+}
+
+const AppearanceContext = createContext(null);
+
+function AppearanceProvider({ children }) {
+  const [theme, setTheme] = useState(loadTheme);
+  useEffect(() => { applyThemeToDocument(theme); }, [theme]);
+
+  const updateTheme = useCallback((patch) => {
+    setTheme(prev => {
+      const next = { ...prev, ...patch };
+      try { localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }, []);
+
+  const resetTheme = useCallback(() => {
+    try { localStorage.removeItem(THEME_STORAGE_KEY); } catch {}
+    setTheme({ ...DEFAULT_THEME });
+  }, []);
+
+  return (
+    <AppearanceContext.Provider value={{ theme, updateTheme, resetTheme }}>
+      {children}
+    </AppearanceContext.Provider>
+  );
+}
+
+function useAppearance() {
+  const ctx = useContext(AppearanceContext);
+  if (!ctx) throw new Error("useAppearance must be used within AppearanceProvider");
+  return ctx;
+}
+
+function ColorField({ label, value, onChange }) {
+  return (
+    <div>
+      <label>{label}</label>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 5 }}>
+        <input type="color" value={value} onChange={e => onChange(e.target.value)} style={{ width: 42, height: 36, padding: 2, margin: 0, cursor: "pointer" }} />
+        <input type="text" value={value} onChange={e => onChange(e.target.value)} style={{ margin: 0 }} />
+      </div>
+    </div>
+  );
+}
+
+function AppearanceModal({ onClose }) {
+  const { theme, updateTheme, resetTheme } = useAppearance();
+  const isMobile = useIsMobile();
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "var(--overlay)", display: "flex", alignItems: isMobile ? "flex-end" : "center", justifyContent: "center", zIndex: 9500 }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: "var(--bg1)", border: "1px solid var(--border)",
+        borderRadius: isMobile ? "16px 16px 0 0" : 12, padding: 22,
+        width: "100%", maxWidth: 500, maxHeight: isMobile ? "92dvh" : "90vh", overflowY: "auto",
+        display: "flex", flexDirection: "column", gap: 16,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div>
+            <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".1em" }}>Appearance</div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: "var(--amber)" }}>Customize {getDeptLabel()} View</div>
+          </div>
+          <button onClick={onClose} style={{ padding: "8px 12px", background: "var(--bg3)", color: "var(--on-surface)", border: "1px solid var(--border)", borderRadius: 6, fontWeight: 700 }}>✕</button>
+        </div>
+
+        <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 8, padding: 14 }}>
+          <div style={{ fontSize: 10, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 8 }}>Live Preview</div>
+          <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 8, padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ fontFamily: "var(--fm)", fontSize: 15, fontWeight: 800, color: "var(--amber)" }}>JOB-0001</div>
+            <div style={{ fontFamily: "var(--font-body)", fontSize: "var(--font-size-base)", color: "var(--text-pri)" }}>Sample Customer Name</div>
+            <div style={{ fontSize: 12, color: "var(--text-sec)" }}>Secondary text example</div>
+            <button style={{ padding: "8px 14px", background: "var(--amber)", color: "var(--on-accent)", borderRadius: 6, fontWeight: 800, fontSize: 13, width: "fit-content" }}>Sample Button</button>
+          </div>
+        </div>
+
+        <div>
+          <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 8 }}>Quick Themes</div>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 8 }}>
+            {THEME_PRESETS.map(p => (
+              <button key={p.name} onClick={() => updateTheme(p.theme)} style={{
+                display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", borderRadius: 8,
+                background: p.theme.bg1, border: `1px solid ${p.theme.border}`, textAlign: "left",
+              }}>
+                <span style={{ width: 14, height: 14, borderRadius: "50%", background: p.accentPreview, flexShrink: 0 }} />
+                <span style={{ fontSize: 12, fontWeight: 700, color: p.theme.textPri }}>{p.name}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 8 }}>Custom Colors</div>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 12 }}>
+            <ColorField label="Page Background" value={theme.bg0}     onChange={v => updateTheme({ bg0: v, bg1: v })} />
+            <ColorField label="Card Background" value={theme.bg2}     onChange={v => updateTheme({ bg2: v, bg3: v })} />
+            <ColorField label="Border Color"    value={theme.border}  onChange={v => updateTheme({ border: v })} />
+            <ColorField label="Accent Color"    value={theme.accent}  onChange={v => updateTheme({ accent: v })} />
+            <ColorField label="Primary Text"    value={theme.textPri} onChange={v => updateTheme({ textPri: v })} />
+            <ColorField label="Secondary Text"  value={theme.textSec} onChange={v => updateTheme({ textSec: v })} />
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 12 }}>
+          <div>
+            <label>Font Style</label>
+            <select value={theme.font} onChange={e => updateTheme({ font: e.target.value })}>
+              {FONT_OPTIONS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label>Text Size</label>
+            <select value={theme.fontSize} onChange={e => updateTheme({ fontSize: e.target.value })}>
+              {FONT_SIZE_OPTIONS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={resetTheme} style={{ flex: 1, padding: "11px 0", background: "var(--bg3)", color: "var(--on-surface)", border: "1px solid var(--border)", borderRadius: 8, fontWeight: 700 }}>↺ Reset to Default</button>
+          <button onClick={onClose} style={{ flex: 1, padding: "11px 0", background: "var(--amber)", color: "var(--on-accent)", borderRadius: 8, fontWeight: 800 }}>✓ Done</button>
+        </div>
+        <div style={{ fontSize: 11, color: "var(--text-dim)", lineHeight: 1.5 }}>
+          Saved for this station/device only — won't affect other departments.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AppearanceButton({ isMobile }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button onClick={() => setOpen(true)} title="Appearance" style={{
+        padding: isMobile ? "6px 10px" : "8px 14px",
+        background: "var(--bg3)", color: "var(--text-sec)",
+        border: "1px solid var(--border)", borderRadius: 6, fontWeight: 700,
+        fontSize: isMobile ? 11 : 13, display: "flex", alignItems: "center", gap: 6,
+      }}>
+        <Palette size={14} /> {isMobile ? "" : "Appearance"}
+      </button>
+      {open && <AppearanceModal onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
 function slDateStr(date) {
   // Shift any Date into Sri Lanka's calendar day (UTC+5:30), regardless
   // of what timezone the viewing device is set to.
@@ -100,6 +431,10 @@ function getPage() {
   if (p === "/entry")     return { page: "entry" };
   if (p === "/history")   return { page: "history" };
   if (p === "/analytics") return { page: "analytics" };
+  if (p === "/damages")   return { page: "damages" };
+  if (p === "/papers")    return { page: "papers" }; 
+  const md = p.match(/^\/station\/([\w]+)\/damages$/);
+  if (md) return { page: "damages", dept: md[1] };
   const m = p.match(/^\/station\/([\w]+)$/);
   if (m) return { page: "station", dept: m[1] };
   return { page: "dashboard" };
@@ -120,6 +455,8 @@ const NAV_ITEMS = [
   { label: "Laminating",    path: "/station/laminating",   accent: "#06b6d4"       },
   { label: "Laser Cut",     path: "/station/laser_cutting",accent: "#a855f7"       },
   { label: "Binding",       path: "/station/binding",      accent: "#22c55e"       },
+  { label: "Damages",       path: "/damages",              accent: "var(--red)"    },
+  { label: "Papers",        path: "/papers",               accent: "#3b82f6"       },
 ];
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
@@ -171,8 +508,8 @@ function ExpiryBadge({ completedAt }) {
       display: "inline-flex", alignItems: "center", gap: 4,
       padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 700,
       fontFamily: "var(--fm)", background: isUrgent ? "#2a0a00" : "var(--bg3)",
-      color: isUrgent ? "#ff9060" : "var(--text-dim)",
-      border: `1px solid ${isUrgent ? "#6a2a00" : "var(--border)"}`,
+      color: isUrgent ? "var(--danger-text)" : "var(--text-dim)",
+      border: `1px solid ${isUrgent ? "var(--danger-border)" : "var(--border)"}`,
     }}>{h}h {m}m</span>
   );
 }
@@ -199,7 +536,7 @@ function DelayReasonModal({ job, dept, onClose, onSaved, addToast }) {
   }
   const deptLabel = { PRINTING: "Printing", LAMINATING: "Laminating", LASER_CUTTING: "Laser Cutting", BINDING: "Binding" }[dept] || dept;
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9000 }} onClick={onClose}>
+    <div style={{ position: "fixed", inset: 0, background: "var(--overlay)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9000 }} onClick={onClose}>
       <div onClick={e => e.stopPropagation()} style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 12, padding: 24, width: "100%", maxWidth: 480, display: "flex", flexDirection: "column", gap: 16 }}>
         <div>
           <div style={{  fontSize: 12, color: "var(--red)", letterSpacing: ".1em", textTransform: "uppercase", marginBottom: 4 }}>DELAY REASON - {deptLabel}</div>
@@ -257,7 +594,7 @@ function PaymentEditModal({ job, onClose, onSaved, addToast }) {
   }
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9100 }} onClick={onClose}>
+    <div style={{ position: "fixed", inset: 0, background: "var(--overlay)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9100 }} onClick={onClose}>
       <div onClick={e => e.stopPropagation()} style={{ background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: 12, padding: 24, width: "100%", maxWidth: 420, display: "flex", flexDirection: "column", gap: 16 }}>
         <div>
           <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 4 }}>Payment Taken By</div>
@@ -319,7 +656,7 @@ function PaymentField({ job, addToast }) {
       <button onClick={() => setEditing(true)} style={{
         padding: "3px 12px", fontSize: 12, fontWeight: 700, borderRadius: 5,
         background: hasPayment ? "var(--amber)" : "#035702", 
-        color:hasPayment? "#ff0000":"#ffffff",
+        color:hasPayment? "#ff0000":"var(--text-pri)",
         border: `1px solid ${hasPayment ? "var(--border)" : "#00ff3c"}`,
       }}>{hasPayment ? "EDIT PAYMENT" : "ADD PAYMENT"}</button>
       {editing && (
@@ -555,7 +892,7 @@ function JobCardViewModal({ job, onClose, addToast }) {
   const isMobile = useIsMobile();
   return (
     <div style={{
-      position: "fixed", inset: 0, background: "rgba(0,0,0,.9)",
+      position: "fixed", inset: 0, background: "var(--overlay)",
       display: "flex", alignItems: isMobile ? "stretch" : "center", justifyContent: "center",
       zIndex: 9500, overflowY: "auto",
       padding: isMobile ? 0 : "24px 16px",
@@ -575,7 +912,7 @@ function JobCardViewModal({ job, onClose, addToast }) {
           display: "flex", alignItems: "center", justifyContent: "center",
           gap: 6, width: isMobile ? "100%" : 30, height: isMobile ? "auto" : 30,
           padding: isMobile ? "12px 14px" : 0,
-          background: "var(--red)", color: "#fff",
+          background: "var(--red)", color:"var(--text-pri)",
           border: "none", borderRadius: isMobile ? 0 : "50%",
           fontWeight: 800, zIndex: 5, cursor: "pointer",
         }}>✕{isMobile && " Close"}</button>
@@ -680,6 +1017,19 @@ function DeptCompletedDropdown({ deptKey, title = "Dispatched", accent = "var(--
   );
 }
 
+function useLowStockBlink() {
+  const [low, setLow] = useState(false);
+  useEffect(() => {
+    if (ROLE !== "PRINTING" && !IS_ADMIN) return;
+    const check = () => api.paperStockStats().then(d => {
+      setLow((d.low_stock_sizes || []).length > 0);
+    }).catch(() => {});
+    check();
+    const t = setInterval(check, POLL_INTERVAL_MS);
+    return () => clearInterval(t);
+  }, []);
+  return low;
+}
 
 // ── Shell ─────────────────────────────────────────────────────────────────────
 function Shell({ title, accent = "var(--amber)", topRight, children }) {
@@ -695,6 +1045,9 @@ function Shell({ title, accent = "var(--amber)", topRight, children }) {
   const path        = window.location.pathname;
   const onDashboard = path === "/";
   const onHistory   = path === "/history";
+  const onDamages   = path === "/damages" || /^\/station\/[\w]+\/damages$/.test(path);
+  const onPapers    = path === "/papers";  
+  const lowStock    = useLowStockBlink();
  
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", background: "var(--bg0)" }}>
@@ -734,7 +1087,7 @@ function Shell({ title, accent = "var(--amber)", topRight, children }) {
           {IS_ADMIN && !onHistory && (
             <button onClick={() => navigate("/history")} style={{
               padding: isMobile ? "6px 10px" : "8px 14px",
-              background: "var(--bg3)", color: "white",
+              background: "var(--bg3)", color: "var(--text-sec)",
               border: "1px solid var(--border)", borderRadius: 6, fontWeight: 700, cursor: "pointer",
               fontSize: isMobile ? 11 : 13,
             }}>{isMobile ? <Calendar size={14}/> : "History"}</button>
@@ -743,7 +1096,7 @@ function Shell({ title, accent = "var(--amber)", topRight, children }) {
           {!IS_ADMIN && !onHistory && (
             <button onClick={() => navigate("/history")} style={{
               padding: isMobile ? "6px 10px" : "8px 14px",
-              background: "var(--bg3)", color: "white",
+              background: "var(--bg3)", color:"var(--text-pri)",
               border: "1px solid var(--border)", borderRadius: 6, fontWeight: 700, cursor: "pointer",
               fontSize: isMobile ? 11 : 13,
             }}>{isMobile ? <Calendar size={14}/> : "History"}</button>
@@ -757,10 +1110,53 @@ function Shell({ title, accent = "var(--amber)", topRight, children }) {
               fontSize: isMobile ? 11 : 13,
             }}>← {getDeptLabel()}</button>
           )}
+
+          {/* ── ADD: Damages back button ── */}
+          {!IS_ADMIN && onDamages && (
+            <button onClick={() => navigate(getDeptHomePath())} style={{
+              padding: isMobile ? "6px 10px" : "8px 14px",
+              background: "var(--amber)", color: "#000",
+              border: "none", borderRadius: 6, fontWeight: 700, cursor: "pointer",
+              fontSize: isMobile ? 11 : 13,
+            }}>← {getDeptLabel()}</button>
+          )}
+
+          {/* ── ADD: Damages entry button (only for the 3 relevant stations) ── */}
+          {!IS_ADMIN && !onDamages && DAMAGE_DEPTS.includes(ROLE) && (
+            <button onClick={() => navigate(`/station/${ROLE.toLowerCase()}/damages`)} style={{
+              padding: isMobile ? "6px 10px" : "8px 14px",
+              background: "var(--danger-bg)", color: "var(--red)",
+              border: "1px solid var(--red)", borderRadius: 6, fontWeight: 700, cursor: "pointer",
+              fontSize: isMobile ? 11 : 13,
+            }}>{isMobile ? "⚠" : "⚠ Damages"}</button>
+          )}
+
+          {/* ── ADD: Papers entry button (Printing station only) ── */}
+          {!IS_ADMIN && !onPapers && ROLE === "PRINTING" && (
+            <button onClick={() => navigate("/papers")} className={lowStock ? "blink" : ""} style={{
+              padding: isMobile ? "6px 10px" : "8px 14px",
+              background: lowStock ? "var(--danger-bg)" : "var(--info-bg)",
+              color: lowStock ? "var(--red)" : "var(--blue)",
+              border: `1px solid ${lowStock ? "var(--red)" : "var(--blue)"}`,
+              borderRadius: 6, fontWeight: 700, cursor: "pointer",
+              fontSize: isMobile ? 11 : 13,
+            }}>{isMobile ? "📄" : lowStock ? "Papers (Low!)" : "Papers"}</button>
+          )}
+
+          {/* ── ADD: Papers back button ── */}
+          {!IS_ADMIN && onPapers && (
+            <button onClick={() => navigate(getDeptHomePath())} style={{
+              padding: isMobile ? "6px 10px" : "8px 14px",
+              background: "var(--amber)", color: "#000",
+              border: "none", borderRadius: 6, fontWeight: 700, cursor: "pointer",
+              fontSize: isMobile ? 11 : 13,
+            }}>← {getDeptLabel()}</button>
+          )}
  
-          {topRight}
-        </div>
-      </header>
+        <AppearanceButton isMobile={isMobile} />
+        {topRight}        
+            </div>
+        </header>
       <main className="r-main-pad" style={{ flex: 1, padding: 20, maxWidth: 1400, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
         {children}
       </main>
@@ -803,13 +1199,13 @@ function Sec({ title, accent = "var(--amber)", children }) {
   );
 }
 
-// ── STEPS config ──────────────────────────────────────────────────────────────
-const STEPS = [
-  { label: "PRINT", field: "status_printing",      color: "#0058e6", dept: "PRINTING" },
-  { label: "LASER", field: "status_laser_cutting",  color: "#8100fa", dept: "LASER_CUTTING"},
-  { label: "LAMINATING",   field: "status_laminating",     color: "#00d9ff", dept: "LAMINATING"},
-  { label: "BIND",  field: "status_binding",        color: "#00ff5e", dept: "BINDING"},
-];
+// // ── STEPS config ──────────────────────────────────────────────────────────────
+// const STEPS = [
+//   { label: "PRINT", field: "status_printing",      color: "#0058e6", dept: "PRINTING" },
+//   { label: "LASER", field: "status_laser_cutting",  color: "#8100fa", dept: "LASER_CUTTING"},
+//   { label: "LAMINATING",   field: "status_laminating",     color: "#00d9ff", dept: "LAMINATING"},
+//   { label: "BIND",  field: "status_binding",        color: "#00ff5e", dept: "BINDING"},
+// ];
 
 function boxPouchLabel(status) {
   if (status === "COMPLETE")   return "Complete";
@@ -833,15 +1229,31 @@ function Chip({ label, value, accent = "#555" }) {
       alignSelf: "flex-start",
     }}>
       <span style={{
-        padding: "4px 7px", background: "#111111",
-        color: "rgba(255, 255, 255, 0.55)", fontSize: 10, fontWeight: 600,
+        padding: "4px 7px", background: "var(--surface-sunken)",
+        color: "var(--text-dim)", fontSize: 10, fontWeight: 600,
         textTransform: "uppercase", letterSpacing: ".07em",
         borderRight: `1px solid ${accent}33`,
       }}>{label}</span>
       <span style={{
-        padding: "4px 9px", background: "#000000",
-        color: "#ffffff", fontWeight: 700, fontSize: 12,
+        padding: "4px 9px", background: "var(--surface-sunken)",
+        color:"var(--text-pri)", fontWeight: 700, fontSize: 12,
       }}>{value}</span>
+    </span>
+  );
+}
+
+function AlbumTypeBadge({ type }) {
+  if (!type || type === "NORMAL") return null;
+  const isStory = type === "STORY";
+  return (
+    <span style={{
+      fontSize: 11, padding: "3px 9px", borderRadius: 4, fontWeight: 800,
+      letterSpacing: ".06em", textTransform: "uppercase",
+      background: isStory ? "#3b1d6b" : "#0d3b5c",
+      color: isStory ? "#c9a6ff" : "#7fd4ff",
+      border: `1px solid ${isStory ? "#7c3aed" : "#0ea5e9"}`,
+    }}>
+      {isStory ? "Story Album" : "Rebind Album"}
     </span>
   );
 }
@@ -851,14 +1263,14 @@ function SpecialNote({ note }) {
   if (!note) return null;
   return (
     <div style={{
-      background: "#0d0b00", border: "1px solid #4a3800",
+      background: "var(--warn-bg)", border: "1px solid var(--warn-border)",
       borderLeft: "4px solid var(--amber)", borderRadius: 6, overflow: "hidden",
     }}>
-      <div style={{ background: "#1a1400", padding: "6px 12px", borderBottom: "1px solid #3a2800", display: "flex", alignItems: "center", gap: 7 }}>
+      <div style={{ background: "var(--warn-bg)", padding: "6px 12px", borderBottom: "1px solid var(--warn-border)", display: "flex", alignItems: "center", gap: 7 }}>
         <Speech size={14}/>
         <span style={{ fontSize: 10, color: "var(--amber)", textTransform: "uppercase", letterSpacing: ".12em", fontWeight: 800 }}>Special Instructions</span>
       </div>
-      <div style={{ padding: "10px 14px", fontSize: 13, color: "#f5ecd0", lineHeight: 1.7, fontWeight: 500 }}>{note}</div>
+      <div style={{ padding: "10px 14px", fontSize: 13, color: "var(--warn-text)", lineHeight: 1.7, fontWeight: 500 }}>{note}</div>
     </div>
   );
 }
@@ -869,19 +1281,19 @@ function OperatorTag({ log, dept }) {
   const showUnder    = dept === "PRINTING" && log.under_whom;
   const showMachine   = dept === "PRINTING" && log.machine;
   const isLaminating  = dept === "LAMINATING";
-  const machineLabel = { GREEN_2: "Green 2", GREEN_3: "Green 3" }[log.machine] || log.machine;
+  const machineLabel = { GREEN_2: "Green 2", GREEN_3: "Green 3",EPSON:"Epson" }[log.machine] || log.machine;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", marginTop: 3 }}>
-      <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 4, background: isLaminating ? "#0a0a1a" : "#0a0a1a", border: `1px solid ${isLaminating ? "#06b6d4" : "#837f7f"}`, color: "#ffffff", letterSpacing: ".08em" }}>
-        {isLaminating ? <span style={{color: "#a24d4d"}}>ACCU. BY </span> : "👤"}{log.operator_name}
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 4, background: isLaminating ? "var(--info-bg)" : "var(--info-bg)", border: `1px solid ${isLaminating ? "#06b6d4" : "var(--border-strong)"}`, color: "var(--text-pri)", letterSpacing: ".08em" }}>
+        {isLaminating ? <span style={{color: "var(--red)"}}>ACCU. BY </span> : "👤"}{log.operator_name}
       </span>
       {showUnder && (
-        <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 4, background: "#0a0a1a", border: "1px solid #837f7f", color: "#ffffff", letterSpacing: ".08em" }}>
-          <span style={{ color: "#a24d4d" }}>SUPERVISED </span> {log.under_whom}
+        <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 4, background: "var(--info-bg)", border: "1px solid var(--border-strong)", color: "var(--text-pri)", letterSpacing: ".08em" }}>
+          <span style={{ color: "var(--red)" }}>SUPERVISED </span> {log.under_whom}
         </span>
       )}
       {showMachine && (
-        <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 4, background: "#0a0a1a", border: "1px solid #06b6d4", color: "#ffffff", letterSpacing: ".08em" }}>
+        <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 4, background: "var(--info-bg)", border: "1px solid #06b6d4", color: "var(--text-pri)", letterSpacing: ".08em" }}>
           🖨 {machineLabel}
         </span>
       )}
@@ -898,10 +1310,10 @@ function StageRow({ job }) {
   return (
     <div style={{
       background: "var(--bg1)", borderRadius: 6, overflow: "hidden",
-      border: `1px solid ${delayed ? "var(--red)" : "#ffffff"}`,
+      border: `1px solid ${delayed ? "var(--red)" : "var(--text-pri)"}`,
     }}>
       <div style={{ padding: "6px 12px", borderBottom: "1px solid #ffffff", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span style={{ fontSize: 10, color: "#ffffff", textTransform: "uppercase", letterSpacing: ".1em", fontWeight: 700 }}>Production Pipeline</span>
+        <span style={{ fontSize: 10, color: "var(--text-pri)", textTransform: "uppercase", letterSpacing: ".1em", fontWeight: 700 }}>Production Pipeline</span>
         {delayed && <span className="blink" style={{ fontSize: 10, color: "var(--red)", fontWeight: 700 }}>⚠ DELAYED</span>}
         {job.is_fully_completed && <span style={{ fontSize: 10, color: "var(--green)", fontWeight: 700 }}>✓ ALL DONE</span>}
       </div>
@@ -916,28 +1328,28 @@ function StageRow({ job }) {
           const log = activeLog || completedLog;
           let bg, textClr, icon, statusLabel,fontSize;
           if      (sv === "COMPLETED")   { bg = st.color + "30"; textClr = st.color; statusLabel = "Done";}
-          else if (sv === "IN_PROGRESS") { bg = "#101501";       textClr = "var(--amber)";  fontSize = "10px";   statusLabel = "IN PROGRESS. . ."; }
-          else if (sv === "SKIPPED")     { bg = "transparent";   textClr = "#ffffff"; fontSize = "10px"; statusLabel = "Skipped"; }
-          else                           { bg = "transparent";   textClr = "#ffffff";fontSize = "10px";  statusLabel = "Pending"; }
+          else if (sv === "IN_PROGRESS") { bg = "var(--process)";       textClr = "var(--amber)";  fontSize = "10px";   statusLabel = "IN PROGRESS. . ."; }
+          else if (sv === "SKIPPED")     { bg = "transparent";   textClr = "var(--text-pri)"; fontSize = "10px"; statusLabel = "Skipped"; }
+          else                           { bg = "transparent";   textClr = "var(--text-pri)";fontSize = "10px";  statusLabel = "Pending"; }
           return (
             <div key={st.label} style={{
               fontWeight: 700,
               letterSpacing: ".04em",
               padding: "10px 12px", background: bg,
-              borderRight: i < 3 ? "1px solid #ffffff" : "none",
+              borderRight: i < 3 ? "1px solid var(--text-pri)" : "none",
               display: "flex", flexDirection: "column", gap: 4,
               borderTop: sv === "IN_PROGRESS" ? `2px solid ${st.color}` : "2px solid transparent",
               
             }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <span style={{ fontSize: 14, fontWeight: 800, color:"#c7c6c8", textTransform: "uppercase", letterSpacing: ".08em" }}>{icon} {st.label}</span>
+                <span style={{ fontSize: 14, fontWeight: 800, color:st.color, textTransform: "uppercase", letterSpacing: ".08em" }}>{icon} {st.label}</span>
                 {sv === "COMPLETED" && (
                   <span style={{  display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: "#00ff48", fontWeight: 900 }}>DONE</span>
                 )}
               </div>
-              <span style={{ fontSize: 10, color: textClr, opacity: 0.75 }}>{statusLabel}</span>
+              {/* <span style={{ fontSize: 10, color: textClr, opacity: 0.75 }}>{statusLabel}</span> */}
               
-              {sv === "IN_PROGRESS" && <span style={{ fontSize: 10, color: "var(--amber)", fontWeight: 600 }}>RUNNING</span>}
+              {sv === "IN_PROGRESS" && <span style={{ fontSize: 11, color: "var(--text-pri)", fontWeight: 600 }}>RUNNING..</span>}
               {reason && (
                   <div style={{ fontSize: 10, color: isDelayed ? "#ffaa60" : "var(--text-dim)", background: isDelayed ? "rgba(255,100,0,.08)" : "rgba(255,255,255,.03)", borderRadius: 3, padding: "3px 6px", lineHeight: 1.4, borderLeft: `2px solid ${isDelayed ? "#ff6030" : "var(--border)"}` }}>
                     {reason}
@@ -961,7 +1373,7 @@ function StageRow({ job }) {
       fontWeight: 700,
       letterSpacing: ".11em",
       textTransform: "uppercase",
-      color: "#ff0404",
+      color: "var(--red)",
     }}>
       Time Log
     </div>
@@ -969,7 +1381,7 @@ function StageRow({ job }) {
     <div style={{ padding: "6px 8px", display: "flex", flexDirection: "column", gap: 4 }}>
       {log.entered_at && (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#ebeaea" }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--text-sec)" }}>
             Start
           </span>
           <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-pri)" }}>
@@ -980,7 +1392,7 @@ function StageRow({ job }) {
 
       {log.exited_at && (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#ebeaea" }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--text-sec)" }}>
             End
           </span>
           <span style={{  fontSize: 11, fontWeight: 700, color: "var(--text-pri)" }}>
@@ -1027,7 +1439,7 @@ function DelayReasonsList({ logs }) {
         <div
           style={{
             fontSize: 10,
-            color: "#ffffff",
+            color: "var(--text-pri)",
             textTransform: "uppercase",
             letterSpacing: ".16em",
             fontWeight: 700,
@@ -1041,7 +1453,7 @@ function DelayReasonsList({ logs }) {
           <div
             key={l.id}
             style={{
-              background: "linear-gradient(180deg, #353538 0%, #000000 100%)",
+              background: "linear-gradient(180deg, #353538 0%, var(--surface-sunken) 100%)",
               borderRadius: 10,
               padding: "12px 12px",
               border: "1px solid #ffffff",
@@ -1077,12 +1489,12 @@ function DelayReasonsList({ logs }) {
                     alignItems: "center",
                     gap: 6,
                     fontSize: 11,
-                    color: "#D4D4D8",
+                    color: "var(--text-dim)",
                     fontWeight: 500,
-                    background: "#000000",
+                    background: "var(--surface-sunken)",
                     padding: "3px 8px",
                     borderRadius: 999,
-                    border: "1px solid #2F2F37",
+                    border: "1px solid var(--border-strong)",
                   }}
                 >
                   <Timer size={12} />
@@ -1099,14 +1511,14 @@ function DelayReasonsList({ logs }) {
               
               }}
             >
-              <span style={{ color: "#F59E0B" ,display: "inline-flex", alignItems: "center", gap: 4,textTransform: "uppercase" }}>
+              <span style={{ color: "var(--text-pri)" ,display: "inline-flex", alignItems: "center", gap: 4,textTransform: "uppercase" }}>
                 {l.delay_reason}
 
                   {l.delay_reason_at && (
                 <span
                   style={{
                     fontSize: 9,
-                    color: "#979797",
+                    color: "var(--text-pri)",
                     marginTop:"5px",  
                     fontWeight: 600,
                   }}
@@ -1137,9 +1549,9 @@ function DelayReasonsList({ logs }) {
                     fontWeight: 600,
                     padding: "4px 10px",
                     borderRadius: 999,
-                    background: "#000000",
-                    border: "1px solid #32323A",
-                    color: "#E5E7EB",
+                    background: "var(--surface-sunken)",
+                    border: "1px solid var(--border-strong)",
+                    color: "var(--text-sec)",
                   }}
                 >
                   👤 {l.operator_name}
@@ -1152,12 +1564,12 @@ function DelayReasonsList({ logs }) {
                       fontWeight: 500,
                       padding: "4px 10px",
                       borderRadius: 999,
-                      background: "#000000",
-                      border: "1px solid #32323A",
-                      color: "#E5E7EB",
+                      background: "var(--surface-sunken)",
+                      border: "1px solid var(--border-strong)",
+                      color: "var(--text-sec)",
                     }}
                   >
-                    <span style={{color:"#a24d4d"}}>SUPERVISED</span> {l.under_whom}
+                    <span style={{color:"var(--red)"}}>SUPERVISED</span> {l.under_whom}
                   </span>
                 )}
               </div>
@@ -1183,7 +1595,8 @@ function CompactCard({ job }) {
           <span style={{ fontSize: 14, color: "var(--text-pri)", fontWeight: 600 }}>{job.customer}</span>
           {job.couple_name && <span style={{ fontSize: 12, color: "var(--text-sec)" }}>/ {job.couple_name}</span>}
           {job.priority === "URGENT" && <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 4, background: "var(--red)", color: "#000", fontWeight: 800 }}>URGENT</span>}
-          {delayed && <span className="blink" style={{ fontSize: 10, padding: "2px 7px", borderRadius: 4, background: "#3a0000", color: "var(--red)", fontWeight: 800, border: "1px solid var(--red)" }}>LATE</span>}
+          <AlbumTypeBadge type={job.album_type} />
+          {delayed && <span className="blink" style={{ fontSize: 10, padding: "2px 7px", borderRadius: 4, background: "var(--danger-bg)", color: "var(--red)", fontWeight: 800, border: "1px solid var(--red)" }}>LATE</span>}
         </div>
         <div style={{ textAlign: "right", flexShrink: 0, marginLeft: 12 }}>
           <div style={{ fontSize: 13, fontFamily: "var(--fm)", fontWeight: 700, color: days < 2 ? "var(--red)" : days < 5 ? "var(--amber)" : "var(--text-sec)" }}>
@@ -1219,11 +1632,11 @@ function LivePanel() {
   const [jobs, setJobs] = useState([]);
   const [open, setOpen] = useState(false);
   useEffect(() => {
-    const load = () => api.jobs().then(setJobs).catch(() => {});
-    load();
-    const t = setInterval(load, POLL_INTERVAL_MS);
-    return () => clearInterval(t);
-  }, []);
+  const load = () => api.jobs().then(setIfChanged(setJobs)).catch(() => {});
+  load();
+  const t = setInterval(load, POLL_INTERVAL_MS);
+  return () => clearInterval(t);
+}, []);
   const active = jobs.filter(j => !j.is_fully_completed);
   return (
     <div style={{ marginTop: 28 }}>
@@ -1253,8 +1666,8 @@ function JobCardFull({ job, actionLabel, onAction, acting, actionBlocked = false
     <div 
     className={delayed ? "delayed-card" : ""}
     style={{
-      background: "#444343e0",
-      border: `4px solid ${delayed ? "var(--red)" : job.priority === "URGENT" ? "#850606" : "none"}`,
+      background: "var(--card-bg)",
+      border: `4px solid ${delayed ? "var(--red)" : job.priority === "URGENT" ? "var(--red)" : "none"}`,
       borderRadius: "12px 12px 0 0",
       boxShadow: delayed ? "0 0 0 1px var(--red)" : "none",
     }}>
@@ -1268,19 +1681,20 @@ function JobCardFull({ job, actionLabel, onAction, acting, actionBlocked = false
               {job.priority === "URGENT" && (
                 <span style={{ fontSize: 11, padding: "3px 9px", borderRadius: 4, background: "var(--red)", color: "#000", fontWeight: 800, letterSpacing: ".06em" }}><Flame  size ={18} color={"#ffa600"}/> URGENT</span>
               )}
+              <AlbumTypeBadge type={job.album_type} /> 
               {delayed && (
-                <span className="blink" style={{ fontSize: 11, padding: "3px 9px", borderRadius: 4, background: "#3a0000", color: "var(--red)", fontWeight: 800, border: "1px solid var(--red)" }}>⏱ DELAYED</span>
+                <span className="blink" style={{ fontSize: 11, padding: "3px 9px", borderRadius: 4, background: "var(--danger-bg)", color: "var(--red)", fontWeight: 800, border: "1px solid var(--red)" }}>⏱ DELAYED</span>
               )}
               {showExpiry && job.completed_at && <ExpiryBadge completedAt={job.completed_at} />}
             </div>
             <div style={{ fontSize: isMobile ? 17 : 16, fontWeight: 700, color: "var(--text-pri)", lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis" }}>{job.customer}</div>
             {job.couple_name && <div style={{ fontSize: 13, color: "var(--text-sec)", marginTop: 2 }}>{job.couple_name}</div>}
-            {job.order_no    && <div style={{ fontSize: 11, color: "#ffffff", marginTop: 2 }}>Order: {job.order_no}</div>}
+            {job.order_no    && <div style={{ fontSize: 11, color: "var(--text-pri)", marginTop: 2 }}>Order: {job.order_no}</div>}
           </div>
           {/* Delivery date box */}
           <div className="r-job-date-box" style={{
             textAlign: "center", flexShrink: 0,
-            background: days < 2 ? "#2a0000" : days < 5 ? "#1a1200" : "var(--bg3)",
+            background: days < 2 ? "var(--danger-bg)" : days < 5 ? "#1a1200" : "var(--bg3)",
             border: `1px solid ${days < 2 ? "var(--red)" : days < 5 ? "var(--amber)" : "var(--border)"}`,
             borderRadius: 8, padding: "10px 14px", minWidth: 80,
           }}>
@@ -1320,7 +1734,7 @@ function JobCardFull({ job, actionLabel, onAction, acting, actionBlocked = false
                             : isDone        ? "#16a34a"
                             :                 "var(--amber)";
             const clr       = acting        ? "var(--text-dim)"
-                            : actionBlocked ? "#ffffff"
+                            : actionBlocked ? "var(--text-pri)"
                             :                 "#000";
             const border    = actionBlocked ? "1px solid #a3a3a3" : "none";
             const shadow    = actionBlocked ? "0 2px 12px rgba(229,62,62,.25)"
@@ -1343,8 +1757,8 @@ function JobCardFull({ job, actionLabel, onAction, acting, actionBlocked = false
           return (
             <button onClick={() => onAddReason(job)} style={{
               padding: "9px 16px", borderRadius: 6, fontSize: 13, fontWeight: 900,
-              background: thisLog.delay_reason? "#000000" : "#035702", 
-              color: "#ffffff",
+              background: thisLog.delay_reason? "var(--surface-sunken)" : "#035702", 
+              color: "var(--text-pri)",
               border: "1px solid #00ff3c", letterSpacing: ".05em",
             }}>
               {thisLog.delay_reason ? "EDIT DELAY REASON" : "ADD DELAY REASON"}
@@ -1512,6 +1926,48 @@ function JobFields({ job }) {
     </>
   );
 }
+function AlbumTypeModal({ job, onConfirm }) {
+  const [choice, setChoice] = useState("NORMAL");
+  const [saving, setSaving] = useState(false);
+  async function confirm() {
+    setSaving(true);
+    try { await onConfirm(choice); } finally { setSaving(false); }
+  }
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "var(--overlay)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9300 }}>
+      <div style={{ background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: 12, padding: 28, width: "100%", maxWidth: 420, display: "flex", flexDirection: "column", gap: 16 }}>
+        <div>
+          <div style={{ fontSize: 13, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 4 }}>One last thing</div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: "var(--amber)" }}>{job.job_no}</div>
+          <div style={{ fontSize: 14, color: "var(--text-sec)" }}>{job.customer}</div>
+        </div>
+        <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-pri)" }}>What type of album is this?</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {ALBUM_TYPES.map(opt => (
+            <label key={opt.value} style={{
+              display: "flex", alignItems: "center", gap: 10, padding: "12px 14px",
+              background: choice === opt.value ? "var(--bg3)" : "transparent",
+              border: `1px solid ${choice === opt.value ? "var(--amber)" : "var(--border)"}`,
+              borderRadius: 8, cursor: "pointer",
+            }}>
+              <input type="radio" name="album_type" value={opt.value}
+                checked={choice === opt.value}
+                onChange={() => setChoice(opt.value)}
+                style={{ width: 16, height: 16, margin: 0 }} />
+              <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text-pri)" }}>
+                {opt.value === "STORY" ? " " : opt.value === "REBIND" ? " " : ""}{opt.label}
+              </span>
+            </label>
+          ))}
+        </div>
+        <button onClick={confirm} disabled={saving} style={{ padding: "13px 0", background: "var(--amber)", color: "#000", borderRadius: 8, fontWeight: 800, fontSize: 15 }}>
+          {saving ? "Saving…" : "✓ Confirm"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Entry page ────────────────────────────────────────────────────────────────
 function EntryPage() {
   const { toasts, add } = useToast();
@@ -1520,6 +1976,7 @@ function EntryPage() {
   const [editJob,    setEditJob]    = useState(null);
   const [deleteJob,  setDeleteJob]  = useState(null);
   const [printJob,   setPrintJob]   = useState(null);
+  const [albumTypeJob, setAlbumTypeJob] = useState(null);
   const [paymentJob, setPaymentJob] = useState(null);
   const [todayCount, setTodayCount] = useState(null);
   const [paymentBy, setPaymentBy]           = useState("");
@@ -1539,19 +1996,22 @@ function EntryPage() {
   }
  
   const reload = useCallback(async () => {
-    try {
-      const jobList = await api.jobs(false);
-      setJobs(jobList);
-    } catch {}
-    try {
-      const ds = await api.deptStats();
-      setTodayCount(ds?.daily?.ENTRY ?? 0);
-    } catch {}
-    try {
-      const pn = await api.knownPaymentNames();
-      setKnownPayments(pn?.names || []);
-    } catch {}
-  }, []);
+  try {
+    const jobList = await api.jobs(false);
+    setIfChanged(setJobs)(jobList);
+  } catch {}
+  try {
+    const ds = await api.deptStats();
+    setTodayCount(prev => {
+      const next = ds?.daily?.ENTRY ?? 0;
+      return prev === next ? prev : next;
+    });
+  } catch {}
+  try {
+    const pn = await api.knownPaymentNames();
+    setIfChanged(setKnownPayments)(pn?.names || []);
+  } catch {}
+}, []);
  
   useEffect(() => {
     reload();
@@ -1613,7 +2073,7 @@ async function handleSubmit(e) {
     }
     setBusy(true);
     try {
-      await api.createJob({
+      const created = await api.createJob({    // ← capture the result
         job_no, customer,
         couple_name:      fd.get("couple_name")      || "",
         order_no:         fd.get("order_no")         || "",
@@ -1634,8 +2094,17 @@ async function handleSubmit(e) {
       setPaymentBy("");
       setShowNewPayment(false);
       reload();
+      setAlbumTypeJob(created);   // ← ADD: triggers the modal
     } catch (err) { add(err.message, "error"); }
     finally { setBusy(false); }
+  }
+
+  async function handleAlbumTypeConfirm(type) {
+    try {
+      await api.setAlbumType(albumTypeJob.id, type);
+      add(`✓ Marked as ${ALBUM_TYPES.find(a => a.value === type)?.label}`, "success");
+    } catch (err) { add(err.message, "error"); }
+    finally { setAlbumTypeJob(null); reload(); }
   }
  
   // ── Edit save ─────────────────────────────────────────────────────────
@@ -1693,17 +2162,18 @@ async function handleSubmit(e) {
           
           <div style={{
             display: "flex", alignItems: "center", gap: isMobile ? 5 : 8,
-            background: "#001a00", border: "1px solid #1a4a1a",
+            background: "var(--success-bg)", border: "1px solid var(--success-border)",
             borderRadius: 8, padding: isMobile ? "2px 8px 2px 6px" : "2px 10px 2px 8px",
           }}>
             <span style={{
               fontFamily: "var(--fd)", fontSize: isMobile ? 28 : 38,
               fontWeight: 900, lineHeight: 1,
               color: todayCount > 0 ? "var(--green)" : "var(--text-dim)",
+              minWidth: "1.6em", display: "inline-block", textAlign: "right", 
             }}>{todayCount ?? "—"}</span>
             <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
               <span style={{ fontSize: isMobile ? 9 : 11, fontWeight: 800, color: "var(--green)", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>ISSUED</span>
-              <span style={{ fontSize: isMobile ? 7 : 9, fontWeight: 600, color: "#6aaa6a", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>TODAY</span>
+              <span style={{ fontSize: isMobile ? 7 : 9, fontWeight: 600, color: "var(--success-text)", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>TODAY</span>
             </div>
           </div>
         </div>
@@ -1824,7 +2294,7 @@ async function handleSubmit(e) {
                           <span style={{ fontSize: 11, color: "var(--text-sec)" }}>{job.couple_name}</span>
                         )}
                         {job.payment_by && (
-                          <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 4, background: "#062", color: "#fff", fontWeight: 700 }}>💰 {job.payment_by}</span>
+                          <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 4, background: "#062", color:"var(--text-pri)", fontWeight: 700 }}>💰 {job.payment_by}</span>
                         )}
                       </div>
                       <div style={{
@@ -1847,9 +2317,9 @@ async function handleSubmit(e) {
                         fontSize: 13, fontWeight: 900,
                         fontFamily: "var(--fm)",
                         minWidth: 48, textAlign: "center",
-                        background: secs <= 15 ? "#2a0000" : "#1a1200",
+                        background: secs <= 15 ? "var(--danger-bg)" : "#1a1200",
                         color: secs <= 15 ? "var(--red)" : "var(--amber)",
-                        border: `1px solid ${secs <= 15 ? "var(--red)" : "#4a3800"}`,
+                        border: `1px solid ${secs <= 15 ? "var(--red)" : "var(--warn-border)"}`,
                         animation: secs <= 15 ? "blink 1s step-start infinite" : "none",
                       }}>{secs}s</div>
  
@@ -1877,7 +2347,7 @@ async function handleSubmit(e) {
                       {/* Delete */}
                       <button onClick={() => setDeleteJob(job)} style={{
                         padding: "7px 14px", fontSize: 12, fontWeight: 700, borderRadius: 5,
-                        background: "#2a0000", color: "var(--red)", border: "1px solid var(--red)",
+                        background: "var(--danger-bg)", color: "var(--red)", border: "1px solid var(--red)",
                       }}><Trash size={14} /></button>
  
                     </div>
@@ -1893,7 +2363,7 @@ async function handleSubmit(e) {
       {/* ── Edit modal ── */}
       {editJob && (
         <div style={{
-          position: "fixed", inset: 0, background: "rgba(0,0,0,.85)",
+          position: "fixed", inset: 0, background: "var(--overlay)",
           display: "flex", alignItems: "flex-start", justifyContent: "center",
           zIndex: 9000, overflowY: "auto", padding: "20px 12px",
         }} onClick={() => setEditJob(null)}>
@@ -1916,9 +2386,9 @@ async function handleSubmit(e) {
                     <div style={{
                       padding: "6px 12px", borderRadius: 6,
                       fontSize: 14, fontWeight: 900, fontFamily: "var(--fm)",
-                      background: secs <= 15 ? "#2a0000" : "#1a1200",
+                      background: secs <= 15 ? "var(--danger-bg)" : "#1a1200",
                       color: secs <= 15 ? "var(--red)" : "var(--amber)",
-                      border: `1px solid ${secs <= 15 ? "var(--red)" : "#4a3800"}`,
+                      border: `1px solid ${secs <= 15 ? "var(--red)" : "var(--warn-border)"}`,
                       animation: secs <= 15 ? "blink 1s step-start infinite" : "none",
                     }}>⏱ {secs}s</div>
                   );
@@ -1980,7 +2450,7 @@ async function handleSubmit(e) {
       {/* ── Delete confirm modal ── */}
       {deleteJob && (
         <div style={{
-          position: "fixed", inset: 0, background: "rgba(0,0,0,.85)",
+          position: "fixed", inset: 0, background: "var(--overlay)",
           display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9000,
         }} onClick={() => setDeleteJob(null)}>
           <div onClick={e => e.stopPropagation()} style={{
@@ -1998,9 +2468,9 @@ async function handleSubmit(e) {
                     <div style={{
                       padding: "4px 10px", borderRadius: 5,
                       fontSize: 13, fontWeight: 900, fontFamily: "var(--fm)",
-                      background: secs <= 15 ? "#2a0000" : "#1a1200",
+                      background: secs <= 15 ? "var(--danger-bg)" : "#1a1200",
                       color: secs <= 15 ? "var(--red)" : "var(--amber)",
-                      border: `1px solid ${secs <= 15 ? "var(--red)" : "#4a3800"}`,
+                      border: `1px solid ${secs <= 15 ? "var(--red)" : "var(--warn-border)"}`,
                       animation: secs <= 15 ? "blink 1s step-start infinite" : "none",
                     }}>⏱ {secs}s</div>
                   );
@@ -2015,7 +2485,7 @@ async function handleSubmit(e) {
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={handleDelete} style={{
-                flex: 1, padding: "12px 0", background: "var(--red)", color: "#fff",
+                flex: 1, padding: "12px 0", background: "var(--red)", color:"var(--text-pri)",
                 borderRadius: 8, fontWeight: 800, fontSize: 15,
               }}>✕ Yes, Delete</button>
               <button onClick={() => setDeleteJob(null)} style={{
@@ -2029,6 +2499,10 @@ async function handleSubmit(e) {
  
       {/* ── Print modal ← NEW ── */}
       {printJob && <PrintJobCardModal job={printJob} onClose={() => setPrintJob(null)} />}
+      
+      {albumTypeJob && (
+        <AlbumTypeModal job={albumTypeJob} onConfirm={handleAlbumTypeConfirm} />
+      )}
 
       {/* ── Payment modal ← NEW ── */}
       {paymentJob && (
@@ -2096,12 +2570,16 @@ const STATION_CFG = {
 // Shows per-department delayed + active counts. Worst offender floats to top.
 // Uses only the `active` jobs array already fetched by DashboardPage.
 
-const DEPT_META = [
-  { key: "PRINTING",      label: "Printing",   accent: "#0004ff", field: "status_printing"      },
-  { key: "LAMINATING",    label: "LAMINATING", accent: "#00d9ff", field: "status_laminating"    },
-  { key: "LASER_CUTTING", label: "Laser Cut",  accent: "#8000f8", field: "status_laser_cutting" },
-  { key: "BINDING",       label: "Binding",    accent: "#00f65a", field: "status_binding"       },
+// ── Single source of truth for department colors ─────────────────────────────
+const DEPTS = [
+  { key: "PRINTING",      label: "PRINT",    dashLabel: "Printing",    field: "status_printing",      accentVar: "var(--blue)"   },
+  { key: "LASER_CUTTING", label: "LASER",    dashLabel: "Laser Cut",   field: "status_laser_cutting", accentVar: "var(--purple)" },
+  { key: "LAMINATING",    label: "LAMINATING",dashLabel: "Laminating", field: "status_laminating",    accentVar: "var(--cyan)"   },
+  { key: "BINDING",       label: "BIND",     dashLabel: "Binding",     field: "status_binding",       accentVar: "var(--green)"  },
 ];
+
+const STEPS     = DEPTS.map(d => ({ label: d.label, field: d.field, color: d.accentVar, dept: d.key }));
+const DEPT_META = DEPTS.map(d => ({ key: d.key, label: d.dashLabel, accent: d.accentVar, field: d.field }));
 
 function BottleneckRadar({ active }) {
   const isMobile = useIsMobile();
@@ -2120,16 +2598,16 @@ function BottleneckRadar({ active }) {
 
   return (
     <div style={{
-      background: "#444343e0",
+      background: "var(--card-bg)",
       border: `1px solid ${hasBottleneck && worstDept.delayed > 0 ? "var(--red)" : "var(--border)"}`,
-      borderRadius: 10, padding: "14px 16px",
+      borderRadius: 10, padding: "14px 16px", boxShadow: "0 8px 30px rgba(0,0,0,0.20)"
     }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, flexWrap: "wrap", gap: 6 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={{ fontFamily: "var(--fd)", fontSize: 14, fontWeight: 1000, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--text-pri)", textShadow: '2px 2px 4px rgba(0,0,0,0.9)' }}>Bottleneck Radar</span>
+          <span style={{ fontFamily: "var(--fd)", fontSize: 14, fontWeight: 1000, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--text-pri)", textShadow: 'var(--title-shadow)' }}>Bottleneck Radar</span>
         </div>
         {hasBottleneck && worstDept.delayed > 0 ? (
-          <span className="blink" style={{ fontSize: 9,display:"flex", fontWeight: 600, gap:"2px",padding: "2px 7px", borderRadius: 4, background: "#ff0000", color: "#ffffff", border: "1px solid #ffffff",letterSpacing:"0.08em" }}>
+          <span className="blink" style={{ fontSize: 9,display:"flex", fontWeight: 600, gap:"2px",padding: "2px 7px", borderRadius: 4, background: "#ff0000", color: "var(--text-pri)", border: "1px solid #ffffff",letterSpacing:"0.08em" }}>
              <TriangleAlert size={12}/>{worstDept.label.toUpperCase()}
           </span>
         ) : (
@@ -2142,7 +2620,7 @@ function BottleneckRadar({ active }) {
           const barPct = maxTotal > 0 ? (dept.total / maxTotal) * 100 : 0;
           return (
 <div key={dept.key} style={{
-            background: "#000000",
+            background: "var(--surface-sunken)",
             border: `1px solid ${dept.delayed > 0 ? "var(--red)" : "#787777"}`,
             boxShadow: '3px 4px 5px #181717',
             borderLeft: `3px solid ${dept.delayed > 0 ? "var(--red)" : dept.accent}`,
@@ -2156,13 +2634,13 @@ function BottleneckRadar({ active }) {
               </span>
               <div style={{ display: "flex", gap: 4, flexShrink: 0, flexWrap: "nowrap", alignItems: "center" }}>
                 {dept.inProgress > 0 && (
-                  <span style={{ fontSize: 11, fontWeight: 700, padding: "1px 6px", borderRadius: 4, background: "#d7a40b", color: "#000000", border: "1px solid #ffffff", whiteSpace: "nowrap" }}>RUNNING : {dept.inProgress}</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, padding: "1px 6px", borderRadius: 4, background: "#d7a40b", color: "var(--surface-sunken)", border: "1px solid #ffffff", whiteSpace: "nowrap" }}>RUNNING : {dept.inProgress}</span>
                 )}
                 {dept.pending > 0 && (
-                  <span style={{ fontSize: 11, fontWeight: 700, padding: "1px 6px", borderRadius: 4, background: "var(--bg3)", color: "#ffffff",border: "1px solid #ffffff", whiteSpace: "nowrap" }}>PENDING : {dept.pending}</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, padding: "1px 6px", borderRadius: 4, background: "var(--bg3)", color: "var(--text-pri)",border: "1px solid #ffffff", whiteSpace: "nowrap" }}>PENDING : {dept.pending}</span>
                 )}
                 {dept.delayed > 0 && (
-                  <span style={{ fontSize: 11, fontWeight: 700, padding: "1px 6px", borderRadius: 4, background: "#a12d2d", color: "#000000", border: "1px solid #ffffff", whiteSpace: "nowrap" }}>DELAYED : {dept.delayed}</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, padding: "1px 6px", borderRadius: 4, background: "#a12d2d", color: "var(--surface-sunken)", border: "1px solid #ffffff", whiteSpace: "nowrap" }}>DELAYED : {dept.delayed}</span>
                 )}
                 {dept.total === 0 && dept.delayed === 0 && (
                   <span style={{ fontSize: 12, color: "var(--text-pri)" }}>idle</span>
@@ -2220,10 +2698,15 @@ function DailyGoalRing({ active, done }) {
   return (
     <div
       style={{
-        background: "#444343e0",
-        border: `1px solid ${ringColor}55`,
+        background: "var(--card-bg)",
+        // border: `1px solid ${ringColor}55`,
         borderRadius: 10,
         padding: "14px 16px",
+        border: "1px solid var(--border)", 
+        boxShadow: "0 8px 30px rgba(0,0,0,0.20)"
+
+
+        
       }}
     >
       {/* HEADER */}
@@ -2231,7 +2714,7 @@ function DailyGoalRing({ active, done }) {
         style={{
           display: "flex",
           alignItems: "center",
-          justifyContent: "space-between",
+          justifyContent: "space-between",         
           marginBottom: 12,
         }}
       >
@@ -2243,7 +2726,7 @@ function DailyGoalRing({ active, done }) {
             letterSpacing: ".1em",
             textTransform: "uppercase",
             color: "var(--text-pri)",
-            textShadow: "2px 2px 4px rgba(0,0,0,0.9)",
+            textShadow: "var(--title-shadow)",
           }}
         >
           Daily Progress
@@ -2312,7 +2795,7 @@ function DailyGoalRing({ active, done }) {
                 fontWeight: 900,
                 color: ringColor,
                 lineHeight: 1,
-                textShadow: "2px 2px 4px rgba(0,0,0,0.9)",
+                textShadow: "var(--title-shadow)",
               }}
             >
               {rate}%
@@ -2351,7 +2834,7 @@ function DailyGoalRing({ active, done }) {
             <div
               key={item.label}
               style={{
-                background: "#000",
+                background:"var(--bg1)",
                 border: `1px solid ${item.color}33`,
                 borderLeft: `3px solid ${item.color}`,
                 boxShadow: "3px 4px 5px #181717",
@@ -2401,8 +2884,9 @@ function DailyGoalRing({ active, done }) {
           rate >= 80
             ? "#002b14"
             : rate >= 50
-            ? "#3d2a00"
-            : "#3a0000",
+            ? "#72520d"
+            : "var(--danger-bg)",
+      
         color: ringColor,
         border: `1px solid ${ringColor}55`,
         textTransform: "uppercase",
@@ -2436,20 +2920,20 @@ function AlbumCountPanel() {
   const isMobile = useIsMobile();
 
   useEffect(() => {
-    const load = () =>
-      apiFetch(`/api/stats/albums?year=${year}&month=${month}`)
-        .then(setData).catch(() => {});
-    load();
-    const t = setInterval(load, 10_000);
-    return () => clearInterval(t);
-  }, [year, month]);
+  const load = () =>
+    apiFetch(`/api/stats/albums?year=${year}&month=${month}`)
+      .then(setIfChanged(setData)).catch(() => {});
+  load();
+  const t = setInterval(load, 10_000);
+  return () => clearInterval(t);
+}, [year, month]);
 
   const monthLabel = new Date(year, month - 1, 1)
     .toLocaleDateString("en-GB", { month: "long", year: "numeric" });
 
   return (
     <div style={{
-      background: "#444343e0",
+      background: "var(--card-bg)",
       border: "1px solid var(--border)",
       borderRadius: 10,
       padding: "14px 16px",
@@ -2464,7 +2948,7 @@ function AlbumCountPanel() {
         <span style={{
           fontFamily: "var(--fd)", fontSize: 14, fontWeight: 1000,
           letterSpacing: ".1em", textTransform: "uppercase",
-          color: "var(--text-pri)", textShadow: "2px 2px 4px rgba(0,0,0,0.9)",
+          color: "var(--text-pri)", textShadow: "var(--title-shadow)",
         }}>
           Albums Produced
         </span>
@@ -2493,7 +2977,7 @@ function AlbumCountPanel() {
       {/* Count display */}
       {data ? (
         <div style={{
-          background: "#000",
+          background:"var(--bg2)",
           border: "1px solid var(--green)33",
           borderTop: "3px solid var(--green)",
           borderRadius: 8,
@@ -2525,8 +3009,8 @@ function AlbumCountPanel() {
                 Total Albums Completed
               </div>
               <div style={{
-                fontSize: 11,
-                color: "var(--text-dim)",
+                fontSize: 12,
+                color: "var(--text-pri)",
                 marginTop: 3,
               }}>
                 {monthLabel}
@@ -2541,17 +3025,17 @@ function AlbumCountPanel() {
           }}>
             <span style={{
               fontFamily: "var(--fd)",
-              fontSize: isMobile ? 52 : 64,
+              fontSize: isMobile ? 35 : 30,
               fontWeight: 900,
               lineHeight: 1,
               color: data.total > 0 ? "var(--green)" : "var(--text-dim)",
-              textShadow: "2px 2px 8px rgba(0,0,0,0.9)",
+              textShadow: "var(--title-shadow)",
             }}>
               {data.total}
             </span>
             <span style={{
-              fontSize: 10,
-              color: "var(--text-dim)",
+              fontSize: 11,
+              color: "var(--text-pri)",
               textTransform: "uppercase",
               letterSpacing: ".1em",
               marginTop: 2,
@@ -2581,13 +3065,13 @@ function OperatorStatsPanel() {
   const isMobile = useIsMobile();
 
   useEffect(() => {
-    const load = () =>
-      apiFetch(`/api/stats/operators?year=${year}&month=${month}`)
-        .then(setData).catch(() => {});
-    load();
-    const t = setInterval(load, 10_000);
-    return () => clearInterval(t);
-  }, [year, month]);
+  const load = () =>
+    apiFetch(`/api/stats/operators?year=${year}&month=${month}`)
+      .then(setIfChanged(setData)).catch(() => {});
+  load();
+  const t = setInterval(load, 10_000);
+  return () => clearInterval(t);
+}, [year, month]);
 
   const monthLabel = new Date(year, month - 1, 1)
     .toLocaleDateString("en-GB", { month: "long", year: "numeric" });
@@ -2595,7 +3079,7 @@ function OperatorStatsPanel() {
   function Section({ icon, label, accent, rows }) {
     return (
       <div style={{
-        background: "#000",
+        background:"var(--bg2)",
         border: `1px solid ${accent}33`,
         borderTop: `3px solid ${accent}`,
         borderRadius: 8,
@@ -2622,7 +3106,7 @@ function OperatorStatsPanel() {
               textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1,
             }}>{label}</div>
             <div style={{
-              fontSize: 10, color: "var(--text-dim)",
+              fontSize: 12, color: "var(--text-pri)",
               marginTop: 2, letterSpacing: ".04em",
             }}>{monthLabel}</div>
           </div>
@@ -2702,10 +3186,10 @@ function OperatorStatsPanel() {
                       fontSize: isMobile ? 24 : 28,
                       fontWeight: 900, lineHeight: 1,
                       color: accent,
-                      textShadow: "2px 2px 4px rgba(0,0,0,0.9)",
+                      textShadow: "var(--title-shadow)",
                     }}>{r.count}</span>
                     <span style={{
-                      fontSize: 9, color: "var(--text-dim)",
+                      fontSize: 12, color: "var(--text-pri)",
                       textTransform: "uppercase", letterSpacing: ".06em",
                     }}>job{r.count !== 1 ? "s" : ""}</span>
                   </div>
@@ -2720,7 +3204,7 @@ function OperatorStatsPanel() {
 
   return (
     <div style={{
-      background: "#444343e0",
+      background: "var(--card-bg)",
       border: "1px solid var(--border)",
       borderRadius: 10,
       padding: "14px 16px",
@@ -2735,7 +3219,7 @@ function OperatorStatsPanel() {
         <span style={{
           fontFamily: "var(--fd)", fontSize: 14, fontWeight: 1000,
           letterSpacing: ".1em", textTransform: "uppercase",
-          color: "var(--text-pri)", textShadow: "2px 2px 4px rgba(0,0,0,0.9)",
+          color: "var(--text-pri)", textShadow: "var(--title-shadow)",
         }}>
           Operator Activity
         </span>
@@ -2801,8 +3285,6 @@ function OperatorIdentityModal({ dept, onConfirm, onCancel }) {
   const [name,       setName]      = useState("");
   const [underWhom,  setUnder]     = useState("");
   const [machine,    setMachine]   = useState("");
-  const [isStory,    setIsStory]   = useState(false);   
-  const [isRebind,   setIsRebind]  = useState(false);
   const [knownNames, setKnown]     = useState([]);
   const [showNew,    setShowNew]   = useState(false);
   const isPrinting   = dept === "PRINTING";
@@ -2831,14 +3313,12 @@ function OperatorIdentityModal({ dept, onConfirm, onCancel }) {
     onConfirm({
       operator_name: finalName,
       under_whom: finalUnder || undefined,
-      machine: isPrinting ? machine : undefined,
-      is_story:  isPrinting ? isStory  : undefined,   
-      is_rebind: isPrinting ? isRebind : undefined,   
+      machine: isPrinting ? machine : undefined, 
     });
   }
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.85)",
+    <div style={{ position: "fixed", inset: 0, background: "var(--overlay)",
       display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9100 }}>
       <div style={{ background: "var(--bg1)", border: "1px solid var(--border)",
         borderRadius: 12, padding: 28, width: "100%", maxWidth: 400,
@@ -2881,6 +3361,7 @@ function OperatorIdentityModal({ dept, onConfirm, onCancel }) {
               <option value="Jeewan">Jeewan</option>
               <option value="Hirusha">Hirusha</option>
               <option value="Suresh">Suresh</option>
+              <option value="Boss">Sandeepa</option>
               <option value="Boss">Boss</option>
             </select>
           </div>
@@ -2896,41 +3377,7 @@ function OperatorIdentityModal({ dept, onConfirm, onCancel }) {
             </select>
           </div>
         )}
-        {/* ── NEW: Story / Rebind toggles ── */}
-        {isPrinting && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <div>
-              <label>Is this Story printing?</label>
-              <div style={{ display: "flex", gap: 8 }}>
-                {["NO", "YES"].map(opt => (
-                  <button key={opt} type="button"
-                    onClick={() => setIsStory(opt === "YES")}
-                    style={{
-                      flex: 1, padding: "6px 0", borderRadius: 6, fontWeight: 800, fontSize: 13,
-                      background: (isStory ? "YES" : "NO") === opt ? "var(--green)" : "var(--bg3)",
-                      color: (isStory ? "YES" : "NO") === opt ? "#000" : "var(--text-sec)",
-                      border: `1px solid ${(isStory ? "YES" : "NO") === opt ? "#00f82d" : "var(--border)"}`,
-                    }}>{opt}</button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <label>Is this Rebind printing?</label>
-              <div style={{ display: "flex", gap: 8 }}>
-                {["NO", "YES"].map(opt => (
-                  <button key={opt} type="button"
-                    onClick={() => setIsRebind(opt === "YES")}
-                    style={{
-                      flex: 1, padding: "6px 0", borderRadius: 6, fontWeight: 800, fontSize: 13,
-                      background: (isRebind ? "YES" : "NO") === opt ? "var(--green)" : "var(--bg3)",
-                      color: (isRebind ? "YES" : "NO") === opt ? "#000" : "var(--text-sec)",
-                      border: `1px solid ${(isRebind ? "YES" : "NO") === opt ? "#00f82d" : "var(--border)"}`,
-                    }}>{opt}</button>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
+        
 
         <div style={{ display: "flex", gap: 8 }}>
           <button
@@ -2952,14 +3399,14 @@ function OperatorIdentityModal({ dept, onConfirm, onCancel }) {
 
 function BoxPouchModal({ job, onConfirm, onCancel }) {
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9100 }}>
+    <div style={{ position: "fixed", inset: 0, background: "var(--overlay)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9100 }}>
       <div style={{ background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: 12, padding: 28, width: "100%", maxWidth: 400, display: "flex", flexDirection: "column", gap: 16 }}>
         <div style={{ fontSize: 13, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".1em" }}>Before completing</div>
         <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-pri)" }}>Is Box or Pouch complete?</div>
         <div style={{ fontSize: 13, color: "var(--text-sec)" }}>{job.job_no} - {job.customer}</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <button onClick={() => onConfirm("COMPLETE")} style={{ padding: "12px 0", background: "var(--green)", color: "#000", borderRadius: 8, fontWeight: 800, fontSize: 15 }}>Yes, Complete</button>
-          <button onClick={() => onConfirm("NOT_NEEDED")} style={{ padding: "12px 0", background: "#000000", color: "var(--text-pri)", border: "1px solid var(--border)", borderRadius: 8, fontWeight: 800, fontSize: 15 }}>Box/Pouch Not Needed</button>
+          <button onClick={() => onConfirm("NOT_NEEDED")} style={{ padding: "12px 0", background: "var(--surface-sunken)", color: "var(--text-pri)", border: "1px solid var(--border)", borderRadius: 8, fontWeight: 800, fontSize: 15 }}>Box/Pouch Not Needed</button>
           <button onClick={() => onConfirm("PROCESSING")} style={{ padding: "12px 0", background: "var(--amber)", color: "#000", borderRadius: 8, fontWeight: 800, fontSize: 15 }}>Still Processing</button>
         </div>
         <button onClick={onCancel} style={{ padding: "10px 0", background: "var(--red)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 8, fontWeight: 700 }}>Cancel</button>
@@ -2981,7 +3428,7 @@ function BoxPouchEditModal({ job, onClose, onSaved, addToast }) {
     finally { setSaving(false); }
   }
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9200 }} onClick={onClose}>
+    <div style={{ position: "fixed", inset: 0, background: "var(--overlay)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9200 }} onClick={onClose}>
       <div onClick={e => e.stopPropagation()} style={{ background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: 12, padding: 24, width: "100%", maxWidth: 400, display: "flex", flexDirection: "column", gap: 14 }}>
         <div>
           <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 4 }}>Update Box / Pouch Status</div>
@@ -2990,7 +3437,7 @@ function BoxPouchEditModal({ job, onClose, onSaved, addToast }) {
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <button disabled={saving} onClick={() => set("COMPLETE")} style={{ padding: "11px 0", background: "var(--green)", color: "#000", borderRadius: 8, fontWeight: 800, fontSize: 14 }}> Complete</button>
-          <button disabled={saving} onClick={() => set("NOT_NEEDED")} style={{ padding: "11px 0", background: "#000000", color: "var(--text-pri)", border: "1px solid var(--border)", borderRadius: 8, fontWeight: 800, fontSize: 14 }}> Not Needed</button>
+          <button disabled={saving} onClick={() => set("NOT_NEEDED")} style={{ padding: "11px 0", background: "var(--surface-sunken)", color: "var(--text-pri)", border: "1px solid var(--border)", borderRadius: 8, fontWeight: 800, fontSize: 14 }}> Not Needed</button>
           <button disabled={saving} onClick={() => set("PROCESSING")} style={{ padding: "11px 0", background: "var(--amber)", color: "#000", borderRadius: 8, fontWeight: 800, fontSize: 14 }}> Still Processing</button>
         </div>
         <button onClick={onClose} style={{ padding: "10px 0", background: "var(--red)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 8, fontWeight: 700 }}>Cancel</button>
@@ -3014,13 +3461,19 @@ function StationPage({ deptKey }) {
   const isMobile = useIsMobile();
 
   const reload = useCallback(async () => {
-    try {
-      const [q, ds] = await Promise.all([api.queue(deptKey), api.deptStats()]);
-      setQueue(q);
-      setDeptCompletedCount(ds?.monthly?.[cfg.dept] ?? 0);  // monthly
-      setDeptDailyCount(ds?.daily?.[cfg.dept] ?? 0);         // daily
-    } catch {}
-  }, [deptKey]);
+  try {
+    const [q, ds] = await Promise.all([api.queue(deptKey), api.deptStats()]);
+    setIfChanged(setQueue)(q);
+    setDeptCompletedCount(prev => {
+      const next = ds?.monthly?.[cfg.dept] ?? 0;
+      return prev === next ? prev : next;
+    });
+    setDeptDailyCount(prev => {
+      const next = ds?.daily?.[cfg.dept] ?? 0;
+      return prev === next ? prev : next;
+    });
+  } catch {}
+}, [deptKey]);
 
   useEffect(() => {
     reload();
@@ -3080,13 +3533,13 @@ function StationPage({ deptKey }) {
       }
     }
 
-    async function handleIdentityConfirm({ operator_name, under_whom, machine, is_story, is_rebind }) {
+    async function handleIdentityConfirm({ operator_name, under_whom, machine }) {
       const job = identityPending;
       setIdentityPending(null);
       const a = cfg.getAction(job);
       setActingId(job.id);
       try {
-        await api.advance(job.id, cfg.dept, a.action, { operator_name, under_whom, machine, is_story, is_rebind });
+        await api.advance(job.id, cfg.dept, a.action, { operator_name, under_whom, machine});
         add(`Job #${job.job_no} started at ${cfg.label}.`, "success");
         await reload();
       } catch (err) {
@@ -3130,7 +3583,7 @@ function StationPage({ deptKey }) {
           {/* Queue count */}
           <div style={{
             display: "flex", alignItems: "center", gap: isMobile ? 2 : 10,
-            background: "#000", border: "1px solid var(--border)",
+            background:"var(--bg2)", border: "1px solid var(--border)",
             borderRadius: 8, padding: isMobile ? "2px 6px 2px 6px" : "2px 10px 2px 8px",
           }}>
             <span className="r-station-queue-num" style={{
@@ -3138,10 +3591,11 @@ function StationPage({ deptKey }) {
               fontSize: isMobile ? 36 : 50,
               fontWeight: 900, lineHeight: 1,
               color: queue.length > 0 ? "var(--green)" : "var(--text-dim)",
+              minWidth: "1.6em", display: "inline-block", textAlign: "right",
             }}>{queue.length}</span>
             <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-              <span style={{ fontSize: isMobile ? 9 : 12, fontWeight: 800, color: "#fff", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>{queue.length !== 1 ? "JOBS" : "JOB"}</span>
-              <span style={{ fontSize: isMobile ? 7 : 10, fontWeight: 600, color: "#dad2d2", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>IN QUEUE</span>
+              <span style={{ fontSize: isMobile ? 9 : 12, fontWeight: 800, color:"var(--text-pri)", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>{queue.length !== 1 ? "JOBS" : "JOB"}</span>
+              <span style={{ fontSize: isMobile ? 7 : 10, fontWeight: 600, color: "var(--text-pri)", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>IN QUEUE</span>
             </div>
           </div>
 
@@ -3158,7 +3612,7 @@ function StationPage({ deptKey }) {
             color: deptDailyCount > 0 ? "#4749c2" : "var(--text-dim)",
           }}>{deptDailyCount ?? "—"}</span>
           <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-            <span style={{ fontSize: isMobile ? 9 : 12, fontWeight: 800, color: "#4749c2)", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>Daily</span>
+            <span style={{ fontSize: isMobile ? 9 : 12, fontWeight: 800, color: "#ffff", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>Daily</span>
             <span style={{ fontSize: isMobile ? 7 : 10, fontWeight: 600, color: "#4749c2", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>Done</span>
           </div>
         </div>
@@ -3178,8 +3632,8 @@ function StationPage({ deptKey }) {
               color: deptCompletedCount > 0 ? "var(--green)" : "var(--text-dim)",
             }}>{deptCompletedCount ?? "—"}</span>
             <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-              <span style={{ fontSize: isMobile ? 9 : 12, fontWeight: 800, color: "#ffffff", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>Monthly</span>
-              <span style={{ fontSize: isMobile ? 7 : 10, fontWeight: 600, color: "#6aaa6a", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>Done</span>
+              <span style={{ fontSize: isMobile ? 9 : 12, fontWeight: 800, color: "#ffff", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>Monthly</span>
+              <span style={{ fontSize: isMobile ? 7 : 10, fontWeight: 600, color: "var(--success-text)", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>Done</span>
             </div>
           </div>
         </div>
@@ -3254,6 +3708,831 @@ function StationPage({ deptKey }) {
     </>
   );
 }
+
+// ── Damage tracking ────────────────────────────────────────────────────────────
+const DAMAGE_DEPT_LABELS = { PRINTING: "Printing", LAMINATING: "Laminating", BINDING: "Binding" };
+const DAMAGE_DEPT_COLORS = { PRINTING: "var(--blue)", LAMINATING: "var(--cyan)", BINDING: "var(--green)" };
+
+function DamageEntryForm({ dept, onCreated, addToast }) {
+  const [prices, setPrices] = useState([]);
+  const [knownNames, setKnownNames] = useState([]);
+  const [priceId, setPriceId] = useState("");
+  const [jobNo, setJobNo] = useState("");          
+  const [customer, setCustomer] = useState("");
+  const [operatorName, setOperatorName] = useState("");
+  const [showNewName, setShowNewName] = useState(false);
+  const [reason, setReason] = useState("");
+  const [quantity, setQuantity] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => { api.paperPrices().then(setPrices).catch(() => {}); }, []);
+  useEffect(() => {
+    if (!dept) return;
+    api.knownDamageOperators(dept).then(d => setKnownNames(d.names || [])).catch(() => {});
+  }, [dept]);
+
+  const selectedPrice = prices.find(p => p.id === Number(priceId));
+  const qtyNum = Number(quantity) || 0;
+  const previewTotal = selectedPrice ? selectedPrice.unit_price * qtyNum : 0;
+
+  async function submit(e) {
+    e.preventDefault();
+    if (!priceId || !operatorName.trim() || !reason.trim() || qtyNum <= 0) return;
+    setSaving(true);
+    try {
+      await api.createDamage({
+        department: dept,
+        paper_price_id: Number(priceId),
+        job_no: jobNo.trim(),      
+        customer: customer.trim(), 
+        operator_name: operatorName.trim(),
+        reason: reason.trim(),
+        quantity: qtyNum,
+      });
+      addToast(`✓ Damage entry recorded.`, "success");
+      setPriceId(""); setJobNo(""); setCustomer(""); setReason(""); setQuantity("");  
+      onCreated();
+    } catch (err) { addToast(err.message, "error"); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* ── ADD: Job No / Photographer row ── */}
+      <div className="r-grid-2">
+        <div>
+          <label>Job No <span style={{ color: "var(--text-dim)", fontWeight: 400 }}>(optional)</span></label>
+          <input value={jobNo} onChange={e => setJobNo(e.target.value)} placeholder="JOB-0001" />
+        </div>
+        <div>
+          <label>Photographer / Studio <span style={{ color: "var(--text-dim)", fontWeight: 400 }}>(optional)</span></label>
+          <input value={customer} onChange={e => setCustomer(e.target.value)} placeholder="Studio name" />
+        </div>
+      </div>
+
+      <div className="r-grid-2">
+        <div>
+          <label>Paper Size *</label>
+          <select value={priceId} onChange={e => setPriceId(e.target.value)}>
+            <option value="">-- Select paper size --</option>
+            {prices.map(p => <option key={p.id} value={p.id}>{p.label} (Rs. {p.unit_price})</option>)}
+          </select>
+        </div>
+        <div>
+          <label>Quantity *</label>
+          <input type="number" min="1" value={quantity} onChange={e => setQuantity(e.target.value)} placeholder="e.g. 2" />
+        </div>
+      </div>
+
+      <div>
+        <label>Damaged By *</label>
+        {knownNames.length > 0 && !showNewName ? (
+          <select
+            value={knownNames.includes(operatorName) ? operatorName : ""}
+            onChange={e => {
+              if (e.target.value === "__new__") { setShowNewName(true); setOperatorName(""); }
+              else setOperatorName(e.target.value);
+            }}
+          >
+            <option value="">-- Select name --</option>
+            {knownNames.map(n => <option key={n} value={n}>{n}</option>)}
+            <option value="__new__">+ Type a new name</option>
+          </select>
+        ) : (
+          <div style={{ display: "flex", gap: 6 }}>
+            <input value={operatorName} onChange={e => setOperatorName(e.target.value.replace(/\b\w/g, c => c.toUpperCase()))} placeholder="Enter name" style={{ flex: 1 }} />
+            {knownNames.length > 0 && (
+              <button type="button" onClick={() => { setShowNewName(false); setOperatorName(""); }} style={{ padding: "0 10px", background: "var(--bg3)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 12 }}>← Back</button>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <label>Reason *</label>
+        <textarea value={reason} onChange={e => setReason(e.target.value)} placeholder="e.g. Paper jam, color mismatch…" rows={2} />
+      </div>
+
+      {selectedPrice && qtyNum > 0 && (
+        <div style={{ background: "#1a1200", border: "1px solid var(--amber)", borderRadius: 6, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span style={{ fontSize: 12, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".06em" }}>Estimated Value</span>
+          <span style={{ fontFamily: "var(--fm)", fontSize: 18, fontWeight: 900, color: "var(--amber)" }}>Rs. {previewTotal}</span>
+        </div>
+      )}
+
+      <button type="submit" disabled={saving} style={{
+        padding: "13px 0", background: saving ? "var(--bg3)" : "var(--red)",
+        color: saving ? "var(--text-dim)" : "#fff", borderRadius: 8, fontWeight: 800, fontSize: 15,
+      }}>{saving ? "Saving…" : "⚠ Record Damage"}</button>
+    </form>
+  );
+}
+
+function DamageEditModal({ entry, onClose, onSaved, addToast }) {
+  const [prices, setPrices] = useState([]);
+  const [priceId, setPriceId] = useState(entry.paper_price_id);
+  const [jobNo, setJobNo] = useState(entry.job_no || "");    
+  const [customer, setCustomer] = useState(entry.customer || "");
+  const [operatorName, setOperatorName] = useState(entry.operator_name);
+  const [reason, setReason] = useState(entry.reason);
+  const [quantity, setQuantity] = useState(entry.quantity);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => { api.paperPrices().then(setPrices).catch(() => {}); }, []);
+
+  async function save() {
+    setSaving(true);
+    try {
+      await api.updateDamage(entry.id, {
+        paper_price_id: Number(priceId),
+        job_no: jobNo.trim(),          // ADD
+        customer: customer.trim(),     
+        operator_name: operatorName.trim(),
+        reason: reason.trim(),
+        quantity: Number(quantity),
+      });
+      addToast("✓ Damage entry updated.", "success");
+      onSaved();
+    } catch (err) { addToast(err.message, "error"); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "var(--overlay)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9200 }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: 12, padding: 24, width: "100%", maxWidth: 420, display: "flex", flexDirection: "column", gap: 14 }}>
+        <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".1em" }}>Edit Damage Entry</div>
+
+        {/* ── ADD ── */}
+        <div>
+          <label>Job No</label>
+          <input value={jobNo} onChange={e => setJobNo(e.target.value)} placeholder="JOB-0001" />
+        </div>
+        <div>
+          <label>Photographer / Studio</label>
+          <input value={customer} onChange={e => setCustomer(e.target.value)} placeholder="Studio name" />
+        </div>
+
+        <div>
+          <label>Paper Size</label>
+          <select value={priceId} onChange={e => setPriceId(e.target.value)}>
+            {prices.map(p => <option key={p.id} value={p.id}>{p.label} (Rs. {p.unit_price})</option>)}
+          </select>
+        </div>
+        <div>
+          <label>Quantity</label>
+          <input type="number" min="1" value={quantity} onChange={e => setQuantity(e.target.value)} />
+        </div>
+        <div>
+          <label>Damaged By</label>
+          <input value={operatorName} onChange={e => setOperatorName(e.target.value)} />
+        </div>
+        <div>
+          <label>Reason</label>
+          <textarea value={reason} onChange={e => setReason(e.target.value)} rows={2} />
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={save} disabled={saving} style={{ flex: 1, padding: "12px 0", background: "var(--amber)", color: "#000", borderRadius: 8, fontWeight: 800, fontSize: 14 }}>{saving ? "Saving…" : "✓ Save Changes"}</button>
+          <button onClick={onClose} style={{ padding: "12px 18px", background: "var(--bg3)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 8, fontWeight: 700 }}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DamageEntryCard({ entry, onChanged, addToast }) {
+  const [editing, setEditing] = useState(false);
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  function createdMs() {
+    const s = entry.created_at;
+    return new Date(s.endsWith("Z") ? s : s + "Z").getTime();
+  }
+  const WINDOW_MS = 24 * 3600 * 1000;
+  const remaining = WINDOW_MS - (now - createdMs());
+  const withinWindow = remaining > 0;
+
+  async function del() {
+    if (!window.confirm(`Delete this damage entry (${entry.paper_label} × ${entry.quantity})?`)) return;
+    try {
+      await api.deleteDamage(entry.id);
+      addToast("Damage entry deleted.", "info");
+      onChanged();
+    } catch (err) { addToast(err.message, "error"); }
+  }
+
+  function fmtRemaining() {
+    const h = Math.floor(remaining / 3600000);
+    const m = Math.floor((remaining % 3600000) / 60000);
+    return `${h}h ${m}m left to edit`;
+  }
+
+  return (
+    <div style={{
+      background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 8,
+      padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8,
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontFamily: "var(--fm)", fontSize: 15, fontWeight: 800, color: "var(--amber)" }}>{entry.paper_label}</span>
+            <span style={{ fontSize:15, color: "var(--text-pri)",fontweight:900 }}>× {entry.quantity}</span>
+            <span style={{ fontSize: 12, padding: "2px 7px", borderRadius: 4, background: DAMAGE_DEPT_COLORS[entry.department] + "22", color: DAMAGE_DEPT_COLORS[entry.department], border: `1px solid ${DAMAGE_DEPT_COLORS[entry.department]}55`, fontWeight: 700, textTransform: "uppercase" }}>
+              {DAMAGE_DEPT_LABELS[entry.department] || entry.department}
+            </span>
+          </div>
+          <div style={{ fontSize: 13, color: "var(--text-pri)", marginTop: 4 }}>{entry.reason}</div>
+
+          {(entry.job_no || entry.customer) && (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 5 }}>
+              {entry.job_no && (
+                <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 4, background: "var(--info-bg)", border: "1px solid var(--border-strong)", color: "var(--amber)" }}>
+                  {entry.job_no}
+                </span>
+              )}
+              {entry.customer && (
+                <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 4, background: "var(--info-bg)", border: "1px solid var(--border-strong)", color: "var(--text-pri)" }}>
+                  {entry.customer}
+                </span>
+              )}
+            </div>
+          )}
+          <div style={{ fontSize: 12, color: "var(--text-pri)", marginTop: 3, display: "flex", alignItems: "center", gap: 6 }}>
+            👤 {entry.operator_name}
+            <span>-</span>
+            {new Date(entry.created_at.endsWith("Z") ? entry.created_at : entry.created_at + "Z").toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+          </div>
+        </div>
+        <div style={{ textAlign: "right", flexShrink: 0 }}>
+          <div style={{ fontFamily: "var(--fm)", fontSize: 17, fontWeight: 900, color: "var(--red)" }}>Rs. {entry.total_value}</div>
+          <div style={{ fontSize: 12, color: "var(--text-pri)" }}>@ Rs.{entry.unit_price_snapshot}</div>
+        </div>
+      </div>
+
+      {withinWindow && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 4, paddingTop: 8, borderTop: "1px dashed var(--border)" }}>
+          <span style={{ fontSize: 12, color: "var(--text-pri)" }}>{fmtRemaining()}</span>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button onClick={() => setEditing(true)} style={{ padding: "5px 12px", fontSize: 11, fontWeight: 700, borderRadius: 5, background: "var(--bg3)", color: "var(--amber)", border: "1px solid var(--amber)" }}><Pen size={12} /></button>
+            <button onClick={del} style={{ padding: "5px 12px", fontSize: 11, fontWeight: 700, borderRadius: 5, background: "var(--danger-bg)", color: "var(--red)", border: "1px solid var(--red)" }}><Trash size={12} /></button>
+          </div>
+        </div>
+      )}
+
+      {editing && (
+        <DamageEditModal entry={entry} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); onChanged(); }} addToast={addToast} />
+      )}
+    </div>
+  );
+}
+
+function PaperPricesModal({ onClose, addToast }) {
+  const [prices, setPrices] = useState([]);
+  const [edits, setEdits] = useState({});
+  const [saving, setSaving] = useState({});
+  const isMobile = useIsMobile();
+
+  const reload = useCallback(() => {
+    api.paperPrices().then(setPrices).catch(() => {});
+  }, []);
+  useEffect(() => { reload(); }, [reload]);
+
+  async function save(id) {
+    const val = Number(edits[id]);
+    if (!val || val < 0) { addToast("Enter a valid price.", "error"); return; }
+    setSaving(s => ({ ...s, [id]: true }));
+    try {
+      await api.updatePaperPrice(id, val);
+      addToast("✓ Price updated.", "success");
+      reload();
+    } catch (err) { addToast(err.message, "error"); }
+    finally { setSaving(s => ({ ...s, [id]: false })); }
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "var(--overlay)", display: "flex", alignItems: isMobile ? "flex-end" : "center", justifyContent: "center", zIndex: 9400 }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: "var(--bg1)", border: "1px solid var(--border)",
+        borderRadius: isMobile ? "16px 16px 0 0" : 12, padding: 22,
+        width: "100%", maxWidth: 480, maxHeight: isMobile ? "92dvh" : "88vh", overflowY: "auto",
+        display: "flex", flexDirection: "column", gap: 14,
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".1em" }}>Admin</div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: "var(--amber)" }}>Paper Price List</div>
+          </div>
+          <button onClick={onClose} style={{ padding: "8px 12px", background: "var(--bg3)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 6, fontWeight: 700 }}>✕</button>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {prices.map(p => (
+            <div key={p.id} style={{
+              display: "flex", alignItems: "center", gap: 8,
+              background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px",
+            }}>
+              <div style={{ flex: 1, fontSize: 13, fontWeight: 700, color: "var(--text-pri)" }}>{p.label}</div>
+              <span style={{ fontSize: 12, color: "var(--text-dim)" }}>Rs.</span>
+              <input
+                type="number"
+                defaultValue={p.unit_price}
+                onChange={e => setEdits(ed => ({ ...ed, [p.id]: e.target.value }))}
+                style={{ width: 80, margin: 0, textAlign: "right" }}
+              />
+              <button onClick={() => save(p.id)} disabled={saving[p.id]} style={{
+                padding: "8px 12px", fontSize: 12, fontWeight: 700, borderRadius: 6,
+                background: "var(--amber)", color: "#000",
+              }}>{saving[p.id] ? "…" : "Save"}</button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DamagesPage({ deptKey }) {
+  const { toasts, add } = useToast();
+  const isAdminView = !deptKey;
+  const dept = deptKey ? deptKey.toUpperCase() : "";
+  const [filterDept, setFilterDept] = useState("");
+  const [data, setData] = useState(null);
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const [showPrices, setShowPrices] = useState(false);
+  const isMobile = useIsMobile();
+
+  const activeDept = isAdminView ? filterDept : dept;
+  const invalidDept = !isAdminView && !DAMAGE_DEPTS.includes(dept);
+
+  const reload = useCallback(async () => {
+  if (invalidDept) return;
+  try {
+    const d = await api.damages(activeDept || undefined, page);
+    setIfChanged(setData)(d);
+  } catch (err) { add(err.message, "error"); }
+  finally { setLoading(false); }
+}, [activeDept, page, invalidDept]);
+
+  useEffect(() => { reload(); }, [reload]);
+  useEffect(() => {
+    const t = setInterval(reload, POLL_INTERVAL_MS);
+    return () => clearInterval(t);
+  }, [reload]);
+
+  const accent = isAdminView ? "var(--red)" : (DAMAGE_DEPT_COLORS[dept] || "var(--red)");
+
+  if (invalidDept) {
+    return (
+      <Shell title="DAMAGES" accent="var(--red)">
+        <div style={{ textAlign: "center", padding: "60px 0", color: "var(--text-dim)" }}>
+          Damage tracking is not available for this department.
+        </div>
+      </Shell>
+    );
+  }
+
+  return (
+    <>
+      <Shell title={isAdminView ? "PAPER DAMAGE OVERVIEW" : `${DAMAGE_DEPT_LABELS[dept]} DAMAGES`} accent={accent} topRight={
+        IS_ADMIN && (
+          <button onClick={() => setShowPrices(true)} style={{
+            padding: isMobile ? "6px 10px" : "8px 14px",
+            background: "var(--bg3)", color: "var(--amber)",
+            border: "1px solid var(--amber)", borderRadius: 6, fontWeight: 700,
+            fontSize: isMobile ? 12 : 14,
+          }}>{isMobile ? "Prices" : "Manage Paper Prices"}</button>
+        )
+      }>
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {!isAdminView && (
+            <Sec title="Record New Damage" accent={accent}>
+              <DamageEntryForm dept={dept} onCreated={() => { setPage(1); reload(); }} addToast={add} />
+            </Sec>
+          )}
+
+          {isAdminView && (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {["", "PRINTING", "LAMINATING", "BINDING"].map(d => (
+                <button key={d || "ALL"} onClick={() => { setFilterDept(d); setPage(1); }} style={{
+                  padding: "7px 16px", fontSize: 12, fontWeight: 700, borderRadius: 6,
+                  background: filterDept === d ? "var(--amber)" : "var(--bg2)",
+                  color: filterDept === d ? "#000" : "var(--text-sec)",
+                  border: `1px solid ${filterDept === d ? "var(--amber)" : "var(--border)"}`,
+                }}>{d ? DAMAGE_DEPT_LABELS[d] : "All Departments"}</button>
+              ))}
+            </div>
+          )}
+
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--text-pri)", marginBottom: 10 }}>
+              Recent Entries {data ? `(${data.total})` : ""}
+            </div>
+            {loading && <div style={{ textAlign: "center", padding: "30px 0", color: "var(--text-pri)" }}>LOADING…</div>}
+            {!loading && data?.entries?.length === 0 && (
+              <div style={{ textAlign: "center", padding: "30px 0", color: "var(--text-pri)" }}>No damage entries yet.</div>
+            )}
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {data?.entries?.map(e => (
+                <DamageEntryCard key={e.id} entry={e} onChanged={reload} addToast={add} />
+              ))}
+            </div>
+            {data && data.pages > 1 && (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 12 }}>
+                <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} style={{ padding: "7px 14px", background: "var(--bg2)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, fontWeight: 700 }}>◀ Prev</button>
+                <span style={{ fontSize: 13, color: "var(--text-dim)", fontFamily: "var(--fm)" }}>{page} / {data.pages}</span>
+                <button onClick={() => setPage(p => Math.min(data.pages, p + 1))} disabled={page === data.pages} style={{ padding: "7px 14px", background: "var(--bg2)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, fontWeight: 700 }}>Next ▶</button>
+              </div>
+            )}
+          </div>
+        </div>
+      </Shell>
+      {showPrices && <PaperPricesModal onClose={() => setShowPrices(false)} addToast={add} />}
+      <ToastStack toasts={toasts} />
+    </>
+  );
+}
+
+// ── Paper Stock tracking ─────────────────────────────────────────────────────
+function PaperStockCards({ stock }) {
+  const isMobile = useIsMobile();
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, 1fr)", gap: 10 }}>
+      {stock.map(s => {
+        const low = s.balance <= LOW_STOCK_THRESHOLD;
+        return (
+          <div key={s.size} className={low ? "blink" : ""} style={{
+            background: low ? "var(--danger-bg)" : "var(--bg2)",
+            border: `1px solid ${low ? "var(--red)" : "var(--border)"}`,
+            borderTop: `3px solid ${low ? "var(--red)" : "var(--blue)"}`,
+            borderRadius: 8, padding: "14px 12px", textAlign: "center",
+          }}>
+            <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 6 }}>{s.size}</div>
+            <div style={{
+              fontFamily: "var(--fd)", fontSize: isMobile ? 28 : 34, fontWeight: 900,
+              color: low ? "var(--red)" : "var(--text-pri)",
+              minWidth: "1.6em", display: "inline-block",
+            }}>{s.balance}</div>
+            <div style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 2 }}>sheets left</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function AddPacketControl({ onAdded, addToast }) {
+  const [size, setSize] = useState(PAPER_SIZES[0]);
+  const [saving, setSaving] = useState(false);
+
+  async function add() {
+    setSaving(true);
+    try {
+      await api.addPaperPacket(size);
+      addToast(`✓ New ${size} packet added (+100 sheets)`, "success");
+      onAdded();
+    } catch (err) { addToast(err.message, "error"); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+      <div style={{ flex: 1, minWidth: 160 }}>
+        <label>Paper Size</label>
+        <select value={size} onChange={e => setSize(e.target.value)}>
+          {PAPER_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+      </div>
+      <button onClick={add} disabled={saving} style={{
+        padding: "11px 20px", background: saving ? "var(--bg3)" : "var(--blue)",
+        color: saving ? "var(--text-dim)" : "#fff", borderRadius: 8, fontWeight: 800, fontSize: 14,
+      }}>{saving ? "Adding…" : "+ Add New Packet (100)"}</button>
+    </div>
+  );
+}
+
+function PaperUsageForm({ onCreated, addToast }) {
+  const [jobNo, setJobNo] = useState("");
+  const [knownNames, setKnownNames] = useState([]);
+  const [operatorName, setOperatorName] = useState("");
+  const [showNewName, setShowNewName] = useState(false);
+  const [paperSize, setPaperSize] = useState(PAPER_SIZES[0]);
+  const [okPages, setOkPages] = useState("");
+  const [printDamage, setPrintDamage] = useState("");
+  const [accuRp, setAccuRp] = useState("");
+  const [bindRp, setBindRp] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => { api.knownPaperOperators().then(d => setKnownNames(d.names || [])).catch(() => {}); }, []);
+
+  const total = (Number(okPages) || 0) + (Number(printDamage) || 0) + (Number(accuRp) || 0) + (Number(bindRp) || 0);
+
+  async function submit(e) {
+    e.preventDefault();
+    if (!jobNo.trim() || !operatorName.trim() || total <= 0) return;
+    setSaving(true);
+    try {
+      await api.createPaperUsage({
+        job_no: jobNo.trim(),
+        operator_name: operatorName.trim(),
+        paper_size: paperSize,
+        ok_pages: Number(okPages) || 0,
+        print_damage: Number(printDamage) || 0,
+        accu_rp: Number(accuRp) || 0,
+        bind_rp: Number(bindRp) || 0,
+      });
+      addToast(`✓ Recorded ${total} sheets used for #${jobNo}`, "success");
+      setJobNo(""); setOkPages(""); setPrintDamage(""); setAccuRp(""); setBindRp("");
+      onCreated();
+    } catch (err) { addToast(err.message, "error"); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div className="r-grid-2">
+        <div>
+          <label>Job No *</label>
+          <input value={jobNo} onChange={e => setJobNo(e.target.value)} placeholder="JOB-0001" />
+        </div>
+        <div>
+          <label>Paper Size *</label>
+          <select value={paperSize} onChange={e => setPaperSize(e.target.value)}>
+            {PAPER_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div>
+        <label>Operator *</label>
+        {knownNames.length > 0 && !showNewName ? (
+          <select
+            value={knownNames.includes(operatorName) ? operatorName : ""}
+            onChange={e => {
+              if (e.target.value === "__new__") { setShowNewName(true); setOperatorName(""); }
+              else setOperatorName(e.target.value);
+            }}
+          >
+            <option value="">-- Select name --</option>
+            {knownNames.map(n => <option key={n} value={n}>{n}</option>)}
+            <option value="__new__">+ Type a new name</option>
+          </select>
+        ) : (
+          <div style={{ display: "flex", gap: 6 }}>
+            <input value={operatorName} onChange={e => setOperatorName(e.target.value.replace(/\b\w/g, c => c.toUpperCase()))} placeholder="Enter name" style={{ flex: 1 }} />
+            {knownNames.length > 0 && (
+              <button type="button" onClick={() => { setShowNewName(false); setOperatorName(""); }} style={{ padding: "0 10px", background: "var(--bg3)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 12 }}>← Back</button>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="r-grid-4">
+        <div>
+          <label>OK Pages</label>
+          <input type="number" min="0" value={okPages} onChange={e => setOkPages(e.target.value)} placeholder="0" />
+        </div>
+        <div>
+          <label>Print Damage</label>
+          <input type="number" min="0" value={printDamage} onChange={e => setPrintDamage(e.target.value)} placeholder="0" />
+        </div>
+        <div>
+          <label>Accu RP</label>
+          <input type="number" min="0" value={accuRp} onChange={e => setAccuRp(e.target.value)} placeholder="0" />
+        </div>
+        <div>
+          <label>Bind RP</label>
+          <input type="number" min="0" value={bindRp} onChange={e => setBindRp(e.target.value)} placeholder="0" />
+        </div>
+      </div>
+
+      {total > 0 && (
+        <div style={{ background: "var(--info-bg)", border: "1px solid var(--blue)", borderRadius: 6, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span style={{ fontSize: 12, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".06em" }}>Total Sheets Used</span>
+          <span style={{ fontFamily: "var(--fm)", fontSize: 18, fontWeight: 900, color: "var(--blue)" }}>{total}</span>
+        </div>
+      )}
+
+      <button type="submit" disabled={saving} style={{
+        padding: "13px 0", background: saving ? "var(--bg3)" : "var(--blue)",
+        color: saving ? "var(--text-dim)" : "#fff", borderRadius: 8, fontWeight: 800, fontSize: 15,
+      }}>{saving ? "Saving…" : "✓ Record Usage"}</button>
+    </form>
+  );
+}
+
+function PaperUsageEditModal({ entry, onClose, onSaved, addToast }) {
+  const [jobNo, setJobNo] = useState(entry.job_no);
+  const [operatorName, setOperatorName] = useState(entry.operator_name);
+  const [paperSize, setPaperSize] = useState(entry.paper_size);
+  const [okPages, setOkPages] = useState(entry.ok_pages);
+  const [printDamage, setPrintDamage] = useState(entry.print_damage);
+  const [accuRp, setAccuRp] = useState(entry.accu_rp);
+  const [bindRp, setBindRp] = useState(entry.bind_rp);
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    setSaving(true);
+    try {
+      await api.updatePaperUsage(entry.id, {
+        job_no: jobNo.trim(),
+        operator_name: operatorName.trim(),
+        paper_size: paperSize,
+        ok_pages: Number(okPages) || 0,
+        print_damage: Number(printDamage) || 0,
+        accu_rp: Number(accuRp) || 0,
+        bind_rp: Number(bindRp) || 0,
+      });
+      addToast("✓ Entry updated.", "success");
+      onSaved();
+    } catch (err) { addToast(err.message, "error"); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "var(--overlay)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9200 }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: 12, padding: 24, width: "100%", maxWidth: 440, display: "flex", flexDirection: "column", gap: 14 }}>
+        <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".1em" }}>Edit Paper Usage</div>
+        <div className="r-grid-2">
+          <div>
+            <label>Job No</label>
+            <input value={jobNo} onChange={e => setJobNo(e.target.value)} />
+          </div>
+          <div>
+            <label>Paper Size</label>
+            <select value={paperSize} onChange={e => setPaperSize(e.target.value)}>
+              {PAPER_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+        </div>
+        <div>
+          <label>Operator</label>
+          <input value={operatorName} onChange={e => setOperatorName(e.target.value)} />
+        </div>
+        <div className="r-grid-4">
+          <div><label>OK</label><input type="number" min="0" value={okPages} onChange={e => setOkPages(e.target.value)} /></div>
+          <div><label>Print Dmg</label><input type="number" min="0" value={printDamage} onChange={e => setPrintDamage(e.target.value)} /></div>
+          <div><label>Accu RP</label><input type="number" min="0" value={accuRp} onChange={e => setAccuRp(e.target.value)} /></div>
+          <div><label>Bind RP</label><input type="number" min="0" value={bindRp} onChange={e => setBindRp(e.target.value)} /></div>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={save} disabled={saving} style={{ flex: 1, padding: "12px 0", background: "var(--amber)", color: "#000", borderRadius: 8, fontWeight: 800, fontSize: 14 }}>{saving ? "Saving…" : "✓ Save Changes"}</button>
+          <button onClick={onClose} style={{ padding: "12px 18px", background: "var(--bg3)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 8, fontWeight: 700 }}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PaperUsageCard({ entry, onChanged, addToast }) {
+  const [editing, setEditing] = useState(false);
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  function createdMs() {
+    const s = entry.created_at;
+    return new Date(s.endsWith("Z") ? s : s + "Z").getTime();
+  }
+  const WINDOW_MS = 24 * 3600 * 1000;
+  const remaining = WINDOW_MS - (now - createdMs());
+  const withinWindow = remaining > 0;
+
+  async function del() {
+    if (!window.confirm(`Delete this usage entry for #${entry.job_no}?`)) return;
+    try {
+      await api.deletePaperUsage(entry.id);
+      addToast("Entry deleted.", "info");
+      onChanged();
+    } catch (err) { addToast(err.message, "error"); }
+  }
+
+  function fmtRemaining() {
+    const h = Math.floor(remaining / 3600000);
+    const m = Math.floor((remaining % 3600000) / 60000);
+    return `${h}h ${m}m left to edit`;
+  }
+
+  return (
+    <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 8, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontFamily: "var(--fm)", fontSize: 15, fontWeight: 800, color: "var(--amber)" }}>{entry.job_no}</span>
+            <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 4, background: "var(--blue)22", color: "var(--blue)", border: "1px solid var(--blue)55", fontWeight: 700 }}>{entry.paper_size}</span>
+          </div>
+          <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 4 }}>👤 {entry.operator_name}</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
+            {entry.ok_pages > 0 && <Chip label="OK" value={entry.ok_pages} accent="#22c55e" />}
+            {entry.print_damage > 0 && <Chip label="Print Dmg" value={entry.print_damage} accent="#e53e3e" />}
+            {entry.accu_rp > 0 && <Chip label="Accu RP" value={entry.accu_rp} accent="#06b6d4" />}
+            {entry.bind_rp > 0 && <Chip label="Bind RP" value={entry.bind_rp} accent="#a855f7" />}
+          </div>
+        </div>
+        <div style={{ textAlign: "right", flexShrink: 0 }}>
+          <div style={{ fontFamily: "var(--fm)", fontSize: 18, fontWeight: 900, color: "var(--text-pri)" }}>{entry.total_used}</div>
+          <div style={{ fontSize: 10, color: "var(--text-dim)" }}>sheets used</div>
+        </div>
+      </div>
+      {withinWindow && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 4, paddingTop: 8, borderTop: "1px dashed var(--border)" }}>
+          <span style={{ fontSize: 10, color: "var(--text-dim)" }}>{fmtRemaining()}</span>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button onClick={() => setEditing(true)} style={{ padding: "5px 12px", fontSize: 11, fontWeight: 700, borderRadius: 5, background: "var(--bg3)", color: "var(--amber)", border: "1px solid var(--amber)" }}><Pen size={12} /></button>
+            <button onClick={del} style={{ padding: "5px 12px", fontSize: 11, fontWeight: 700, borderRadius: 5, background: "var(--danger-bg)", color: "var(--red)", border: "1px solid var(--red)" }}><Trash size={12} /></button>
+          </div>
+        </div>
+      )}
+      {editing && <PaperUsageEditModal entry={entry} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); onChanged(); }} addToast={addToast} />}
+    </div>
+  );
+}
+
+function PapersPage() {
+  const { toasts, add } = useToast();
+  const [stock, setStock] = useState([]);
+  const [data, setData] = useState(null);
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const t = setTimeout(() => { setDebouncedSearch(search); setPage(1); }, 350);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const reloadStock = useCallback(() => {
+    api.paperStock().then(setIfChanged(setStock)).catch(() => {});
+  }, []);
+
+  const reloadUsage = useCallback(async () => {
+    try {
+      const d = await api.paperUsage(debouncedSearch, page);
+      setIfChanged(setData)(d);
+    } catch (err) { add(err.message, "error"); }
+    finally { setLoading(false); }
+  }, [debouncedSearch, page]);
+
+  useEffect(() => { reloadStock(); }, [reloadStock]);
+  useEffect(() => { reloadUsage(); }, [reloadUsage]);
+  useEffect(() => {
+    const t = setInterval(() => { reloadStock(); reloadUsage(); }, POLL_INTERVAL_MS);
+    return () => clearInterval(t);
+  }, [reloadStock, reloadUsage]);
+
+  function reloadAll() {
+    reloadStock();
+    reloadUsage();
+  }
+
+  return (
+    <>
+      <Shell title="PAPER STOCK" accent="var(--blue)">
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <PaperStockCards stock={stock} />
+
+          <Sec title="Add New Packet" accent="var(--blue)">
+            <AddPacketControl onAdded={reloadAll} addToast={add} />
+          </Sec>
+
+          <Sec title="Record Paper Usage" accent="var(--blue)">
+            <PaperUsageForm onCreated={reloadAll} addToast={add} />
+          </Sec>
+
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--text-pri)", marginBottom: 10 }}>
+              Recent Usage {data ? `(${data.total})` : ""}
+            </div>
+            <SearchBar value={search} onChange={setSearch} placeholder="Search Job No / Operator…" />
+            {loading && <div style={{ textAlign: "center", padding: "30px 0", color: "var(--text-dim)" }}>LOADING…</div>}
+            {!loading && data?.entries?.length === 0 && (
+              <div style={{ textAlign: "center", padding: "30px 0", color: "var(--text-dim)" }}>No usage entries yet.</div>
+            )}
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {data?.entries?.map(e => (
+                <PaperUsageCard key={e.id} entry={e} onChanged={reloadAll} addToast={add} />
+              ))}
+            </div>
+            {data && data.pages > 1 && (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 12 }}>
+                <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} style={{ padding: "7px 14px", background: "var(--bg2)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, fontWeight: 700 }}>◀ Prev</button>
+                <span style={{ fontSize: 13, color: "var(--text-dim)", fontFamily: "var(--fm)" }}>{page} / {data.pages}</span>
+                <button onClick={() => setPage(p => Math.min(data.pages, p + 1))} disabled={page === data.pages} style={{ padding: "7px 14px", background: "var(--bg2)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, fontWeight: 700 }}>Next ▶</button>
+              </div>
+            )}
+          </div>
+        </div>
+      </Shell>
+      <ToastStack toasts={toasts} />
+    </>
+  );
+}
 // ── 3. OVERDUE DELIVERY ALERT ─────────────────────────────────────────────────
 // Jobs that are past their delivery date but still in the pipeline.
 // Computed from `active` jobs — no backend needed.
@@ -3287,11 +4566,11 @@ function OverdueAlert({ active }) {
             }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                 <span style={{ fontFamily: "var(--fm)", fontSize: 12, color: "var(--amber)", fontWeight: 800 }}>{job.job_no}</span>
-                <span style={{ fontSize: 12, color: "var(--text-pri)", fontWeight: 600 }}>{job.customer}</span>
+                <span style={{ fontSize: 12, color: "#ffff", fontWeight: 600 }}>{job.customer}</span>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 {currentDept && !isMobile && (
-                  <span style={{ fontSize: 10, color: "var(--text-dim)" }}>@ {({ PRINTING:"Print", LAMINATING:"Lam", LASER_CUTTING:"Laser", BINDING:"Bind" })[currentDept]}</span>
+                  <span style={{ fontSize: 10, color: "#ffff" }}>@ {({ PRINTING:"Print", LAMINATING:"Lam", LASER_CUTTING:"Laser", BINDING:"Bind" })[currentDept]}</span>
                 )}
                 <span style={{ fontSize: 10, fontWeight: 800, padding: "2px 7px", borderRadius: 3, background: "var(--red)", color: "#fff" }}>{daysLate}d late</span>
               </div>
@@ -3348,7 +4627,7 @@ function ThroughputTicker({ done }) {
 
   return (
     <div style={{
-      background: "#444343e0",
+      background: "var(--card-bg)",
       border: "1px solid var(--border)",
       borderRadius: 12, padding: "14px 16px",
     }}>
@@ -3360,27 +4639,27 @@ function ThroughputTicker({ done }) {
         <span style={{
           fontFamily: "var(--fd)", fontSize: 14, fontWeight: 1000,
           letterSpacing: ".12em", textTransform: "uppercase",
-          color: "var(--text-pri)", textShadow: "2px 2px 4px rgba(0,0,0,0.9)",
+          color: "var(--text-pri)", textShadow: "var(--title-shadow)",
         }}>
           Throughput - Today
         </span>
         {/* Total badge */}
         <div style={{
           display: "flex", alignItems: "center", gap: 6,
-          background: "#000", border: "1px solid var(--border)",
+          background:"var(--bg2)", border: "1px solid var(--border)",
           borderRadius: 6, padding: "4px 10px", flexShrink: 0,
         }}>
           <span style={{
             fontFamily: "var(--fm)",
-            fontSize: isMobile ? 22 : 18,
+            fontSize: isMobile ? 30 : 35,
             fontWeight: 900, lineHeight: 1,
             color: totalToday > 0 ? "var(--green)" : "var(--text-dim)",
           }}>
             {totalToday}
           </span>
           <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-            <span style={{ fontSize: 9, fontWeight: 700, color: "#666", textTransform: "uppercase", letterSpacing: ".08em", lineHeight: 1.3 }}>Total</span>
-            <span style={{ fontSize: 9, fontWeight: 700, color: "#666", textTransform: "uppercase", letterSpacing: ".08em", lineHeight: 1.3 }}>Albums</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-pri)", textTransform: "uppercase", letterSpacing: ".08em", lineHeight: 1.3 }}>Total</span>
+            <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-pri)", textTransform: "uppercase", letterSpacing: ".08em", lineHeight: 1.3 }}>Albums</span>
           </div>
         </div>
       </div>
@@ -3400,33 +4679,33 @@ function ThroughputTicker({ done }) {
           // Color logic
           let numColor, lblColor, barColor, borderTop;
           if (isFuture) {
-            numColor = "var(--bg3)"; lblColor = "var(--bg3)";
-            barColor = "var(--bg3)"; borderTop = "2px solid var(--bg2)";
+            numColor = "var(--text-pri)"; lblColor = "var(--text-pri)";
+            barColor = "var(--text-pri)"; borderTop = "2px solid var(--bg1)";
           } else if (isCurrent) {
-            numColor  = count > 10 ? "#0616f0" : "var(--text-dim)";
-            lblColor  = "#0616f0";
-            barColor  = "#0616f0";
-            borderTop = "2px solid #0616f0";
+            numColor  = count > 10 ? "#0caeee" : "var(--text-pri)";
+            lblColor  = "#0caeee";
+            barColor  = "#0caeee";
+            borderTop = "2px solid #0caeee";
           } else if (count > 5 && count <= 10) {
-            numColor  = "#34d40c"; lblColor = "var(--text-dim)";
-            barColor  = "#34d40c";     borderTop = "2px solid #34d40c";
+            numColor  = "#b30cd4"; lblColor = "var(--text-pri)";
+            barColor  = "#b30cd4";     borderTop = "2px solid #b30cd4";
           } else if (count > 0 && count < 5) {
-            numColor  = "#fd2d26"; lblColor = "var(--text-dim)";
+            numColor  = "#fd2d26"; lblColor = "var(--text-pri)";
             barColor  = "#fd2d26";      borderTop = "2px solid #fd2d26";
           } else if (count > 10) {
-            numColor  = "#22c55e"; lblColor = "var(--text-dim)";
+            numColor  = "#22c55e"; lblColor = "var(--text-pri)";
             barColor  = "#22c55e";      borderTop = "2px solid #22c55e";
 
 
           } else {
-            numColor  = "var(--text-dim)"; lblColor = "var(--text-dim)";
+            numColor  = "var(--text-pri)"; lblColor = "var(--text-pri)";
             barColor  = "var(--bg3)";      borderTop = "2px solid var(--bg2)";
           }
 
           return (
             <div key={i} style={{
-              background: "#000",
-              border: `1px solid ${isCurrent ? "#22c55e33" : "var(--bg0)"}`,
+              background:"var(--surface-sunken)",
+              border: `3px solid ${isCurrent ? "#0caeee" : "var(--bg2)"}`,
               borderTop,
               borderRadius: 8,
               padding: isMobile ? "10px 6px 8px" : "10px 6px 8px",
@@ -3463,7 +4742,7 @@ function ThroughputTicker({ done }) {
 
               {/* Time label */}
               <div style={{
-                fontSize: isMobile ? 9 : 8,
+                fontSize: isMobile ? 11 : 12,
                 fontWeight: 700,
                 letterSpacing: ".05em",
                 textTransform: "uppercase",
@@ -3497,26 +4776,27 @@ function ThroughputTicker({ done }) {
 function MachineStatsPanel() {
   const [data, setData] = useState(null);
   useEffect(() => {
-    const load = () => api.deptStats().then(setData).catch(() => {});
-    load();
-    const t = setInterval(load, POLL_INTERVAL_MS);
-    return () => clearInterval(t);
-  }, []);
+  const load = () => api.deptStats().then(setIfChanged(setData)).catch(() => {});
+  load();
+  const t = setInterval(load, POLL_INTERVAL_MS);
+  return () => clearInterval(t);
+}, []);
 
   const machines = data?.machines || { monthly: {}, daily: {} };
   const rows = [
-    { key: "GREEN_2", label: "Green II", accent: "#dcdcdc" },
-    { key: "GREEN_3", label: "Green III", accent: "#dcdcdc" },
+    { key: "GREEN_2", label: "Green II", accent: "var(--text-pri)" },
+    { key: "GREEN_3", label: "Green III", accent: "var(--text-pri)" },
+    { key: "EPSON", label: "Epson", accent: "var(--text-pri)" },
   ];
 
   return (
 <div
   style={{
-    background: "#444343e0",
-    border: "1px solid #2E2E2E",
+    background: "var(--card-bg)",
+    border: "1px solid var(--border)",
     borderRadius: 16,
     padding: 20,
-    boxShadow: "0 8px 30px rgba(0,0,0,0.35)",
+    boxShadow: "0 8px 30px rgba(0,0,0,0.20)",
   }}
 >
   {/* Header */}
@@ -3533,10 +4813,10 @@ function MachineStatsPanel() {
         style={{
           fontSize: 18,
           fontWeight: 700,
-          color: "#fff",
+          color:"var(--text-pri)",
           fontFamily: "var(--fd)",
           letterSpacing: ".04em",
-          textShadow: "2px 2px 4px rgba(0,0,0,0.9)",
+          textShadow: "var(--title-shadow)",
         }}
       >
         Printing Machines
@@ -3559,8 +4839,8 @@ function MachineStatsPanel() {
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          background: "#000000",
-          border: "1px solid #2A2A2A",
+          background: "var(--surface-sunken)",
+          border: "1px solid var(--border-strong)",
           borderLeft: `5px solid ${r.accent}`,
           borderRadius: 12,
           padding: "14px 18px",
@@ -3591,9 +4871,10 @@ function MachineStatsPanel() {
           <div style={{ textAlign: "right" }}>
             <div
               style={{
-                fontSize: 11,
-                color: "#FFFFFF",
-                textTransform: "uppercase",
+                fontSize: 12,
+                fontweight:700,
+                color: "var(--text-pri)",
+                letterSpacing:".2em"
               }}
             >
               Today
@@ -3613,16 +4894,18 @@ function MachineStatsPanel() {
           <div
             style={{
               width: 1,
-              background: "#2D2D2D",
+              background: "var(--border-strong)",
             }}
           />
 
           <div style={{ textAlign: "right" }}>
             <div
               style={{
-                fontSize: 11,
-                color: "#FFFFFF",
-                textTransform: "uppercase",
+                fontSize: 12,
+                fontweight:700,
+                color: "var(--text-pri)",
+                // textTransform: "uppercase",
+                letterSpacing:".2em"
               }}
             >
               Monthly
@@ -3649,16 +4932,16 @@ function MachineStatsPanel() {
 function PrintingSectionPanel() {
   const [data, setData] = useState(null);
   useEffect(() => {
-    const load = () => api.printingSection().then(setData).catch(() => {});
-    load();
-    const t = setInterval(load, POLL_INTERVAL_MS);
-    return () => clearInterval(t);
-  }, []);
+  const load = () => api.printingSection().then(setIfChanged(setData)).catch(() => {});
+  load();
+  const t = setInterval(load, POLL_INTERVAL_MS);
+  return () => clearInterval(t);
+}, []);
 
   const rows = [
-    { key: "normal",         label: "Normal Prints",  accent: "#ffffff" },
-    { key: "story",          label: "Story Albums",   accent: "#ffffff" },
-    { key: "rebind",         label: "Rebinds",        accent: "#ffffff" },
+    { key: "normal",         label: "Normal Prints",  accent: "var(--text-pri)" },
+    { key: "story",          label: "Story Albums",   accent: "var(--text-pri)" },
+    { key: "rebind",         label: "Rebinds",        accent: "var(--text-pri)" },
   ];
 
   const m = data?.monthly || {};
@@ -3667,11 +4950,11 @@ function PrintingSectionPanel() {
   return (
     <div
       style={{
-        background: "#444343e0",
-        border: "1px solid #2E2E2E",
+        background: "var(--card-bg)",
+        border: "1px solid var(--border)",
         borderRadius: 16,
         padding: 20,
-        boxShadow: "0 8px 30px rgba(0,0,0,0.35)",
+        boxShadow: "0 8px 30px rgba(0,0,0,0.20)",
       }}
     >
       {/* Header */}
@@ -3687,10 +4970,10 @@ function PrintingSectionPanel() {
           style={{
             fontSize: 18,
             fontWeight: 700,
-            color: "#fff",
+            color:"var(--text-pri)",
             fontFamily: "var(--fd)",
             letterSpacing: ".04em",
-            textShadow: "2px 2px 4px rgba(0,0,0,0.9)",
+            textShadow: "var(--title-shadow)",
           }}
         >
           Printing Section
@@ -3698,7 +4981,7 @@ function PrintingSectionPanel() {
       </div>
 
       {!data ? (
-        <div style={{ textAlign: "center", padding: "24px 0", color: "var(--text-dim)", fontFamily: "var(--fd)", fontSize: 13, letterSpacing: ".08em" }}>
+        <div style={{ textAlign: "center", padding: "24px 0", color:"var(--text-pri)", fontFamily: "var(--fd)", fontSize: 13, letterSpacing: ".08em" }}>
           LOADING…
         </div>
       ) : (
@@ -3710,8 +4993,8 @@ function PrintingSectionPanel() {
                 display: "flex",
                 justifyContent: "space-between",
                 alignItems: "center",
-                background: "#000000",
-                border: "1px solid #2A2A2A",
+                background: "var(--surface-sunken)",
+                border: "1px solid var(--border-strong)",
                 borderLeft: `5px solid ${r.accent}`,
                 borderRadius: 12,
                 padding: "14px 18px",
@@ -3735,7 +5018,7 @@ function PrintingSectionPanel() {
               {/* Stats */}
               <div style={{ display: "flex", gap: 28 }}>
                 <div style={{ textAlign: "right" }}>
-                  <div style={{ fontSize: 11, color: "#FFFFFF", textTransform: "uppercase" }}>
+                  <div style={{ fontSize: 12,fontweight:700 ,color: "var(--text-pri)", letterSpacing:".2em" }}>
                     Today
                   </div>
                   <div style={{ fontSize: 24, fontWeight: 700, color: "#3c24a5" }}>
@@ -3743,10 +5026,10 @@ function PrintingSectionPanel() {
                   </div>
                 </div>
 
-                <div style={{ width: 1, background: "#2D2D2D" }} />
+                <div style={{ width: 1, background: "var(--border-strong)" }} />
 
                 <div style={{ textAlign: "right" }}>
-                  <div style={{ fontSize: 11, color: "#FFFFFF", textTransform: "uppercase" }}>
+                  <div style={{ fontSize: 12, fontweight:700,color: "var(--text-pri)",letterSpacing:".2em"}}>
                     Monthly
                   </div>
                   <div style={{ fontSize: 24, fontWeight: 700, color: "#2ECC71" }}>
@@ -3756,6 +5039,133 @@ function PrintingSectionPanel() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DamageSummaryPanel() {
+  const [data, setData] = useState(null);
+  const isMobile = useIsMobile();
+  useEffect(() => {
+  const load = () => api.damageStats().then(setIfChanged(setData)).catch(() => {});
+  load();
+  const t = setInterval(load, POLL_INTERVAL_MS);
+  return () => clearInterval(t);
+}, []);
+
+  const rows = [
+    { key: "PRINTING",   label: "Printing",   accent: "var(--blue)"  },
+    { key: "LAMINATING", label: "Laminating", accent: "var(--cyan)"  },
+    { key: "BINDING",    label: "Binding",    accent: "var(--green)" },
+  ];
+
+  return (
+    <div style={{
+      background: "var(--card-bg)", border: "1px solid var(--border)",
+      borderRadius: 10, padding: "14px 16px", gridColumn: isMobile ? "1" : "1 / -1",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+        <span style={{
+          fontFamily: "var(--fd)", fontSize: 14, fontWeight: 1000, letterSpacing: ".1em",
+          textTransform: "uppercase", color: "var(--text-pri)", textShadow: "var(--title-shadow)",
+        }}>
+          Paper Damage Summary
+        </span>
+        <button onClick={() => navigate("/damages")} style={{
+          padding: "5px 12px", fontSize: 11, fontWeight: 700, borderRadius: 5,
+          background: "var(--bg3)", color: "var(--red)", border: "1px solid var(--red)",
+        }}>View All →</button>
+      </div>
+
+      {!data ? (
+        <div style={{ textAlign: "center", padding: "24px 0", color: "var(--text-dim)", fontFamily: "var(--fd)", fontSize: 13, letterSpacing: ".08em" }}>LOADING…</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div style={{ background: "var(--bg2)", border: "1px solid var(--red)33", borderTop: "3px solid var(--red)", borderRadius: 8, padding: "14px 16px" }}>
+              <div style={{ fontSize: 12, color: "var(--text-pri)", textTransform: "uppercase", letterSpacing: ".06em" }}>Today's Loss</div>
+              <div style={{ fontFamily: "var(--fd)", fontSize: isMobile ? 26 : 32, fontWeight: 900, color: "var(--red)" }}>Rs. {data.daily.total_value}</div>
+              <div style={{ fontSize: 12, color: "var(--text-pri)" }}>{data.daily.total_quantity} sheets</div>
+            </div>
+            <div style={{ background: "var(--bg2)", border: "1px solid var(--amber)33", borderTop: "3px solid var(--amber)", borderRadius: 8, padding: "14px 16px" }}>
+              <div style={{ fontSize: 12, color: "var(--text-pri)", textTransform: "uppercase", letterSpacing: ".06em" }}>Monthly Loss</div>
+              <div style={{ fontFamily: "var(--fd)", fontSize: isMobile ? 26 : 32, fontWeight: 900, color: "var(--amber)" }}>Rs. {data.monthly.total_value}</div>
+              <div style={{ fontSize: 12, color: "var(--text-pri)" }}>{data.monthly.total_quantity} sheets</div>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {rows.map(r => {
+              const monthly = data.monthly.by_department[r.key] || { quantity: 0, value: 0 };
+              return (
+                <div key={r.key} style={{
+                  display: "flex", alignItems: "center", justifyContent: "space-between",
+                  background: "var(--surface-sunken)", border: "1px solid var(--border-strong)", borderLeft: `4px solid ${r.accent}`,
+                  borderRadius: 6, padding: "8px 12px",
+                }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: r.accent, textTransform: "uppercase", letterSpacing: ".06em" }}>{r.label}</span>
+                  <span style={{ fontSize: 13, fontWeight: 800, color: "var(--text-pri)" }}>Rs. {monthly.value} <span style={{ fontSize: 12, color: "var(--text-pri)", fontWeight: 600,letterSpacing:"0.1em" }}>({monthly.quantity} sheets)</span></span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PaperStockSummaryPanel() {
+  const [data, setData] = useState(null);
+  const isMobile = useIsMobile();
+  useEffect(() => {
+    const load = () => api.paperStockStats().then(setIfChanged(setData)).catch(() => {});
+    load();
+    const t = setInterval(load, POLL_INTERVAL_MS);
+    return () => clearInterval(t);
+  }, []);
+
+  return (
+    <div style={{
+      background: "var(--card-bg)", border: "1px solid var(--border)",
+      borderRadius: 10, padding: "14px 16px", gridColumn: isMobile ? "1" : "1 / -1",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+        <span style={{
+          fontFamily: "var(--fd)", fontSize: 14, fontWeight: 1000, letterSpacing: ".1em",
+          textTransform: "uppercase", color: "var(--text-pri)", textShadow: "var(--title-shadow)",
+        }}>
+          Print - Paper Stock Summary
+        </span>
+        <button onClick={() => navigate("/papers")} style={{
+          padding: "5px 12px", fontSize: 11, fontWeight: 700, borderRadius: 5,
+          background: "var(--bg3)", color: "var(--blue)", border: "1px solid var(--blue)",
+        }}>View All →</button>
+      </div>
+
+      {!data ? (
+        <div style={{ textAlign: "center", padding: "24px 0", color: "var(--text-dim)", fontFamily: "var(--fd)", fontSize: 13, letterSpacing: ".08em" }}>LOADING…</div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, 1fr)", gap: 10 }}>
+          {PAPER_SIZES.map(size => {
+            const balance = data.balances[size] ?? 0;
+            const used    = data.monthly_used[size] ?? 0;
+            const low     = balance <= LOW_STOCK_THRESHOLD;
+            return (
+              <div key={size} className={low ? "blink" : ""} style={{
+                background: low ? "var(--danger-bg)" : "var(--surface-sunken)",
+                border: `1px solid ${low ? "var(--red)" : "var(--border-strong)"}`,
+                borderLeft: `4px solid ${low ? "var(--red)" : "var(--blue)"}`,
+                borderRadius: 8, padding: "12px 14px",
+              }}>
+                <div style={{ fontSize: 12, color: "var(--text-pri)", textTransform: "uppercase", letterSpacing: ".06em" }}>{size}</div>
+                <div style={{ fontFamily: "var(--fd)", fontSize: 24, fontWeight: 900, color: low ? "var(--red)" : "var(--text-pri)", marginTop: 4 }}>{balance}</div>
+                <div style={{ fontSize: 12, color: "var(--text-pri)" }}>left · {used} used this month</div>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -3782,9 +5192,9 @@ const reload = useCallback(async () => {
       return slDateStr(parseUTC(completedAt)) === todayStr;
     });
 
-    setActive(a);
-    setDone(todayDone); // only today's completions
-    setStats(s);
+    setIfChanged(setActive)(a);
+    setIfChanged(setDone)(todayDone);
+    setIfChanged(setStats)(s);
   } catch {}
 }, []);
  
@@ -3804,10 +5214,10 @@ const reload = useCallback(async () => {
  
   function Stat({ label, val, clr = "var(--text-pri)", sub }) {
     return (
-      <div style={{ background: "#444343e0", border: "1px solid var(--border)", borderRadius: 10, padding: isMobile ? "12px 14px" : "14px 18px", textAlign: "center" }}>
-        <div className="r-stat-num" style={{ fontFamily: "var(--fd)", fontSize: isMobile ? 30 : 40, fontWeight: 900, color: clr, lineHeight: 1,textShadow: '2px 2px 4px rgba(0, 0, 0, 0.9)' }}>{val ?? "—"}</div>
+      <div style={{ background: "var(--card-bg)", border: "1px solid var(--border)", borderRadius: 10, padding: isMobile ? "12px 14px" : "14px 18px", textAlign: "center" }}>
+        <div className="r-stat-num" style={{ fontFamily: "var(--fd)", fontSize: isMobile ? 30 : 40, fontWeight: 900, color: clr, lineHeight: 1,textShadow: 'var(--title-shadow)',minHeight: "1.2em", }}>{val ?? "—"}</div>
         <div style={{ fontSize: isMobile ? 13 : 11, color: "var(--text-pri)", textTransform: "uppercase", letterSpacing: ".08em", marginTop: 4, fontWeight: 800 }}>{label}</div>
-        {sub && !isMobile && <div style={{ fontSize: 10, color: "#b4b2b2", marginTop: 2 }}>{sub}</div>}
+        {sub && !isMobile && <div style={{ fontSize: 11, color: "#dbd9d9", marginTop: 2,letterSpacing: ".08em" }}>{sub}</div>}
       </div>
     );
   }
@@ -3854,7 +5264,7 @@ const reload = useCallback(async () => {
             <div
               className="pulse"
               style={{
-                background: "#2a0000",
+                background: "var(--danger-bg)",
                 border: "1px solid var(--red)",
                 borderRadius: 8,
                 padding: "10px 14px",
@@ -3894,6 +5304,8 @@ const reload = useCallback(async () => {
           <PrintingSectionPanel /> 
           <AlbumCountPanel />
           <OperatorStatsPanel />
+          <DamageSummaryPanel />
+          <PaperStockSummaryPanel />
         </div>
  
         {/* Throughput ticker */}
@@ -3929,7 +5341,7 @@ const reload = useCallback(async () => {
                 <JobCardFull job={job} showExpiry={tab === "done"} addToast={add} />
                 <button onClick={() => del(job)} title="Delete" style={{
                   position: "absolute", top: 12, right: 12,
-                  background: "rgba(0, 0, 0, 0.6)", color: "var(--red)",
+                  background: "var(--overlay)", color: "var(--red)",
                   fontSize: 13, padding: "4px 9px", borderRadius: 4,
                   border: "1px solid var(--border)",
                   minHeight: "unset",
@@ -3986,6 +5398,7 @@ function HistoryPage() {
   const [printJob,        setPrintJob]        = useState(null);
   const [showCal,         setShowCal]         = useState(!isMobile); // on mobile cal is collapsed by default
   const [machineFilter, setMachineFilter] = useState(""); 
+  const [albumTypeFilter, setAlbumTypeFilter] = useState("");
   const [open, setOpen] = useState(false);
   useEffect(() => {
     const t = setTimeout(() => { setDebouncedSearch(search); setPage(1); }, 400);
@@ -4004,10 +5417,11 @@ function HistoryPage() {
     const params = new URLSearchParams({ date: selectedDate, page: String(page), page_size: "20" });
     if (debouncedSearch) params.set("search", debouncedSearch);
     if (machineFilter)   params.set("machine", machineFilter);
+    if (albumTypeFilter) params.set("album_type", albumTypeFilter);
     apiFetch(`/api/history?${params}`)
       .then(d => { setData(d); setLoading(false); })
       .catch(err => { add(err.message, "error"); setLoading(false); });
-  }, [selectedDate, debouncedSearch, machineFilter, page]);
+  }, [selectedDate, debouncedSearch, machineFilter, albumTypeFilter, page]);
  
   function MiniCalendar() {
     const DAYS = ["Su","Mo","Tu","We","Th","Fr","Sa"];
@@ -4106,6 +5520,11 @@ function HistoryPage() {
                 <option value="">All Machines</option>
                 {MACHINES.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
               </select>
+
+              <select value={albumTypeFilter} onChange={e => { setAlbumTypeFilter(e.target.value); setPage(1); }} style={{ margin: 0 }}>
+                <option value="">All Album Types</option>
+                {ALBUM_TYPES.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
+              </select>
             {search && <button onClick={() => { setSearch(""); setPage(1); }} style={{ fontSize: 12, color: "var(--red)", textAlign: "left" }}>Clear search</button>}
             {showCal && <MiniCalendar />}
             {data && (
@@ -4126,51 +5545,60 @@ function HistoryPage() {
                 <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Job no / Studio / Couple…" style={{ margin: 0 }} />
                 {search && <button onClick={() => { setSearch(""); setPage(1); }} style={{ marginTop: 6, fontSize: 12, color: "var(--red)", width: "100%", textAlign: "center" }}>✕ Clear</button>}
 
-<div
-  style={{
-    position: "relative",
-    width: "100%",
-  }}
->
-  <select
-    value={machineFilter}
-    onFocus={() => setOpen(true)}
-    onBlur={() => setOpen(false)}
-    onChange={(e) => {
-      setMachineFilter(e.target.value);
-      setPage(1);
-      setOpen(false);
-    }}
-    style={{
-      width: "100%",
-      paddingRight: "40px",
-      appearance: "none",
-      WebkitAppearance: "none",
-      MozAppearance: "none",
-    }}
-  >
-    <option value="">All Machines</option>
-    {MACHINES.map((m) => (
-      <option key={m.value} value={m.value}>
-        {m.label}
-      </option>
-    ))}
-  </select>
+                <div
+                  style={{
+                    position: "relative",
+                    width: "100%",
+                    marginTop: 10,
+                  }}
+                >
+                  <select
+                    value={machineFilter}
+                    onFocus={() => setOpen(true)}
+                    onBlur={() => setOpen(false)}
+                    onChange={(e) => {
+                      setMachineFilter(e.target.value);
+                      setPage(1);
+                      setOpen(false);
+                    }}
+                    style={{
+                      width: "100%",
+                      paddingRight: "40px",
+                      appearance: "none",
+                      WebkitAppearance: "none",
+                      MozAppearance: "none",
+                    }}
+                  >
+                    <option value="">All Machines</option>
+                    {MACHINES.map((m) => (
+                      <option key={m.value} value={m.value}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </select>
 
-    <ChevronDown
-      size={18}
-      style={{
-        position: "absolute",
-        right: 12,
-        top: "50%",
-        transform: `translateY(-50%) rotate(${open ? 180 : 0}deg)`,
-        transition: "transform 0.2s ease",
-        pointerEvents: "none",
-        color: "#888",
-      }}
-    />
-    
+                  <ChevronDown
+                    size={18}
+                    style={{
+                      position: "absolute",
+                      right: 12,
+                      top: "50%",
+                      transform: `translateY(-50%) rotate(${open ? 180 : 0}deg)`,
+                      transition: "transform 0.2s ease",
+                      pointerEvents: "none",
+                      color: "#888",
+                    }}
+                  />
                 </div>
+
+                <select
+                  value={albumTypeFilter}
+                  onChange={e => { setAlbumTypeFilter(e.target.value); setPage(1); }}
+                  style={{ marginTop: 8 }}
+                >
+                  <option value="">All Album Types</option>
+                  {ALBUM_TYPES.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
+                </select>
               </div>
               {data && (
                 <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 8, padding: 12 }}>
@@ -4191,7 +5619,6 @@ function HistoryPage() {
     </>
   );
 }
-
 // ── History card ──────────────────────────────────────────────────────────────
 function HistoryCard({ job, fmtDate, fmtTime, onPrint, addToast }) {
   const [expanded, setExpanded] = useState(false);
@@ -4209,9 +5636,10 @@ function HistoryCard({ job, fmtDate, fmtTime, onPrint, addToast }) {
             {job.couple_name && <div style={{ fontSize: 14, color: "var(--text-sec)",marginTop :"5px" }}>{job.couple_name}</div>}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0, flexWrap: "wrap", justifyContent: "flex-end" }}>
-            <span style={{ fontSize: 9, padding: "2px 7px", borderRadius: 4, fontWeight: 700, background: hadDelay ? "#3a0000" : "#001a00", color: hadDelay ? "var(--red)" : "var(--green)", border: `1px solid ${hadDelay ? "var(--red)" : "var(--green)"}` }}>{hadDelay ? "LATE" : "✓"}</span>
+            <AlbumTypeBadge type={job.album_type} />   {/* ADD */}
+            <span style={{ fontSize: 9, padding: "2px 7px", borderRadius: 4, fontWeight: 700, background: hadDelay ? "var(--danger-bg)" : "var(--success-bg)", color: hadDelay ? "var(--red)" : "var(--green)", border: `1px solid ${hadDelay ? "var(--red)" : "var(--green)"}` }}>{hadDelay ? "LATE" : "✓"}</span>
             {totalMinutes > 0 && !isMobile && (
-              <span style={{ fontSize: 13, color: "#ffffff", fontFamily: "var(--fm)" }}>{Math.floor(totalMinutes/60)}h{totalMinutes%60}m</span>
+              <span style={{ fontSize: 13, color: "var(--text-pri)", fontFamily: "var(--fm)" }}>{Math.floor(totalMinutes/60)}h{totalMinutes%60}m</span>
             )}
             <span style={{ color: "var(--text-dim)", fontSize: 11 }}>{expanded ? "▲" : "▼"}</span>
           </div>
@@ -4321,7 +5749,7 @@ function PrintJobCardModal({ job, onClose }) {
   const days = Math.ceil((new Date(job.dele_date) - new Date()) / 86400000);
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9000 }} onClick={onClose}>
+    <div style={{ position: "fixed", inset: 0, background: "var(--overlay)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9000 }} onClick={onClose}>
       <div onClick={e => e.stopPropagation()} style={{ background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: 12, padding: 24, width: "100%", maxWidth: 520, display: "flex", flexDirection: "column", gap: 16 }}>
         <div>
           <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 6 }}>Print Job Card</div>
@@ -4372,12 +5800,14 @@ export default function App() {
   const { page, dept } = route;
  
   return (
-    <>
+    <AppearanceProvider>
       <GlobalResponsiveStyles />
       {page === "entry"     ? <EntryPage /> :
        page === "station"   ? <StationPage deptKey={dept} /> :
+       page === "damages"   ? <DamagesPage deptKey={dept} /> :
+       page === "papers"    ? <PapersPage /> :
        page === "history"   ? <HistoryPage /> :
        <DashboardPage />}
-    </>
+    </AppearanceProvider>
   );
 }

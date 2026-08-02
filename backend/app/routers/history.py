@@ -19,7 +19,8 @@ def get_history(
     date_from:  Optional[str] = Query(None),
     date_to:    Optional[str] = Query(None),
     search:     Optional[str] = Query(None, description="job_no / customer / couple_name"),
-    machine:    Optional[str] = Query(None, description="GREEN_2 / GREEN_3"),   # ← NEW
+    machine:    Optional[str] = Query(None, description="GREEN_2 / GREEN_3/EPSON"),
+    album_type: Optional[str] = Query(None, description="NORMAL / STORY / REBIND"),
     page:       int = Query(1, ge=1),
     page_size:  int = Query(20, ge=1, le=100),
 ):
@@ -51,6 +52,9 @@ def get_history(
               )
               .exists()
         )
+
+    if album_type:
+        q = q.filter(JobCard.album_type == album_type.strip().upper())
 
     # ── Search filter ─────────────────────────────────────────────
     if search and search.strip():
