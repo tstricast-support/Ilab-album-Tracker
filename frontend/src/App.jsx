@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef,createContext, useContext } from "react";
 import { API_BASE, POLL_INTERVAL_MS, APP_NAME,MACHINES,ALBUM_TYPES,DAMAGE_DEPTS, PAPER_SIZES, LOW_STOCK_THRESHOLD} from "./config.js";
-import {ArrowRight, Calendar,Pen,SquareX, Trash,Printer,TriangleAlert,Flame,Activity, Speech, Scissors,BookOpen,Plus, Timer,ChevronDown ,Search,Palette}from "lucide-react";
+import {ArrowRight, Calendar,Pen,SquareX, Trash,Printer,TriangleAlert,Flame,Activity, Speech, Scissors,BookOpen,Plus, Timer,ChevronDown ,Search,Palette,Check}from "lucide-react";
 import logo from "./assets/logo.jpg";
 import "./index.css";
 
@@ -55,7 +55,7 @@ const api = {
     method: "PATCH", body: JSON.stringify({ unit_price }),
   }),
   createDamage: (body) => apiFetch(`/api/damages`, { method: "POST", body: JSON.stringify(body) }),
-  damages: (department, page = 1) => apiFetch(`/api/damages?${department ? `department=${department}&` : ""}page=${page}&page_size=20`),
+  // damages: (department, page = 1) => apiFetch(`/api/damages?${department ? `department=${department}&` : ""}page=${page}&page_size=20`),
   updateDamage: (id, body) => apiFetch(`/api/damages/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteDamage: (id) => apiFetch(`/api/damages/${id}`, { method: "DELETE" }),
   knownDamageOperators: (department) => apiFetch(`/api/damages/known-operators?department=${department}`),
@@ -71,12 +71,23 @@ const api = {
   }),
   deletePacketLog: (id) => apiFetch(`/api/paper-packet-logs/${id}`, { method: "DELETE" }),
   createPaperUsage: (body) => apiFetch(`/api/paper-usage`, { method: "POST", body: JSON.stringify(body) }),
-  paperUsage: (search = "", page = 1) =>
-    apiFetch(`/api/paper-usage?search=${encodeURIComponent(search)}&page=${page}&page_size=20`),
+  // paperUsage: (search = "", page = 1) =>
+  //   apiFetch(`/api/paper-usage?search=${encodeURIComponent(search)}&page=${page}&page_size=20`),
   updatePaperUsage: (id, body) => apiFetch(`/api/paper-usage/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deletePaperUsage: (id) => apiFetch(`/api/paper-usage/${id}`, { method: "DELETE" }),
   knownPaperOperators: () => apiFetch(`/api/paper-usage/known-operators`),
   paperStockStats: () => apiFetch(`/api/stats/paper-stock`),
+  damageDates: (year, month, department) =>
+  apiFetch(`/api/damages/dates-with-entries?year=${year}&month=${month}${department ? `&department=${department}` : ""}`),
+
+  damages: (department, page = 1, date = "") =>
+  apiFetch(`/api/damages?${department ? `department=${department}&` : ""}${date ? `date=${date}&` : ""}page=${page}&page_size=20`),
+
+  paperUsageDates: (year, month) =>
+  apiFetch(`/api/paper-usage/dates-with-entries?year=${year}&month=${month}`),
+
+  paperUsage: (search = "", page = 1, date = "") =>
+  apiFetch(`/api/paper-usage?search=${encodeURIComponent(search)}&${date ? `date=${date}&` : ""}page=${page}&page_size=20`),
 };
 
 function parseUTC(s) {
@@ -154,25 +165,26 @@ const DEFAULT_THEME = {
 const LIGHT_THEME = {
   name: "light",
   bg0: "#cfcece", bg1: "#aaa8a8", bg2: "#e6e6e6", bg3: "#d4d4d4",
-  border: "#b8b8b8", borderStrong: "#00000026",
+  border: "#c5c5c5", borderStrong: "#00000026",
   textPri: "#000000", textSec: "#1a1a1a", textDim: "#4a4a4a",
-  accent: "#052c80",
+  accent: "#3a61b4",
   font: "Aptos, \"Segoe UI\", Arial, sans-serif",
   fontSize: "14",
+  // proPipe:"#000000",
 
   cardBg: "#9c9898",
   cardInnerBg: "#645f5f",
   overlay: "rgba(0,0,0,.45)",
   process:"#92913d",
 
-  green: "#12e45f", red: "#dc2626", amber2: "#d97706",
+  green: "#049704", red: "#dc2626", amber2: "#d97706",
   blue: "#2563eb", cyan: "#0891b2", purple: "#7c3aed",
 
   surfaceSunken: "#e6e6e6", surfaceSunkenBorder: "#00000022",
   dangerBg: "#f79696", dangerBorder: "#f09d9d", dangerText: "#b91c1c",
   successBg: "#e8f7ec", successBorder: "#a9e6bb", successText: "#15803d",
   warnBg: "#fff6df", warnBorder: "#f0d68a", warnText: "#7a4e00",
-  infoBg: "#e6f0ff", infoBorder: "#9fc4fb", infoText: "#1d4ed8",
+  infoBg: "#e6f0ff", infoBorder: "#9fc4fb", infoText: "#5066a1",
   dateIconInvert: "0",
   titleShadow: "none",
 };
@@ -336,7 +348,7 @@ function AppearanceModal({ onClose }) {
         </div>
 
         <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 8, padding: 14 }}>
-          <div style={{ fontSize: 10, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 8 }}>Live Preview</div>
+          <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 8 }}>Live Preview</div>
           <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 8, padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
             <div style={{ fontFamily: "var(--fm)", fontSize: 15, fontWeight: 800, color: "var(--amber)" }}>JOB-0001</div>
             <div style={{ fontFamily: "var(--font-body)", fontSize: "var(--font-size-base)", color: "var(--text-pri)" }}>Sample Customer Name</div>
@@ -874,7 +886,7 @@ function CompactHistoryRow({ job, onView }) {
           {job.customer}
         </div>
         {job.couple_name && (
-          <div style={{ fontSize: 10, color: "var(--text-sec)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <div style={{ fontSize: 11, color: "var(--text-sec)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {job.couple_name}
           </div>
         )}
@@ -1217,6 +1229,60 @@ function boxPouchAccent(status) {
   if (status === "NOT_NEEDED") return "#888";
   return "#f59e0b";
 }
+function EntryCalendar({ year, month, onYearMonth, dotDays, selectedDate, onSelect, accent = "var(--amber)", onAfterSelect }) {
+  const DAYS = ["Su","Mo","Tu","We","Th","Fr","Sa"];
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const startDay    = new Date(year, month - 1, 1).getDay();
+  const cells = [];
+  for (let i = 0; i < startDay; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+  function selectDay(d) {
+    const mm = String(month).padStart(2, "0");
+    const dd = String(d).padStart(2, "0");
+    onSelect(`${year}-${mm}-${dd}`);
+    onAfterSelect?.();
+  }
+
+  const selDay = selectedDate.startsWith(`${year}-${String(month).padStart(2,"0")}`)
+    ? parseInt(selectedDate.slice(8)) : -1;
+
+  return (
+    <div style={{ background: "var(--bg3)", borderRadius: 8, padding: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        <button onClick={() => { if (month === 1) onYearMonth(year - 1, 12); else onYearMonth(year, month - 1); }} style={{ color: "var(--text-sec)", fontSize: 16, padding: "0 6px" }}>◀</button>
+        <span style={{ fontSize: 13, fontWeight: 700, color: accent, fontFamily: "var(--fm)" }}>{monthNames[month-1]} {year}</span>
+        <button onClick={() => { if (month === 12) onYearMonth(year + 1, 1); else onYearMonth(year, month + 1); }} style={{ color: "var(--text-sec)", fontSize: 16, padding: "0 6px" }}>▶</button>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 2, marginBottom: 4 }}>
+        {DAYS.map(d => <div key={d} style={{ textAlign: "center", fontSize: 9, color: "var(--text-dim)", fontWeight: 700, padding: "2px 0" }}>{d}</div>)}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 2 }}>
+        {cells.map((d, i) => {
+          if (!d) return <div key={`e${i}`} />;
+          const hasDot   = !!dotDays[String(d)];
+          const isActive = d === selDay;
+          return (
+            <button key={d} onClick={() => selectDay(d)} style={{
+              position: "relative", padding: "6px 2px", borderRadius: 4,
+              fontSize: 12, fontWeight: isActive ? 800 : 500,
+              background: isActive ? accent : "transparent",
+              color: isActive ? "var(--bg0)" : hasDot ? "var(--text-pri)" : "var(--text-sec)",
+              border: hasDot && !isActive ? "1px solid var(--border)" : "1px solid transparent",
+              minHeight: 32,
+            }}>
+              {d}
+              {hasDot && !isActive && <span style={{ position: "absolute", bottom: 2, left: "50%", transform: "translateX(-50%)", width: 4, height: 4, borderRadius: "50%", background: "var(--green)", display: "block" }} />}
+            </button>
+          );
+        })}
+      </div>
+      <button onClick={() => { const t = new Date(); onYearMonth(t.getFullYear(), t.getMonth()+1); onSelect(slDateStr(t)); onAfterSelect?.(); }}
+        style={{ marginTop: 8, width: "100%", padding: "6px 0", fontSize: 11, fontWeight: 700, color: accent, background: "var(--bg2)", borderRadius: 4, border: "1px solid var(--border)" }}>Today</button>
+    </div>
+  );
+}
 
 // ── Chip ──────────────────────────────────────────────────────────────────────
 function Chip({ label, value, accent = "#555" }) {
@@ -1230,7 +1296,7 @@ function Chip({ label, value, accent = "#555" }) {
     }}>
       <span style={{
         padding: "4px 7px", background: "var(--surface-sunken)",
-        color: "var(--text-dim)", fontSize: 10, fontWeight: 600,
+        color: "var(--text-dim)", fontSize: 11, fontWeight: 600,
         textTransform: "uppercase", letterSpacing: ".07em",
         borderRight: `1px solid ${accent}33`,
       }}>{label}</span>
@@ -1268,9 +1334,9 @@ function SpecialNote({ note }) {
     }}>
       <div style={{ background: "var(--warn-bg)", padding: "6px 12px", borderBottom: "1px solid var(--warn-border)", display: "flex", alignItems: "center", gap: 7 }}>
         <Speech size={14}/>
-        <span style={{ fontSize: 10, color: "var(--amber)", textTransform: "uppercase", letterSpacing: ".12em", fontWeight: 800 }}>Special Instructions</span>
+        <span style={{ fontSize: 13, color: "var(--text-pri)", textTransform: "uppercase", letterSpacing: ".12em", fontWeight: 800 }}>Special Instructions</span>
       </div>
-      <div style={{ padding: "10px 14px", fontSize: 13, color: "var(--warn-text)", lineHeight: 1.7, fontWeight: 500 }}>{note}</div>
+      <div style={{ padding: "10px 14px", fontSize: 12, color: "var(--text-pri)", lineHeight: 1.7, fontWeight: 700,textTransform:"uppercase" }}>{note}</div>
     </div>
   );
 }
@@ -1284,16 +1350,16 @@ function OperatorTag({ log, dept }) {
   const machineLabel = { GREEN_2: "Green 2", GREEN_3: "Green 3",EPSON:"Epson" }[log.machine] || log.machine;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", marginTop: 3 }}>
-      <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 4, background: isLaminating ? "var(--info-bg)" : "var(--info-bg)", border: `1px solid ${isLaminating ? "#06b6d4" : "var(--border-strong)"}`, color: "var(--text-pri)", letterSpacing: ".08em" }}>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 700, padding: "2px 7px", borderRadius: 4, background: isLaminating ? "var(--info-bg)" : "var(--info-bg)", border: `1px solid ${isLaminating ? "#06b6d4" : "var(--border-strong)"}`, color: "var(--text-pri)", letterSpacing: ".08em" }}>
         {isLaminating ? <span style={{color: "var(--red)"}}>ACCU. BY </span> : "👤"}{log.operator_name}
       </span>
       {showUnder && (
-        <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 4, background: "var(--info-bg)", border: "1px solid var(--border-strong)", color: "var(--text-pri)", letterSpacing: ".08em" }}>
+        <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 7px", borderRadius: 4, background: "var(--info-bg)", border: "1px solid var(--border-strong)", color: "var(--text-pri)", letterSpacing: ".08em" }}>
           <span style={{ color: "var(--red)" }}>SUPERVISED </span> {log.under_whom}
         </span>
       )}
       {showMachine && (
-        <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 4, background: "var(--info-bg)", border: "1px solid #06b6d4", color: "var(--text-pri)", letterSpacing: ".08em" }}>
+        <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 7px", borderRadius: 4, background: "var(--info-bg)", border: "1px solid var(--border-strong)", color: "var(--text-pri)", letterSpacing: ".08em" }}>
           🖨 {machineLabel}
         </span>
       )}
@@ -1313,9 +1379,9 @@ function StageRow({ job }) {
       border: `1px solid ${delayed ? "var(--red)" : "var(--text-pri)"}`,
     }}>
       <div style={{ padding: "6px 12px", borderBottom: "1px solid #ffffff", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span style={{ fontSize: 10, color: "var(--text-pri)", textTransform: "uppercase", letterSpacing: ".1em", fontWeight: 700 }}>Production Pipeline</span>
-        {delayed && <span className="blink" style={{ fontSize: 10, color: "var(--red)", fontWeight: 700 }}>⚠ DELAYED</span>}
-        {job.is_fully_completed && <span style={{ fontSize: 10, color: "var(--green)", fontWeight: 700 }}>✓ ALL DONE</span>}
+        <span style={{ fontSize: 12, color: "var(--text-pri)", textTransform: "uppercase", letterSpacing: ".1em", fontWeight: 800 }}>Production Pipeline</span>
+        {delayed && <span className="blink" style={{ fontSize: 11, color: "var(--red)", fontWeight: 700 }}>⚠ DELAYED</span>}
+        {job.is_fully_completed && <span style={{ fontSize: 11, color: "var(--green)", fontWeight: 700 }}>✓ ALL DONE</span>}
       </div>
       {/* 2-col on mobile, 4-col on desktop */}
       <div className="r-stage-row" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)" }}>
@@ -1327,7 +1393,7 @@ function StageRow({ job }) {
           const isDelayed    = activeLog?.is_delayed || completedLog?.is_delayed;
           const log = activeLog || completedLog;
           let bg, textClr, icon, statusLabel,fontSize;
-          if      (sv === "COMPLETED")   { bg = st.color + "30"; textClr = st.color; statusLabel = "Done";}
+          if      (sv === "COMPLETED")   { bg = st.color + "30"; textClr ="var(--text-pri)"; statusLabel = "Done";}
           else if (sv === "IN_PROGRESS") { bg = "var(--process)";       textClr = "var(--amber)";  fontSize = "10px";   statusLabel = "IN PROGRESS. . ."; }
           else if (sv === "SKIPPED")     { bg = "transparent";   textClr = "var(--text-pri)"; fontSize = "10px"; statusLabel = "Skipped"; }
           else                           { bg = "transparent";   textClr = "var(--text-pri)";fontSize = "10px";  statusLabel = "Pending"; }
@@ -1342,16 +1408,16 @@ function StageRow({ job }) {
               
             }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <span style={{ fontSize: 14, fontWeight: 800, color:st.color, textTransform: "uppercase", letterSpacing: ".08em" }}>{icon} {st.label}</span>
+                <span style={{ fontSize: 14, fontWeight: 800, color:"var(--text-pri)", textTransform: "uppercase", letterSpacing: ".08em" }}>{icon} {st.label}</span>
                 {sv === "COMPLETED" && (
-                  <span style={{  display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: "#00ff48", fontWeight: 900 }}>DONE</span>
+                  <span style={{  display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: "var(--text-pri)", fontWeight: 900 }}>DONE <span><ArrowRight size={14}/></span></span>
                 )}
               </div>
-              {/* <span style={{ fontSize: 10, color: textClr, opacity: 0.75 }}>{statusLabel}</span> */}
+              <span style={{ fontSize: 11, color: textClr, opacity: 0.75 }}>{statusLabel}</span>
               
               {sv === "IN_PROGRESS" && <span style={{ fontSize: 11, color: "var(--text-pri)", fontWeight: 600 }}>RUNNING..</span>}
               {reason && (
-                  <div style={{ fontSize: 10, color: isDelayed ? "#ffaa60" : "var(--text-dim)", background: isDelayed ? "rgba(255,100,0,.08)" : "rgba(255,255,255,.03)", borderRadius: 3, padding: "3px 6px", lineHeight: 1.4, borderLeft: `2px solid ${isDelayed ? "#ff6030" : "var(--border)"}` }}>
+                  <div style={{ fontSize: 11, color: isDelayed ? "var(--text-pri)" : "var(--text-dim)", background: isDelayed ? "rgba(255,100,0,.08)" : "rgba(255,255,255,.03)", borderRadius: 3, padding: "3px 6px", lineHeight: 1.4, borderLeft: `2px solid ${isDelayed ? "#ff6030" : "var(--border)"}` }}>
                     {reason}
                   </div>
                 )}
@@ -1369,7 +1435,7 @@ function StageRow({ job }) {
       padding: "4px 8px",
       background: "rgba(255,255,255,.04)",
       borderBottom: "1px solid var(--border)",
-      fontSize: 10,
+      fontSize: 11,
       fontWeight: 700,
       letterSpacing: ".11em",
       textTransform: "uppercase",
@@ -1438,7 +1504,7 @@ function DelayReasonsList({ logs }) {
         {/* Section title */}
         <div
           style={{
-            fontSize: 10,
+            fontSize: 11,
             color: "var(--text-pri)",
             textTransform: "uppercase",
             letterSpacing: ".16em",
@@ -1594,15 +1660,15 @@ function CompactCard({ job }) {
           <span style={{ fontFamily: "var(--fm)", fontSize: 15, color: "var(--amber)", fontWeight: 800, letterSpacing: ".04em" }}>{job.job_no}</span>
           <span style={{ fontSize: 14, color: "var(--text-pri)", fontWeight: 600 }}>{job.customer}</span>
           {job.couple_name && <span style={{ fontSize: 12, color: "var(--text-sec)" }}>/ {job.couple_name}</span>}
-          {job.priority === "URGENT" && <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 4, background: "var(--red)", color: "#000", fontWeight: 800 }}>URGENT</span>}
+          {job.priority === "URGENT" && <span style={{ fontSize: 11, padding: "2px 7px", borderRadius: 4, background: "var(--red)", color: "#000", fontWeight: 800 }}>URGENT</span>}
           <AlbumTypeBadge type={job.album_type} />
-          {delayed && <span className="blink" style={{ fontSize: 10, padding: "2px 7px", borderRadius: 4, background: "var(--danger-bg)", color: "var(--red)", fontWeight: 800, border: "1px solid var(--red)" }}>LATE</span>}
+          {delayed && <span className="blink" style={{ fontSize: 11, padding: "2px 7px", borderRadius: 4, background: "var(--danger-bg)", color: "var(--red)", fontWeight: 800, border: "1px solid var(--red)" }}>LATE</span>}
         </div>
         <div style={{ textAlign: "right", flexShrink: 0, marginLeft: 12 }}>
           <div style={{ fontSize: 13, fontFamily: "var(--fm)", fontWeight: 700, color: days < 2 ? "var(--red)" : days < 5 ? "var(--amber)" : "var(--text-sec)" }}>
             {new Date(job.dele_date).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}
           </div>
-          <div style={{ fontSize: 10, color: days < 2 ? "var(--red)" : "var(--text-dim)" }}>
+          <div style={{ fontSize: 11, color: days < 2 ? "var(--red)" : "var(--text-dim)" }}>
             {days < 0 ? `${Math.abs(days)}d overdue` : days === 0 ? "Today!" : days === 1 ? "Tomorrow" : `${days}d left`}
           </div>
         </div>
@@ -1641,7 +1707,7 @@ function LivePanel() {
   return (
     <div style={{ marginTop: 28 }}>
       <button onClick={() => setOpen(p => !p)} style={{ background: "var(--bg0)", color: "var(--text-pri)", border: "1px solid var(--amber)", borderRadius: 8, padding: "7px 14px", fontSize: 14, fontWeight: 700, display: "flex", alignItems: "center", gap: 8, marginBottom: 8 ,letterSpacing: ".04em"}}>
-        <span className="blink" style={{ color: "var(--green)", fontSize: 10 }}>●</span>
+        <span className="blink" style={{ color: "var(--green)", fontSize: 11 }}>●</span>
         LIVE FACTORY PIPELINE <ArrowRight size={14} fontWeight={700} /> {active.length} ACTIVE JOB{active.length !== 1 ? "s" : ""}
         <span>{open ? "▲" : "▼"}</span>
       </button>
@@ -1698,7 +1764,7 @@ function JobCardFull({ job, actionLabel, onAction, acting, actionBlocked = false
             border: `1px solid ${days < 2 ? "var(--red)" : days < 5 ? "var(--amber)" : "var(--border)"}`,
             borderRadius: 8, padding: "10px 14px", minWidth: 80,
           }}>
-            <div style={{ fontSize: 10, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 4 }}>Delivery</div>
+            <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 4 }}>Delivery</div>
             <div style={{ fontFamily: "var(--fm)", fontSize: 16, fontWeight: 800, color: days < 2 ? "var(--red)" : days < 5 ? "var(--amber)" : "var(--text-pri)" }}>
               {new Date(job.dele_date).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}
             </div>
@@ -2287,14 +2353,14 @@ async function handleSubmit(e) {
                       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                         <span style={{ fontFamily: "var(--fm)", fontSize: 15, color: "var(--amber)", fontWeight: 800 }}>{job.job_no}</span>
                         {job.priority === "URGENT" && (
-                          <span style={{ fontSize: 10, padding: "2px 6px", borderRadius: 3, background: "var(--red)", color: "#000", fontWeight: 800 }}><Flame  size ={18} color={"#ffa600"}/> URGENT</span>
+                          <span style={{ fontSize: 11, padding: "2px 6px", borderRadius: 3, background: "var(--red)", color: "#000", fontWeight: 800 }}><Flame  size ={18} color={"#ffa600"}/> URGENT</span>
                         )}
                        <span style={{ fontSize: 13, color: "var(--text-pri)", fontWeight: 600 }}>{job.customer}</span>
                         {job.couple_name && (
                           <span style={{ fontSize: 11, color: "var(--text-sec)" }}>{job.couple_name}</span>
                         )}
                         {job.payment_by && (
-                          <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 4, background: "#062", color:"var(--text-pri)", fontWeight: 700 }}>💰 {job.payment_by}</span>
+                          <span style={{ fontSize: 11, padding: "2px 7px", borderRadius: 4, background: "#062", color:"var(--text-pri)", fontWeight: 700 }}>💰 {job.payment_by}</span>
                         )}
                       </div>
                       <div style={{
@@ -2403,11 +2469,11 @@ async function handleSubmit(e) {
             {/* Read-only fields */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
               <div style={{ background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: 6, padding: "10px 12px" }}>
-                <div style={{ fontSize: 10, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 3 }}>Job No (cannot change)</div>
+                <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 3 }}>Job No (cannot change)</div>
                 <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text-pri)", fontFamily: "var(--fm)" }}>{editJob.job_no}</div>
               </div>
               <div style={{ background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: 6, padding: "10px 12px" }}>
-                <div style={{ fontSize: 10, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 3 }}>Photographer / Studio (cannot change)</div>
+                <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 3 }}>Photographer / Studio (cannot change)</div>
                 <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text-pri)" }}>{editJob.customer}</div>
               </div>
             </div>
@@ -3080,7 +3146,7 @@ function OperatorStatsPanel() {
     return (
       <div style={{
         background:"var(--bg2)",
-        border: `1px solid ${accent}33`,
+        border: `1px solid ${accent}50`,
         borderTop: `3px solid ${accent}`,
         borderRadius: 8,
         padding: "12px 14px",
@@ -3253,15 +3319,15 @@ function OperatorStatsPanel() {
           gap: 12,
         }}>
           <Section
-            icon={<Printer size={16} color="#3b82f6" />}
+            icon={<Printer size={16} color="#0c64f1" />}
             label="Printing"
-            accent="#3b82f6"
+            accent="#0c64f1"
             rows={data.PRINTING}
           />
           <Section
-            icon={<Scissors size={16} color="#a855f7" />}
+            icon={<Scissors size={16} color="#8616f0" />}
             label="Laser Cutting"
-            accent="#a855f7"
+            accent="#8616f0"
             rows={data.LASER_CUTTING}
           />
         </div>
@@ -3814,9 +3880,9 @@ function DamageEntryForm({ dept, onCreated, addToast }) {
       </div>
 
       {selectedPrice && qtyNum > 0 && (
-        <div style={{ background: "#1a1200", border: "1px solid var(--amber)", borderRadius: 6, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ fontSize: 12, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".06em" }}>Estimated Value</span>
-          <span style={{ fontFamily: "var(--fm)", fontSize: 18, fontWeight: 900, color: "var(--amber)" }}>Rs. {previewTotal}</span>
+        <div style={{ background: "#807a7a", border: "1px solid var(--border)", borderRadius: 6, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span style={{ fontSize: 12, color: "var(--text-pri)", textTransform: "uppercase", letterSpacing: ".06em",fontweight:900 }}>Estimated Value</span>
+          <span style={{ fontFamily: "var(--fm)", fontSize: 18, fontWeight: 900, color: "var(--text-pri)" }}>Rs. {previewTotal}</span>
         </div>
       )}
 
@@ -3949,12 +4015,12 @@ function DamageEntryCard({ entry, onChanged, addToast }) {
           {(entry.job_no || entry.customer) && (
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 5 }}>
               {entry.job_no && (
-                <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 4, background: "var(--info-bg)", border: "1px solid var(--border-strong)", color: "var(--amber)" }}>
+                <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 7px", borderRadius: 4, background: "var(--info-bg)", border: "1px solid var(--border-strong)", color: "var(--amber)" }}>
                   {entry.job_no}
                 </span>
               )}
               {entry.customer && (
-                <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 4, background: "var(--info-bg)", border: "1px solid var(--border-strong)", color: "var(--text-pri)" }}>
+                <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 7px", borderRadius: 4, background: "var(--info-bg)", border: "1px solid var(--border-strong)", color: "var(--text-pri)" }}>
                   {entry.customer}
                 </span>
               )}
@@ -4064,6 +4130,11 @@ function DamagesPage({ deptKey }) {
   const [loading, setLoading] = useState(false);
   const [showPrices, setShowPrices] = useState(false);
   const isMobile = useIsMobile();
+  const [selectedDate, setSelectedDate] = useState(() => slDateStr(new Date()));
+  const [calYear,  setCalYear]  = useState(new Date().getFullYear());
+  const [calMonth, setCalMonth] = useState(new Date().getMonth() + 1);
+  const [dotDays,  setDotDays]  = useState({});
+  const [showCal,  setShowCal]  = useState(!isMobile);
 
   const activeDept = isAdminView ? filterDept : dept;
   const invalidDept = !isAdminView && !DAMAGE_DEPTS.includes(dept);
@@ -4071,12 +4142,18 @@ function DamagesPage({ deptKey }) {
   const reload = useCallback(async () => {
   if (invalidDept) return;
   try {
-    const d = await api.damages(activeDept || undefined, page);
+    const d = await api.damages(activeDept || undefined, page, selectedDate);
     setIfChanged(setData)(d);
   } catch (err) { add(err.message, "error"); }
   finally { setLoading(false); }
-}, [activeDept, page, invalidDept]);
+}, [activeDept, page, selectedDate, invalidDept]);
 
+
+  useEffect(() => {
+  api.damageDates(calYear, calMonth, activeDept || undefined).then(setDotDays).catch(() => {});
+}, [calYear, calMonth, activeDept]);
+
+  useEffect(() => { setPage(1); }, [selectedDate, activeDept]);
   useEffect(() => { reload(); }, [reload]);
   useEffect(() => {
     const t = setInterval(reload, POLL_INTERVAL_MS);
@@ -4127,27 +4204,64 @@ function DamagesPage({ deptKey }) {
             </div>
           )}
 
-          <div>
-            <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--text-pri)", marginBottom: 10 }}>
-              Recent Entries {data ? `(${data.total})` : ""}
-            </div>
-            {loading && <div style={{ textAlign: "center", padding: "30px 0", color: "var(--text-pri)" }}>LOADING…</div>}
-            {!loading && data?.entries?.length === 0 && (
-              <div style={{ textAlign: "center", padding: "30px 0", color: "var(--text-pri)" }}>No damage entries yet.</div>
-            )}
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {data?.entries?.map(e => (
-                <DamageEntryCard key={e.id} entry={e} onChanged={reload} addToast={add} />
-              ))}
-            </div>
-            {data && data.pages > 1 && (
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 12 }}>
-                <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} style={{ padding: "7px 14px", background: "var(--bg2)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, fontWeight: 700 }}>◀ Prev</button>
-                <span style={{ fontSize: 13, color: "var(--text-dim)", fontFamily: "var(--fm)" }}>{page} / {data.pages}</span>
-                <button onClick={() => setPage(p => Math.min(data.pages, p + 1))} disabled={page === data.pages} style={{ padding: "7px 14px", background: "var(--bg2)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, fontWeight: 700 }}>Next ▶</button>
-              </div>
-            )}
-          </div>
+          <div className="r-history-layout" style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "220px 1fr", gap: 16, alignItems: "start" }}>
+  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+    {isMobile && (
+      <button onClick={() => setShowCal(p => !p)} style={{
+        padding: "8px 12px", background: showCal ? accent : "var(--bg3)",
+        color: showCal ? "#000" : "var(--text-sec)",
+        border: `1px solid ${accent}`, borderRadius: 6, fontWeight: 700, fontSize: 12,
+        display: "flex", alignItems: "center", gap: 6, justifyContent: "center",
+      }}>
+        <Calendar size={14} /> {selectedDate}
+      </button>
+    )}
+    {showCal && (
+      <EntryCalendar
+        year={calYear} month={calMonth}
+        onYearMonth={(y, m) => { setCalYear(y); setCalMonth(m); }}
+        dotDays={dotDays}
+        selectedDate={selectedDate}
+        onSelect={setSelectedDate}
+        onAfterSelect={() => { if (isMobile) setShowCal(false); }}
+        accent={accent}
+      />
+    )}
+    {data && (
+      <div style={{ background: "var(--bg2)", border: `1px solid ${accent}33`, borderTop: `3px solid ${accent}`, borderRadius: 8, padding: "12px 14px" }}>
+        <div style={{ fontSize: 10, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 6 }}>
+          {selectedDate} Total
+        </div>
+        <div style={{ fontFamily: "var(--fm)", fontSize: 22, fontWeight: 900, color: accent }}>Rs. {data.day_total_value ?? 0}</div>
+        <div style={{ fontSize: 12, color: "var(--text-dim)" }}>{data.day_total_quantity ?? 0} sheets · {data.total} entries</div>
+      </div>
+    )}
+  </div>
+
+  <div>
+    <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--text-pri)", marginBottom: 10 }}>
+      Entries — {selectedDate}
+    </div>
+    {loading && <div style={{ textAlign: "center", padding: "30px 0", color: "var(--text-pri)" }}>LOADING…</div>}
+    {!loading && data?.entries?.length === 0 && (
+      <div style={{ textAlign: "center", padding: "30px 0", color: "var(--text-pri)" }}>No damage entries on this day.</div>
+    )}
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {data?.entries?.map(e => (
+        <DamageEntryCard key={e.id} entry={e} onChanged={reload} addToast={add} />
+      ))}
+    </div>
+    {data && data.pages > 1 && (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 12 }}>
+        <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} style={{ padding: "7px 14px", background: "var(--bg2)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, fontWeight: 700 }}>◀ Prev</button>
+        <span style={{ fontSize: 13, color: "var(--text-dim)", fontFamily: "var(--fm)" }}>{page} / {data.pages}</span>
+        <button onClick={() => setPage(p => Math.min(data.pages, p + 1))} disabled={page === data.pages} style={{ padding: "7px 14px", background: "var(--bg2)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, fontWeight: 700 }}>Next ▶</button>
+      </div>
+    )}
+  </div>
+</div>
+
+
         </div>
       </Shell>
       {showPrices && <PaperPricesModal onClose={() => setShowPrices(false)} addToast={add} />}
@@ -4176,7 +4290,7 @@ function PaperStockCards({ stock }) {
               color: low ? "var(--red)" : "var(--text-pri)",
               minWidth: "1.6em", display: "inline-block",
             }}>{s.balance}</div>
-            <div style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 2 }}>sheets left</div>
+            <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 2 }}>sheets left</div>
           </div>
         );
       })}
@@ -4424,7 +4538,7 @@ function PaperUsageCard({ entry, onChanged, addToast }) {
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <span style={{ fontFamily: "var(--fm)", fontSize: 15, fontWeight: 800, color: "var(--amber)" }}>{entry.job_no}</span>
-            <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 4, background: "var(--blue)22", color: "var(--blue)", border: "1px solid var(--blue)55", fontWeight: 700 }}>{entry.paper_size}</span>
+            <span style={{ fontSize: 11, padding: "2px 7px", borderRadius: 4, background: "var(--blue)22", color: "var(--blue)", border: "1px solid var(--blue)55", fontWeight: 700 }}>{entry.paper_size}</span>
           </div>
           <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 4 }}>👤 {entry.operator_name}</div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
@@ -4436,12 +4550,12 @@ function PaperUsageCard({ entry, onChanged, addToast }) {
         </div>
         <div style={{ textAlign: "right", flexShrink: 0 }}>
           <div style={{ fontFamily: "var(--fm)", fontSize: 18, fontWeight: 900, color: "var(--text-pri)" }}>{entry.total_used}</div>
-          <div style={{ fontSize: 10, color: "var(--text-dim)" }}>sheets used</div>
+          <div style={{ fontSize: 11, color: "var(--text-dim)" }}>sheets used</div>
         </div>
       </div>
       {withinWindow && (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 4, paddingTop: 8, borderTop: "1px dashed var(--border)" }}>
-          <span style={{ fontSize: 10, color: "var(--text-dim)" }}>{fmtRemaining()}</span>
+          <span style={{ fontSize: 11, color: "var(--text-dim)" }}>{fmtRemaining()}</span>
           <div style={{ display: "flex", gap: 6 }}>
             <button onClick={() => setEditing(true)} style={{ padding: "5px 12px", fontSize: 11, fontWeight: 700, borderRadius: 5, background: "var(--bg3)", color: "var(--amber)", border: "1px solid var(--amber)" }}><Pen size={12} /></button>
             <button onClick={del} style={{ padding: "5px 12px", fontSize: 11, fontWeight: 700, borderRadius: 5, background: "var(--danger-bg)", color: "var(--red)", border: "1px solid var(--red)" }}><Trash size={12} /></button>
@@ -4455,12 +4569,18 @@ function PaperUsageCard({ entry, onChanged, addToast }) {
 
 function PapersPage() {
   const { toasts, add } = useToast();
+  const isMobile = useIsMobile();
   const [stock, setStock] = useState([]);
   const [data, setData] = useState(null);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(() => slDateStr(new Date()));
+  const [calYear,  setCalYear]  = useState(new Date().getFullYear());
+  const [calMonth, setCalMonth] = useState(new Date().getMonth() + 1);
+  const [dotDays,  setDotDays]  = useState({});
+  const [showCal,  setShowCal]  = useState(!isMobile);
 
   useEffect(() => {
     const t = setTimeout(() => { setDebouncedSearch(search); setPage(1); }, 350);
@@ -4472,13 +4592,19 @@ function PapersPage() {
   }, []);
 
   const reloadUsage = useCallback(async () => {
-    try {
-      const d = await api.paperUsage(debouncedSearch, page);
-      setIfChanged(setData)(d);
-    } catch (err) { add(err.message, "error"); }
-    finally { setLoading(false); }
-  }, [debouncedSearch, page]);
+  try {
+    const d = await api.paperUsage(debouncedSearch, page, selectedDate);
+    setIfChanged(setData)(d);
+  } catch (err) { add(err.message, "error"); }
+  finally { setLoading(false); }
+}, [debouncedSearch, page, selectedDate]);
 
+
+  useEffect(() => {
+  api.paperUsageDates(calYear, calMonth).then(setDotDays).catch(() => {});
+}, [calYear, calMonth]);
+
+  useEffect(() => { setPage(1); }, [selectedDate]);
   useEffect(() => { reloadStock(); }, [reloadStock]);
   useEffect(() => { reloadUsage(); }, [reloadUsage]);
   useEffect(() => {
@@ -4505,27 +4631,62 @@ function PapersPage() {
             <PaperUsageForm onCreated={reloadAll} addToast={add} />
           </Sec>
 
-          <div>
-            <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--text-pri)", marginBottom: 10 }}>
-              Recent Usage {data ? `(${data.total})` : ""}
+          <div className="r-history-layout" style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "220px 1fr", gap: 16, alignItems: "start" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {isMobile && (
+                <button onClick={() => setShowCal(p => !p)} style={{
+                  padding: "8px 12px", background: showCal ? "var(--blue)" : "var(--bg3)",
+                  color: showCal ? "#000" : "var(--text-sec)",
+                  border: "1px solid var(--blue)", borderRadius: 6, fontWeight: 700, fontSize: 12,
+                  display: "flex", alignItems: "center", gap: 6, justifyContent: "center",
+                }}>
+                  <Calendar size={14} /> {selectedDate}
+                </button>
+              )}
+              {showCal && (
+                <EntryCalendar
+                  year={calYear} month={calMonth}
+                  onYearMonth={(y, m) => { setCalYear(y); setCalMonth(m); }}
+                  dotDays={dotDays}
+                  selectedDate={selectedDate}
+                  onSelect={setSelectedDate}
+                  onAfterSelect={() => { if (isMobile) setShowCal(false); }}
+                  accent="var(--blue)"
+                />
+              )}
+              <SearchBar value={search} onChange={setSearch} placeholder="Search Job No / Operator…" />
+              {data && (
+                <div style={{ background: "var(--bg2)", border: "1px solid var(--blue)33", borderTop: "3px solid var(--blue)", borderRadius: 8, padding: "12px 14px" }}>
+                  <div style={{ fontSize: 10, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 6 }}>
+                    {selectedDate} Total
+                  </div>
+                  <div style={{ fontFamily: "var(--fm)", fontSize: 22, fontWeight: 900, color: "var(--blue)" }}>{data.day_total_used ?? 0}</div>
+                  <div style={{ fontSize: 12, color: "var(--text-dim)" }}>sheets used · {data.total} entries</div>
+                </div>
+              )}
             </div>
-            <SearchBar value={search} onChange={setSearch} placeholder="Search Job No / Operator…" />
-            {loading && <div style={{ textAlign: "center", padding: "30px 0", color: "var(--text-dim)" }}>LOADING…</div>}
-            {!loading && data?.entries?.length === 0 && (
-              <div style={{ textAlign: "center", padding: "30px 0", color: "var(--text-dim)" }}>No usage entries yet.</div>
-            )}
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {data?.entries?.map(e => (
-                <PaperUsageCard key={e.id} entry={e} onChanged={reloadAll} addToast={add} />
-              ))}
-            </div>
-            {data && data.pages > 1 && (
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 12 }}>
-                <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} style={{ padding: "7px 14px", background: "var(--bg2)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, fontWeight: 700 }}>◀ Prev</button>
-                <span style={{ fontSize: 13, color: "var(--text-dim)", fontFamily: "var(--fm)" }}>{page} / {data.pages}</span>
-                <button onClick={() => setPage(p => Math.min(data.pages, p + 1))} disabled={page === data.pages} style={{ padding: "7px 14px", background: "var(--bg2)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, fontWeight: 700 }}>Next ▶</button>
+
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--text-pri)", marginBottom: 10 }}>
+                Usage — {selectedDate}
               </div>
-            )}
+              {loading && <div style={{ textAlign: "center", padding: "30px 0", color: "var(--text-dim)" }}>LOADING…</div>}
+              {!loading && data?.entries?.length === 0 && (
+                <div style={{ textAlign: "center", padding: "30px 0", color: "var(--text-dim)" }}>No usage entries on this day.</div>
+              )}
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {data?.entries?.map(e => (
+                  <PaperUsageCard key={e.id} entry={e} onChanged={reloadAll} addToast={add} />
+                ))}
+              </div>
+              {data && data.pages > 1 && (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 12 }}>
+                  <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} style={{ padding: "7px 14px", background: "var(--bg2)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, fontWeight: 700 }}>◀ Prev</button>
+                  <span style={{ fontSize: 13, color: "var(--text-dim)", fontFamily: "var(--fm)" }}>{page} / {data.pages}</span>
+                  <button onClick={() => setPage(p => Math.min(data.pages, p + 1))} disabled={page === data.pages} style={{ padding: "7px 14px", background: "var(--bg2)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, fontWeight: 700 }}>Next ▶</button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </Shell>
@@ -4546,7 +4707,7 @@ function OverdueAlert({ active }) {
   return (
     <div className="pulse" style={{ background: "#180000", border: "1px solid var(--red)", borderRadius: 8, padding: "12px 14px", marginBottom: 10,flex: 1,minWidth: 280 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-        <TriangleAlert size={isMobile ? 14 : 18} color="var(--amber)" />
+        <TriangleAlert size={isMobile ? 14 : 18} color="var(--danger-text)" />
         <span style={{ fontFamily: "var(--fd)", fontWeight: 800, fontSize: isMobile ? 12 : 14, color: "var(--red)", letterSpacing: ".04em" }}>
           {overdue.length} JOB{overdue.length > 1 ? "S" : ""} PAST DELIVERY DATE
         </span>
@@ -4565,14 +4726,14 @@ function OverdueAlert({ active }) {
               display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 6,
             }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                <span style={{ fontFamily: "var(--fm)", fontSize: 12, color: "var(--amber)", fontWeight: 800 }}>{job.job_no}</span>
+                <span style={{ fontFamily: "var(--fm)", fontSize: 12, color: "#ffffff", fontWeight: 700,letterSpacing:".1em" }}>{job.job_no}</span>
                 <span style={{ fontSize: 12, color: "#ffff", fontWeight: 600 }}>{job.customer}</span>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 {currentDept && !isMobile && (
-                  <span style={{ fontSize: 10, color: "#ffff" }}>@ {({ PRINTING:"Print", LAMINATING:"Lam", LASER_CUTTING:"Laser", BINDING:"Bind" })[currentDept]}</span>
+                  <span style={{ fontSize: 11, color: "#ffff" }}>@ {({ PRINTING:"Print", LAMINATING:"Lam", LASER_CUTTING:"Laser", BINDING:"Bind" })[currentDept]}</span>
                 )}
-                <span style={{ fontSize: 10, fontWeight: 800, padding: "2px 7px", borderRadius: 3, background: "var(--red)", color: "#fff" }}>{daysLate}d late</span>
+                <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 7px", borderRadius: 3, background: "var(--red)", color: "#fff",letterSpacing:".1em" }}>{daysLate}d late</span>
               </div>
             </div>
           );
@@ -4659,7 +4820,7 @@ function ThroughputTicker({ done }) {
           </span>
           <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
             <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-pri)", textTransform: "uppercase", letterSpacing: ".08em", lineHeight: 1.3 }}>Total</span>
-            <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-pri)", textTransform: "uppercase", letterSpacing: ".08em", lineHeight: 1.3 }}>Albums</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-pri)", textTransform: "uppercase", letterSpacing: ".08em", lineHeight: 1.3 }}>Albums</span>
           </div>
         </div>
       </div>
@@ -5541,7 +5702,7 @@ function HistoryPage() {
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <MiniCalendar />
               <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 8, padding: 12 }}>
-                <div style={{ fontSize: 10, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".1em", fontWeight: 700, marginBottom: 6 }}>Search</div>
+                <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".1em", fontWeight: 700, marginBottom: 6 }}>Search</div>
                 <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Job no / Studio / Couple…" style={{ margin: 0 }} />
                 {search && <button onClick={() => { setSearch(""); setPage(1); }} style={{ marginTop: 6, fontSize: 12, color: "var(--red)", width: "100%", textAlign: "center" }}>✕ Clear</button>}
 
@@ -5602,7 +5763,7 @@ function HistoryPage() {
               </div>
               {data && (
                 <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 8, padding: 12 }}>
-                  <div style={{ fontSize: 10, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".1em", fontWeight: 700, marginBottom: 8 }}>Results</div>
+                  <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".1em", fontWeight: 700, marginBottom: 8 }}>Results</div>
                   <div style={{ fontFamily: "var(--fd)", fontSize: 32, fontWeight: 900, color: "var(--cyan)", lineHeight: 1 }}>{data.total}</div>
                   <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 4 }}>
                     {search ? "matching jobs" : `completed on ${fmtDate(selectedDate + "T00:00:00")}`}

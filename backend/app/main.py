@@ -389,6 +389,7 @@ def create_damage(payload: DamageCreate, db: Session = Depends(get_db)):
 def list_damages(
     db: Session = Depends(get_db),
     department: Optional[str] = Query(None),
+    date: Optional[str] = Query(None, description="YYYY-MM-DD, Sri Lanka calendar day"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
@@ -399,7 +400,17 @@ def list_damages(
             raise HTTPException(400, "Unknown department")
         q = q.filter(DamageEntry.department == DamageDeptEnum[dept])
 
+    if date:
+        day_start = datetime.strptime(date, "%Y-%m-%d") - SL_TZ_OFFSET
+        day_end   = day_start + timedelta(days=1)
+        q = q.filter(DamageEntry.created_at >= day_start, DamageEntry.created_at < day_end)
+
     total = q.count()
+    sum_value, sum_qty = q.with_entities(
+        func.coalesce(func.sum(DamageEntry.total_value), 0),
+        func.coalesce(func.sum(DamageEntry.quantity), 0),
+    ).one()
+
     rows = (
         q.order_by(desc(DamageEntry.created_at))
          .offset((page - 1) * page_size)
@@ -411,9 +422,40 @@ def list_damages(
         "page": page,
         "page_size": page_size,
         "pages": max(1, -(-total // page_size)),
+        "day_total_value": int(sum_value),
+        "day_total_quantity": int(sum_qty),
         "entries": [_damage_out(e).model_dump() for e in rows],
     }
 
+@app.get("/api/damages/dates-with-entries")
+def damage_dates_with_entries(
+    db: Session = Depends(get_db),
+    year: int = Query(...),
+    month: int = Query(...),
+    department: Optional[str] = Query(None),
+):
+    start = datetime(year, month, 1) - SL_TZ_OFFSET
+    end   = (datetime(year + 1, 1, 1) if month == 12 else datetime(year, month + 1, 1)) - SL_TZ_OFFSET
+
+    q = db.query(DamageEntry.created_at, func.count(DamageEntry.id).label("cnt"))
+    if department:
+        dept = department.upper()
+        if dept not in ("PRINTING", "LAMINATING", "BINDING"):
+            raise HTTPException(400, "Unknown department")
+        q = q.filter(DamageEntry.department == DamageDeptEnum[dept])
+
+    rows = (
+        q.filter(DamageEntry.created_at >= start, DamageEntry.created_at < end)
+         .group_by(DamageEntry.created_at)
+         .all()
+    )
+
+    day_counts: dict[str, int] = {}
+    for r in rows:
+        lk_date = r.created_at + SL_TZ_OFFSET
+        day_key = str(lk_date.day)
+        day_counts[day_key] = day_counts.get(day_key, 0) + r.cnt
+    return day_counts
 
 class DamageUpdate(BaseModel):
     paper_price_id: Optional[int] = None
@@ -1209,6 +1251,7 @@ def create_paper_usage(payload: PaperUsageCreate, db: Session = Depends(get_db))
 def list_paper_usage(
     db: Session = Depends(get_db),
     search: Optional[str] = Query(None, description="job_no / operator_name"),
+    date: Optional[str] = Query(None, description="YYYY-MM-DD, Sri Lanka calendar day"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
@@ -1220,7 +1263,14 @@ def list_paper_usage(
             PaperUsageEntry.operator_name.ilike(term),
         ))
 
+    if date:
+        day_start = datetime.strptime(date, "%Y-%m-%d") - SL_TZ_OFFSET
+        day_end   = day_start + timedelta(days=1)
+        q = q.filter(PaperUsageEntry.created_at >= day_start, PaperUsageEntry.created_at < day_end)
+
     total = q.count()
+    day_total_used = q.with_entities(func.coalesce(func.sum(PaperUsageEntry.total_used), 0)).scalar() or 0
+
     rows = (
         q.order_by(desc(PaperUsageEntry.created_at))
          .offset((page - 1) * page_size)
@@ -1232,8 +1282,32 @@ def list_paper_usage(
         "page": page,
         "page_size": page_size,
         "pages": max(1, -(-total // page_size)),
+        "day_total_used": int(day_total_used),
         "entries": [PaperUsageEntryOut.model_validate(r).model_dump() for r in rows],
     }
+@app.get("/api/paper-usage/dates-with-entries")
+def paper_usage_dates_with_entries(
+    db: Session = Depends(get_db),
+    year: int = Query(...),
+    month: int = Query(...),
+):
+    start = datetime(year, month, 1) - SL_TZ_OFFSET
+    end   = (datetime(year + 1, 1, 1) if month == 12 else datetime(year, month + 1, 1)) - SL_TZ_OFFSET
+
+    rows = (
+        db.query(PaperUsageEntry.created_at, func.count(PaperUsageEntry.id).label("cnt"))
+        .filter(PaperUsageEntry.created_at >= start, PaperUsageEntry.created_at < end)
+        .group_by(PaperUsageEntry.created_at)
+        .all()
+    )
+    day_counts: dict[str, int] = {}
+    for r in rows:
+        lk_date = r.created_at + SL_TZ_OFFSET
+        day_key = str(lk_date.day)
+        day_counts[day_key] = day_counts.get(day_key, 0) + r.cnt
+    return day_counts
+
+
 
 
 class PaperUsageUpdate(BaseModel):
@@ -1359,7 +1433,7 @@ def paper_stock_stats(db: Session = Depends(get_db)):
     )
     monthly_used: dict[str, int] = {size: 0 for size in PAPER_SIZES}
     for e in monthly_rows:
-        monthly_used[e.paper_size] = monthly_used.get(e.paper_size, 0) + e.total_used
+        monthly_used[e.paper_size] = monthly_used.get(e.paper_size, 0) + e.total_used #type:ignore
 
     return {
         "balances": balances,
