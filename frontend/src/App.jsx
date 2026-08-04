@@ -139,7 +139,7 @@ const THEME_STORAGE_KEY = `ilab-theme:${ROLE}`;
 
 const DEFAULT_THEME = {
   name: "dark",
-  bg0: "#0a0a0a", bg1: "#111111", bg2: "#1a1a1a", bg3: "#242424",
+  bg0: "#0a0a0a", bg1: "#111111", bg2: "#080808", bg3: "#242424",
   border: "#4d4d4d", borderStrong: "#ffffff33",
   textPri: "#f0f0f0", textSec: "#e2e1e1", textDim: "#b3b3b3",
   accent: "#f5a623",
@@ -2900,7 +2900,7 @@ function DailyGoalRing({ active, done }) {
             <div
               key={item.label}
               style={{
-                background:"var(--bg1)",
+                background:"var(--bg2)",
                 border: `1px solid ${item.color}33`,
                 borderLeft: `3px solid ${item.color}`,
                 boxShadow: "3px 4px 5px #181717",
