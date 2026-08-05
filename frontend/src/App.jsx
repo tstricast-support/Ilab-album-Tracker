@@ -5418,7 +5418,26 @@ const reload = useCallback(async () => {
           <Stat label="Delayed"         val={stats?.delayed_jobs}   clr={stats?.delayed_jobs > 0 ? "var(--red)" : "var(--text-sec)"} />
         </div>
  
-        {/* Urgent banner */}
+
+              
+ 
+        {/* Intelligence row — side-by-side on desktop, stacked on mobile */}
+        <div className="r-grid-intelligence" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
+          <BottleneckRadar active={active} />
+          <DailyGoalRing   active={active} done={done} />
+          <MachineStatsPanel />
+          <PrintingSectionPanel /> 
+          <AlbumCountPanel />
+          <OperatorStatsPanel />
+          <DamageSummaryPanel />
+          <PaperStockSummaryPanel />
+        </div>
+ 
+        {/* Throughput ticker */}
+        <div style={{ marginBottom: 16 }}>
+          <ThroughputTicker done={done} />
+        </div>
+                {/* Urgent banner */}
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
   
           {stats?.urgent_pending > 0 && (
@@ -5454,24 +5473,6 @@ const reload = useCallback(async () => {
 
           <OverdueAlert active={active} />
 
-        </div>
-              
- 
-        {/* Intelligence row — side-by-side on desktop, stacked on mobile */}
-        <div className="r-grid-intelligence" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
-          <BottleneckRadar active={active} />
-          <DailyGoalRing   active={active} done={done} />
-          <MachineStatsPanel />
-          <PrintingSectionPanel /> 
-          <AlbumCountPanel />
-          <OperatorStatsPanel />
-          <DamageSummaryPanel />
-          <PaperStockSummaryPanel />
-        </div>
- 
-        {/* Throughput ticker */}
-        <div style={{ marginBottom: 16 }}>
-          <ThroughputTicker done={done} />
         </div>
  
         {/* Tab bar */}
