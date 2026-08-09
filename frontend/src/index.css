@@ -161,3 +161,10 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 .delayed-card { animation: delayedCardBlink 1s infinite; }
 
+html, body {
+  overflow-x: hidden;
+  max-width: 100%;
+}
+* {
+  min-width: 0; /* lets flex/grid children shrink instead of overflowing */
+}

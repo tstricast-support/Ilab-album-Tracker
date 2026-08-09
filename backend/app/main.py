@@ -565,9 +565,15 @@ def damage_stats(db: Session = Depends(get_db)):
         by_dept: dict[str, dict] = {}
         for e in entries:
             key = _str(e.department)
-            by_dept.setdefault(key, {"quantity": 0, "value": 0})
+            by_dept.setdefault(key, {"quantity": 0, "value": 0, "by_size": {}})
             by_dept[key]["quantity"] += e.quantity
             by_dept[key]["value"]    += e.total_value
+
+            size_key = e.paper_price.size if e.paper_price else "Unknown"
+            by_dept[key]["by_size"].setdefault(size_key, {"quantity": 0, "value": 0})
+            by_dept[key]["by_size"][size_key]["quantity"] += e.quantity
+            by_dept[key]["by_size"][size_key]["value"]    += e.total_value
+
         return {"total_value": total_value, "total_quantity": total_qty, "by_department": by_dept}
 
     return {
@@ -983,6 +989,45 @@ def printing_section_stats(db: Session = Depends(get_db)):
 
     return {"monthly": counts_for(month_start, month_end), 
             "daily": counts_for(day_start, day_end)}
+
+@app.get("/api/stats/printing-breakdown")
+def printing_breakdown_stats(db: Session = Depends(get_db)):
+    utc_now = datetime.utcnow()
+    sl_now  = utc_now + SL_TZ_OFFSET
+    day_start = datetime(sl_now.year, sl_now.month, sl_now.day) - SL_TZ_OFFSET
+    day_end   = day_start + timedelta(days=1)
+    month_start = datetime(sl_now.year, sl_now.month, 1) - SL_TZ_OFFSET
+    month_end   = (
+        datetime(sl_now.year + 1, 1, 1) if sl_now.month == 12
+        else datetime(sl_now.year, sl_now.month + 1, 1)
+    ) - SL_TZ_OFFSET
+
+    def counts_for(start, end):
+        rows = (
+            db.query(JobCard.album_type, DepartmentLog.machine, func.count(DepartmentLog.id))
+            .join(DepartmentLog, DepartmentLog.job_id == JobCard.id)
+            .filter(
+                DepartmentLog.department == DepartmentEnum.PRINTING,
+                DepartmentLog.machine.isnot(None),
+                DepartmentLog.exited_at != None,
+                DepartmentLog.exited_at >= start,
+                DepartmentLog.exited_at < end,
+            )
+            .group_by(JobCard.album_type, DepartmentLog.machine)
+            .all()
+        )
+        result = {
+            "NORMAL": {"total": 0, "machines": {}},
+            "STORY":  {"total": 0, "machines": {}},
+            "REBIND": {"total": 0, "machines": {}},
+        }
+        for album_type, machine, cnt in rows:
+            key = album_type if album_type in ("STORY", "REBIND") else "NORMAL"
+            result[key]["total"] += cnt
+            result[key]["machines"][machine] = result[key]["machines"].get(machine, 0) + cnt
+        return result
+
+    return {"daily": counts_for(day_start, day_end), "monthly": counts_for(month_start, month_end)}
 
 @app.get("/api/stats/operators")
 def operator_stats(
@@ -1441,6 +1486,41 @@ def paper_stock_stats(db: Session = Depends(get_db)):
         "low_stock_threshold": LOW_STOCK_THRESHOLD,
         "monthly_used": monthly_used,
     }
+
+@app.get("/api/stats/paper-usage-breakdown")
+def paper_usage_breakdown(db: Session = Depends(get_db)):
+    utc_now = datetime.utcnow()
+    sl_now  = utc_now + SL_TZ_OFFSET
+    day_start = datetime(sl_now.year, sl_now.month, sl_now.day) - SL_TZ_OFFSET
+    day_end   = day_start + timedelta(days=1)
+    month_start = datetime(sl_now.year, sl_now.month, 1) - SL_TZ_OFFSET
+    month_end   = (
+        datetime(sl_now.year + 1, 1, 1) if sl_now.month == 12
+        else datetime(sl_now.year, sl_now.month + 1, 1)
+    ) - SL_TZ_OFFSET
+
+    def summary_for(start, end):
+        rows = (
+            db.query(PaperUsageEntry)
+            .filter(PaperUsageEntry.created_at >= start, PaperUsageEntry.created_at < end)
+            .all()
+        )
+        result = {
+            size: {"total": 0, "ok_pages": 0, "print_damage": 0, "accu_rp": 0, "bind_rp": 0}
+            for size in PAPER_SIZES
+        }
+        for e in rows:
+            key = e.paper_size
+            if key not in result:
+                result[key] = {"total": 0, "ok_pages": 0, "print_damage": 0, "accu_rp": 0, "bind_rp": 0}
+            result[key]["total"]        += e.total_used
+            result[key]["ok_pages"]     += e.ok_pages
+            result[key]["print_damage"] += e.print_damage
+            result[key]["accu_rp"]      += e.accu_rp
+            result[key]["bind_rp"]      += e.bind_rp
+        return result
+
+    return {"daily": summary_for(day_start, day_end), "monthly": summary_for(month_start, month_end)}
 
 @app.get("/api/health")
 def health():

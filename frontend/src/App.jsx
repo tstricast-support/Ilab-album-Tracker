@@ -33,6 +33,7 @@ const api = {
   stats:         ()             => apiFetch("/api/stats"),
   deptStats: () => apiFetch("/api/stats/departments"),
   printingSection: () => apiFetch("/api/stats/printing-section"),
+  printingBreakdown: () => apiFetch(`/api/stats/printing-breakdown`),
   setReason:     (id, dept, reason) => apiFetch(`/api/jobs/${id}/delay-reason/${dept}`, {
     method: "POST", body: JSON.stringify({ reason }),
   }),
@@ -51,6 +52,7 @@ const api = {
   method: "PATCH", body: JSON.stringify({ album_type }),
   }),
   paperPrices: () => apiFetch(`/api/paper-prices`),
+  paperUsageBreakdown: () => apiFetch(`/api/stats/paper-usage-breakdown`),
   updatePaperPrice: (id, unit_price) => apiFetch(`/api/paper-prices/${id}`, {
     method: "PATCH", body: JSON.stringify({ unit_price }),
   }),
@@ -332,13 +334,20 @@ function AppearanceModal({ onClose }) {
   const { theme, updateTheme, resetTheme } = useAppearance();
   const isMobile = useIsMobile();
   return (
-    <div style={{ position: "fixed", inset: 0, background: "var(--overlay)", display: "flex", alignItems: isMobile ? "flex-end" : "center", justifyContent: "center", zIndex: 9500 }} onClick={onClose}>
+    <div style={{
+        position: "fixed", inset: 0, background: "var(--overlay)",
+        display: "flex",
+        alignItems: isMobile ? "flex-end" : "center",   
+        justifyContent: "center", zIndex: 9000,
+      }} onClick={onClose}>
       <div onClick={e => e.stopPropagation()} style={{
-        background: "var(--bg1)", border: "1px solid var(--border)",
-        borderRadius: isMobile ? "16px 16px 0 0" : 12, padding: 22,
-        width: "100%", maxWidth: 500, maxHeight: isMobile ? "92dvh" : "90vh", overflowY: "auto",
-        display: "flex", flexDirection: "column", gap: 16,
-      }}>
+          background: "var(--bg1)", border: "1px solid var(--border)",
+          borderRadius: isMobile ? "16px 16px 0 0" : 12,   
+          padding: 24, width: "100%", maxWidth: 480,
+          maxHeight: isMobile ? "92dvh" : "90vh",           
+          overflowY: "auto",                               
+          display: "flex", flexDirection: "column", gap: 16,
+        }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
             <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".1em" }}>Appearance</div>
@@ -531,6 +540,7 @@ function DelayReasonModal({ job, dept, onClose, onSaved, addToast }) {
   const [presets, setPresets] = useState([]);
   const [custom,  setCustom]  = useState("");
   const [saving,  setSaving]  = useState(false);
+  const isMobile = useIsMobile();
   const existingLog = job.logs?.find(l => l.department === dept && !l.exited_at && l.delay_reason);
   useEffect(() => {
     api.presetReasons(dept).then(d => setPresets(d.reasons || [])).catch(() => {});
@@ -548,8 +558,8 @@ function DelayReasonModal({ job, dept, onClose, onSaved, addToast }) {
   }
   const deptLabel = { PRINTING: "Printing", LAMINATING: "Laminating", LASER_CUTTING: "Laser Cutting", BINDING: "Binding" }[dept] || dept;
   return (
-    <div style={{ position: "fixed", inset: 0, background: "var(--overlay)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9000 }} onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 12, padding: 24, width: "100%", maxWidth: 480, display: "flex", flexDirection: "column", gap: 16 }}>
+    <div style={{ position: "fixed", inset: 0, background: "var(--overlay)", display: "flex", alignItems: isMobile ? "flex-end" : "center", justifyContent: "center", zIndex: 9000 }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: isMobile ? "16px 16px 0 0" : 12, padding: 24, width: "100%", maxWidth: 480, maxHeight: isMobile ? "92dvh" : "90vh", overflowY: "auto", display: "flex", flexDirection: "column", gap: 16 }}>
         <div>
           <div style={{  fontSize: 12, color: "var(--red)", letterSpacing: ".1em", textTransform: "uppercase", marginBottom: 4 }}>DELAY REASON - {deptLabel}</div>
           <div style={{ fontSize: 18, fontWeight: 700, color: "var(--amber)" }}>{job.job_no}</div>
@@ -583,6 +593,7 @@ function PaymentEditModal({ job, onClose, onSaved, addToast }) {
   const [knownNames, setKnown]     = useState([]);
   const [showNew,    setShowNew]   = useState(!job.payment_by);
   const [saving,     setSaving]    = useState(false);
+  const isMobile = useIsMobile(); 
 
   useEffect(() => {
     api.knownPaymentNames().then(d => setKnown(d.names || [])).catch(() => {});
@@ -606,8 +617,8 @@ function PaymentEditModal({ job, onClose, onSaved, addToast }) {
   }
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "var(--overlay)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9100 }} onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} style={{ background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: 12, padding: 24, width: "100%", maxWidth: 420, display: "flex", flexDirection: "column", gap: 16 }}>
+    <div style={{ position: "fixed", inset: 0, background: "var(--overlay)", display: "flex", alignItems: isMobile ? "flex-end" : "center", justifyContent: "center", zIndex: 9100 }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: isMobile ? "16px 16px 0 0" : 12, padding: 24, width: "100%", maxWidth: 420, maxHeight: isMobile ? "92dvh" : "90vh", overflowY: "auto", display: "flex", flexDirection: "column", gap: 16 }}>
         <div>
           <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 4 }}>Payment Taken By</div>
           <div style={{ fontSize: 18, fontWeight: 700, color: "var(--amber)" }}>{job.job_no}</div>
@@ -954,6 +965,13 @@ function DeptCompletedDropdown({ deptKey, title = "Dispatched", accent = "var(--
     return () => clearTimeout(t);
   }, [search]);
 
+   useEffect(() => {
+    api.stationHistory(deptKey, "", 1)
+      .then(d => setData(prev => prev ?? d))
+      .catch(() => {});
+  }, [deptKey]);
+
+  
   useEffect(() => {
     if (!open) return;
     setLoading(true);
@@ -981,7 +999,7 @@ function DeptCompletedDropdown({ deptKey, title = "Dispatched", accent = "var(--
         border: `1px solid ${accent}`, borderRadius: 6, fontWeight: 700, cursor: "pointer",
         fontSize: isMobile ? 11 : 13,
       }}>
-        {isMobile ? "" : title}{data ? ` (${data.total})` : ""}
+        {isMobile ? <Calendar size={14} /> : title}{data ? ` (${data.total})` : ""}
       </button>
 
       {open && (
@@ -1308,8 +1326,22 @@ function Chip({ label, value, accent = "#555" }) {
   );
 }
 
+
+
 function AlbumTypeBadge({ type }) {
-  if (!type || type === "NORMAL") return null;
+  if (!type) return null;
+  if (type === "NORMAL") {
+    return (
+      <span style={{
+        fontSize: 11, padding: "3px 9px", borderRadius: 4, fontWeight: 800,
+        letterSpacing: ".06em", textTransform: "uppercase",
+        background: "#0d3b2a", color: "#7fffb0",
+        border: "1px solid #16a34a",
+      }}>
+        Magazine Album
+      </span>
+    );
+  }
   const isStory = type === "STORY";
   return (
     <span style={{
@@ -1995,13 +2027,24 @@ function JobFields({ job }) {
 function AlbumTypeModal({ job, onConfirm }) {
   const [choice, setChoice] = useState("NORMAL");
   const [saving, setSaving] = useState(false);
+  const isMobile = useIsMobile(); 
   async function confirm() {
     setSaving(true);
     try { await onConfirm(choice); } finally { setSaving(false); }
   }
   return (
-    <div style={{ position: "fixed", inset: 0, background: "var(--overlay)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9300 }}>
-      <div style={{ background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: 12, padding: 28, width: "100%", maxWidth: 420, display: "flex", flexDirection: "column", gap: 16 }}>
+     <div style={{
+      position: "fixed", inset: 0, background: "var(--overlay)",
+      display: "flex", alignItems: isMobile ? "flex-end" : "center",
+      justifyContent: "center", zIndex: 9300,
+      }}>
+      <div style={{
+        background: "var(--bg1)", border: "1px solid var(--border)",
+        borderRadius: isMobile ? "16px 16px 0 0" : 12,
+        padding: 28, width: "100%", maxWidth: 420,
+        maxHeight: isMobile ? "92dvh" : "90vh", overflowY: "auto",
+        display: "flex", flexDirection: "column", gap: 16,
+      }}>
         <div>
           <div style={{ fontSize: 13, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 4 }}>One last thing</div>
           <div style={{ fontSize: 18, fontWeight: 800, color: "var(--amber)" }}>{job.job_no}</div>
@@ -2694,19 +2737,19 @@ function BottleneckRadar({ active }) {
             opacity: dept.total === 0 && dept.delayed === 0 ? 0.4 : 1,
           }}>
             {/* TOP ROW: label + counts, never wrap */}
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, marginBottom: 6, flexWrap: "nowrap", minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, marginBottom: 6, flexWrap: isMobile ? "wrap" : "nowrap", minWidth: 0 }}>
               <span style={{ fontSize: 12, fontWeight: 700, color: dept.accent, textTransform: "uppercase", letterSpacing: ".07em", whiteSpace: "nowrap", flexShrink: 0 }}>
                 {dept.label}
               </span>
               <div style={{ display: "flex", gap: 4, flexShrink: 0, flexWrap: "nowrap", alignItems: "center" }}>
                 {dept.inProgress > 0 && (
-                  <span style={{ fontSize: 11, fontWeight: 700, padding: "1px 6px", borderRadius: 4, background: "#d7a40b", color: "var(--surface-sunken)", border: "1px solid #ffffff", whiteSpace: "nowrap" }}>RUNNING : {dept.inProgress}</span>
+                  <span style={{ fontSize: isMobile ? 10 : 11, fontWeight: 700, padding: "1px 6px", borderRadius: 4, background: "#d7a40b", color: "var(--surface-sunken)", border: "1px solid #ffffff", whiteSpace: "nowrap" }}>RUNNING : {dept.inProgress}</span>
                 )}
                 {dept.pending > 0 && (
-                  <span style={{ fontSize: 11, fontWeight: 700, padding: "1px 6px", borderRadius: 4, background: "var(--bg3)", color: "var(--text-pri)",border: "1px solid #ffffff", whiteSpace: "nowrap" }}>PENDING : {dept.pending}</span>
+                  <span style={{ fontSize: isMobile ? 10 : 11, fontWeight: 700, padding: "1px 6px", borderRadius: 4, background: "var(--bg3)", color: "var(--text-pri)",border: "1px solid #ffffff", whiteSpace: "nowrap" }}>PENDING : {dept.pending}</span>
                 )}
                 {dept.delayed > 0 && (
-                  <span style={{ fontSize: 11, fontWeight: 700, padding: "1px 6px", borderRadius: 4, background: "#a12d2d", color: "var(--surface-sunken)", border: "1px solid #ffffff", whiteSpace: "nowrap" }}>DELAYED : {dept.delayed}</span>
+                  <span style={{ fontSize: isMobile ? 10 : 11, fontWeight: 700, padding: "1px 6px", borderRadius: 4, background: "#a12d2d", color: "var(--surface-sunken)", border: "1px solid #ffffff", whiteSpace: "nowrap" }}>DELAYED : {dept.delayed}</span>
                 )}
                 {dept.total === 0 && dept.delayed === 0 && (
                   <span style={{ fontSize: 12, color: "var(--text-pri)" }}>idle</span>
@@ -3353,6 +3396,7 @@ function OperatorIdentityModal({ dept, onConfirm, onCancel }) {
   const [machine,    setMachine]   = useState("");
   const [knownNames, setKnown]     = useState([]);
   const [showNew,    setShowNew]   = useState(false);
+  const isMobile = useIsMobile();
   const isPrinting   = dept === "PRINTING";
   const isLaminating = dept === "LAMINATING";
   const nameLabel = isLaminating ? "Accubind by? *" : "Your name *";
@@ -3385,9 +3429,10 @@ function OperatorIdentityModal({ dept, onConfirm, onCancel }) {
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "var(--overlay)",
-      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9100 }}>
+      display: "flex", alignItems: isMobile ? "flex-end" : "center", justifyContent: "center", zIndex: 9100 }}>
       <div style={{ background: "var(--bg1)", border: "1px solid var(--border)",
-        borderRadius: 12, padding: 28, width: "100%", maxWidth: 400,
+        borderRadius: isMobile ? "16px 16px 0 0" : 12, padding: 28, width: "100%", maxWidth: 400,
+        maxHeight: isMobile ? "92dvh" : "90vh", overflowY: "auto",
         display: "flex", flexDirection: "column", gap: 16 }}>
 
         <div style={{ fontSize: 13, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".1em" }}>
@@ -3464,9 +3509,10 @@ function OperatorIdentityModal({ dept, onConfirm, onCancel }) {
 }
 
 function BoxPouchModal({ job, onConfirm, onCancel }) {
+  const isMobile = useIsMobile();
   return (
-    <div style={{ position: "fixed", inset: 0, background: "var(--overlay)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9100 }}>
-      <div style={{ background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: 12, padding: 28, width: "100%", maxWidth: 400, display: "flex", flexDirection: "column", gap: 16 }}>
+    <div style={{ position: "fixed", inset: 0, background: "var(--overlay)", display: "flex", alignItems: isMobile ? "flex-end" : "center", justifyContent: "center", zIndex: 9100 }}>
+      <div style={{ background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: isMobile ? "16px 16px 0 0" : 12, padding: 28, width: "100%", maxWidth: 400, maxHeight: isMobile ? "92dvh" : "90vh", overflowY: "auto", display: "flex", flexDirection: "column", gap: 16 }}>
         <div style={{ fontSize: 13, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".1em" }}>Before completing</div>
         <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-pri)" }}>Is Box or Pouch complete?</div>
         <div style={{ fontSize: 13, color: "var(--text-sec)" }}>{job.job_no} - {job.customer}</div>
@@ -3483,6 +3529,7 @@ function BoxPouchModal({ job, onConfirm, onCancel }) {
 
 function BoxPouchEditModal({ job, onClose, onSaved, addToast }) {
   const [saving, setSaving] = useState(false);
+  const isMobile = useIsMobile();
   async function set(status) {
     setSaving(true);
     try {
@@ -3494,8 +3541,8 @@ function BoxPouchEditModal({ job, onClose, onSaved, addToast }) {
     finally { setSaving(false); }
   }
   return (
-    <div style={{ position: "fixed", inset: 0, background: "var(--overlay)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9200 }} onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} style={{ background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: 12, padding: 24, width: "100%", maxWidth: 400, display: "flex", flexDirection: "column", gap: 14 }}>
+    <div style={{ position: "fixed", inset: 0, background: "var(--overlay)", display: "flex", alignItems: isMobile ? "flex-end" : "center", justifyContent: "center", zIndex: 9200 }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: isMobile ? "16px 16px 0 0" : 12, padding: 24, width: "100%", maxWidth: 400, maxHeight: isMobile ? "92dvh" : "90vh", overflowY: "auto", display: "flex", flexDirection: "column", gap: 14 }}>
         <div>
           <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 4 }}>Update Box / Pouch Status</div>
           <div style={{ fontSize: 18, fontWeight: 700, color: "var(--amber)" }}>{job.job_no}</div>
@@ -3644,62 +3691,68 @@ function StationPage({ deptKey }) {
   return (
     <>
       <Shell title={`${cfg.label} STATION`} accent={cfg.accent} topRight={
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{
+            display: "flex", alignItems: "center", gap: isMobile ? 6 : 8,
+            flexWrap: "wrap",
+            width: isMobile ? "100%" : "auto",
+            justifyContent: isMobile ? "flex-end" : "flex-start",
+          }}>
           <DeptCompletedDropdown deptKey={cfg.dept} title={`Done Today - ${cfg.label}`} accent={cfg.accent} addToast={add} />
           {/* Queue count */}
           <div style={{
-            display: "flex", alignItems: "center", gap: isMobile ? 2 : 10,
+            display: "flex", alignItems: "center", gap: isMobile ? 4 : 10,
             background:"var(--bg2)", border: "1px solid var(--border)",
-            borderRadius: 8, padding: isMobile ? "2px 6px 2px 6px" : "2px 10px 2px 8px",
+            borderRadius: 8, padding: isMobile ? "3px 8px" : "2px 10px 2px 8px",
+            minWidth: 0,
           }}>
             <span className="r-station-queue-num" style={{
               fontFamily: "var(--fd)",
-              fontSize: isMobile ? 36 : 50,
+              fontSize: isMobile ? 18 : 50,
               fontWeight: 900, lineHeight: 1,
               color: queue.length > 0 ? "var(--green)" : "var(--text-dim)",
-              minWidth: "1.6em", display: "inline-block", textAlign: "right",
+              display: "inline-block", textAlign: "right",
             }}>{queue.length}</span>
             <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-              <span style={{ fontSize: isMobile ? 9 : 12, fontWeight: 800, color:"var(--text-pri)", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>{queue.length !== 1 ? "JOBS" : "JOB"}</span>
-              <span style={{ fontSize: isMobile ? 7 : 10, fontWeight: 600, color: "var(--text-pri)", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>IN QUEUE</span>
+              <span style={{ fontSize: isMobile ? 8 : 12, fontWeight: 800, color:"var(--text-pri)", textTransform: "uppercase", letterSpacing: ".08em", lineHeight: 1, whiteSpace: "nowrap" }}>{queue.length !== 1 ? "JOBS" : "JOB"}</span>
+              <span style={{ fontSize: isMobile ? 7 : 10, fontWeight: 600, color: "var(--text-pri)", textTransform: "uppercase", letterSpacing: ".08em", lineHeight: 1, whiteSpace: "nowrap" }}>IN QUEUE</span>
             </div>
           </div>
 
           {/* Daily Done */}
         <div style={{
-          display: "flex", alignItems: "center", gap: isMobile ? 2 : 8,
+          display: "flex", alignItems: "center", gap: isMobile ? 4 : 8,
           background: "#020015", border: "1px solid #1a1c3a",
-          borderRadius: 8, padding: isMobile ? "2px 6px 2px 6px" : "2px 10px 2px 8px",
+          borderRadius: 8, padding: isMobile ? "3px 8px" : "2px 10px 2px 8px",
+          minWidth: 0,
         }}>
           <span style={{
             fontFamily: "var(--fd)",
-            fontSize: isMobile ? 36 : 50,
+            fontSize: isMobile ? 18 : 50,
             fontWeight: 900, lineHeight: 1,
             color: deptDailyCount > 0 ? "#4749c2" : "var(--text-dim)",
           }}>{deptDailyCount ?? "—"}</span>
           <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-            <span style={{ fontSize: isMobile ? 9 : 12, fontWeight: 800, color: "#ffff", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>Daily</span>
-            <span style={{ fontSize: isMobile ? 7 : 10, fontWeight: 600, color: "#4749c2", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>Done</span>
+            <span style={{ fontSize: isMobile ? 8 : 12, fontWeight: 800, color: "#ffff", textTransform: "uppercase", letterSpacing: ".08em", lineHeight: 1, whiteSpace: "nowrap" }}>Daily</span>
+            <span style={{ fontSize: isMobile ? 7 : 10, fontWeight: 600, color: "#4749c2", textTransform: "uppercase", letterSpacing: ".08em", lineHeight: 1, whiteSpace: "nowrap" }}>Done</span>
           </div>
         </div>
 
-           
           {/* Completed count (24h) */}
-          
           <div style={{
-            display: "flex", alignItems: "center", gap: isMobile ? 2 : 8,
+            display: "flex", alignItems: "center", gap: isMobile ? 4 : 8,
             background: "#021b09", border: "1px solid #1a3a2e",
-            borderRadius: 8, padding: isMobile ? "2px 6px 2px 6px" : "2px 10px 2px 8px",
+            borderRadius: 8, padding: isMobile ? "3px 8px" : "2px 10px 2px 8px",
+            minWidth: 0,
           }}>
             <span style={{
               fontFamily: "var(--fd)",
-              fontSize: isMobile ? 36 : 50,
+              fontSize: isMobile ? 18 : 50,
               fontWeight: 900, lineHeight: 1,
               color: deptCompletedCount > 0 ? "var(--green)" : "var(--text-dim)",
             }}>{deptCompletedCount ?? "—"}</span>
             <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-              <span style={{ fontSize: isMobile ? 9 : 12, fontWeight: 800, color: "#ffff", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>Monthly</span>
-              <span style={{ fontSize: isMobile ? 7 : 10, fontWeight: 600, color: "var(--success-text)", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>Done</span>
+              <span style={{ fontSize: isMobile ? 8 : 12, fontWeight: 800, color: "#ffff", textTransform: "uppercase", letterSpacing: ".08em", lineHeight: 1, whiteSpace: "nowrap" }}>Monthly</span>
+              <span style={{ fontSize: isMobile ? 7 : 10, fontWeight: 600, color: "var(--success-text)", textTransform: "uppercase", letterSpacing: ".08em", lineHeight: 1, whiteSpace: "nowrap" }}>Done</span>
             </div>
           </div>
         </div>
@@ -3903,6 +3956,7 @@ function DamageEditModal({ entry, onClose, onSaved, addToast }) {
   const [reason, setReason] = useState(entry.reason);
   const [quantity, setQuantity] = useState(entry.quantity);
   const [saving, setSaving] = useState(false);
+  const isMobile = useIsMobile();
 
   useEffect(() => { api.paperPrices().then(setPrices).catch(() => {}); }, []);
 
@@ -3924,8 +3978,8 @@ function DamageEditModal({ entry, onClose, onSaved, addToast }) {
   }
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "var(--overlay)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9200 }} onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} style={{ background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: 12, padding: 24, width: "100%", maxWidth: 420, display: "flex", flexDirection: "column", gap: 14 }}>
+    <div style={{ position: "fixed", inset: 0, background: "var(--overlay)", display: "flex", alignItems: isMobile ? "flex-end" : "center", justifyContent: "center", zIndex: 9200 }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: isMobile ? "16px 16px 0 0" : 12, padding: 24, width: "100%", maxWidth: 420, maxHeight: isMobile ? "92dvh" : "90vh", overflowY: "auto", display: "flex", flexDirection: "column", gap: 14 }}>
         <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".1em" }}>Edit Damage Entry</div>
 
         {/* ── ADD ── */}
@@ -4447,6 +4501,7 @@ function PaperUsageEditModal({ entry, onClose, onSaved, addToast }) {
   const [accuRp, setAccuRp] = useState(entry.accu_rp);
   const [bindRp, setBindRp] = useState(entry.bind_rp);
   const [saving, setSaving] = useState(false);
+  const isMobile = useIsMobile();
 
   async function save() {
     setSaving(true);
@@ -4467,8 +4522,8 @@ function PaperUsageEditModal({ entry, onClose, onSaved, addToast }) {
   }
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "var(--overlay)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9200 }} onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} style={{ background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: 12, padding: 24, width: "100%", maxWidth: 440, display: "flex", flexDirection: "column", gap: 14 }}>
+    <div style={{ position: "fixed", inset: 0, background: "var(--overlay)", display: "flex", alignItems: isMobile ? "flex-end" : "center", justifyContent: "center", zIndex: 9200 }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: isMobile ? "16px 16px 0 0" : 12, padding: 24, width: "100%", maxWidth: 440, maxHeight: isMobile ? "92dvh" : "90vh", overflowY: "auto", display: "flex", flexDirection: "column", gap: 14 }}>
         <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".1em" }}>Edit Paper Usage</div>
         <div className="r-grid-2">
           <div>
@@ -4936,6 +4991,7 @@ function ThroughputTicker({ done }) {
 
 function MachineStatsPanel() {
   const [data, setData] = useState(null);
+  const isMobile = useIsMobile();
   useEffect(() => {
   const load = () => api.deptStats().then(setIfChanged(setData)).catch(() => {});
   load();
@@ -5004,7 +5060,7 @@ function MachineStatsPanel() {
           border: "1px solid var(--border-strong)",
           borderLeft: `5px solid ${r.accent}`,
           borderRadius: 12,
-          padding: "14px 18px",
+          padding: isMobile ? "10px 12px" : "14px 18px",
           transition: ".25s",
         }}
       >
@@ -5026,7 +5082,7 @@ function MachineStatsPanel() {
         <div
           style={{
             display: "flex",
-            gap: 28,
+            gap: isMobile ? 14 : 28,
           }}
         >
           <div style={{ textAlign: "right" }}>
@@ -5090,8 +5146,134 @@ function MachineStatsPanel() {
   );
 }
 
+function PrintingBreakdownPanel() {
+  const [data, setData] = useState(null);
+  const [expanded, setExpanded] = useState(null); // "NORMAL" | "STORY" | "REBIND" | null
+  const isMobile = useIsMobile();
+
+  useEffect(() => {
+    const load = () => api.printingBreakdown().then(setIfChanged(setData)).catch(() => {});
+    load();
+    const t = setInterval(load, POLL_INTERVAL_MS);
+    return () => clearInterval(t);
+  }, []);
+
+  const rows = [
+    { key: "NORMAL", label: "Magazine Prints", accent: "var(--text-pri)" },
+    { key: "STORY",  label: "Story Albums",    accent: "var(--text-pri)" },
+    { key: "REBIND", label: "Rebinds",         accent: "var(--text-pri)" },
+  ];
+
+  const machineLabel  = { GREEN_2: "Green II", GREEN_3: "Green III", EPSON: "Epson" };
+  const MACHINE_ORDER = ["GREEN_2", "GREEN_3", "EPSON"];
+
+  return (
+    <div style={{
+      background: "var(--card-bg)", border: "1px solid var(--border)",
+      borderRadius: 16, padding: 20, boxShadow: "0 8px 30px rgba(0,0,0,0.20)",
+      gridColumn: isMobile ? "1" : "1 / -1",
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18, flexWrap: "wrap", gap: 6 }}>
+        <div style={{
+          fontSize: 18, fontWeight: 700, color: "var(--text-pri)",
+          fontFamily: "var(--fd)", letterSpacing: ".04em", textShadow: "var(--title-shadow)",
+        }}>
+          Printing Section
+        </div>
+        <div style={{ fontSize: 11, color: "var(--text-dim)", letterSpacing: ".06em" }}>
+          tap a row for machine breakdown
+        </div>
+      </div>
+
+      {!data ? (
+        <div style={{ textAlign: "center", padding: "24px 0", color: "var(--text-pri)", fontFamily: "var(--fd)", fontSize: 13, letterSpacing: ".08em" }}>
+          LOADING…
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {rows.map(r => {
+            const d = data.daily[r.key]   || { total: 0, machines: {} };
+            const m = data.monthly[r.key] || { total: 0, machines: {} };
+            const isOpen = expanded === r.key;
+            const machineKeys = MACHINE_ORDER.filter(
+              mk => (m.machines[mk] || 0) > 0 || (d.machines[mk] || 0) > 0
+            );
+
+            return (
+              <div key={r.key} style={{
+                background: "var(--surface-sunken)", border: "1px solid var(--border-strong)",
+                borderLeft: `5px solid ${r.accent}`, borderRadius: 12, overflow: "hidden",
+              }}>
+                <button
+                  onClick={() => setExpanded(isOpen ? null : r.key)}
+                  style={{
+                    width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
+                    padding: "14px 18px", background: "transparent", textAlign: "left", flexWrap: "wrap", gap: 8,
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <ChevronDown size={16} style={{
+                      color: "var(--text-dim)", transition: "transform .2s ease",
+                      transform: isOpen ? "rotate(180deg)" : "rotate(0deg)", flexShrink: 0,
+                    }} />
+                    <span style={{ color: r.accent, fontWeight: 700, fontSize: 15, letterSpacing: ".05em" }}>
+                      {r.label}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", gap: 28 }}>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontSize: 12, color: "var(--text-pri)", letterSpacing: ".2em" }}>Today</div>
+                      <div style={{ fontSize: 24, fontWeight: 700, color: "#3c24a5" }}>{d.total}</div>
+                    </div>
+                    <div style={{ width: 1, background: "var(--border-strong)" }} />
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontSize: 12, color: "var(--text-pri)", letterSpacing: ".2em" }}>Monthly</div>
+                      <div style={{ fontSize: 24, fontWeight: 700, color: "#2ECC71" }}>{m.total}</div>
+                    </div>
+                  </div>
+                </button>
+
+                {isOpen && (
+                  <div className="si" style={{ padding: "0 18px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+                    {machineKeys.length === 0 ? (
+                      <div style={{ fontSize: 12, color: "var(--text-dim)", padding: "6px 0" }}>
+                        No machine data recorded yet for this category.
+                      </div>
+                    ) : machineKeys.map(mk => (
+                      <div key={mk} style={{
+                        display: "flex", justifyContent: "space-between", alignItems: "center",
+                        background: "var(--bg2)", border: "1px solid var(--border)",
+                        borderRadius: 8, padding: "9px 14px", marginLeft: isMobile ? 0 : 24,
+                      }}>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-sec)" }}>
+                          {machineLabel[mk] || mk}
+                        </span>
+                        <div style={{ display: "flex", gap: 20 }}>
+                          <div style={{ textAlign: "right" }}>
+                            <div style={{ fontSize: 10, color: "var(--text-dim)", letterSpacing: ".15em" }}>TODAY</div>
+                            <div style={{ fontSize: 16, fontWeight: 700, color: "#5566e0" }}>{d.machines[mk] || 0}</div>
+                          </div>
+                          <div style={{ textAlign: "right" }}>
+                            <div style={{ fontSize: 10, color: "var(--text-dim)", letterSpacing: ".15em" }}>MONTHLY</div>
+                            <div style={{ fontSize: 16, fontWeight: 700, color: "#22c55e" }}>{m.machines[mk] || 0}</div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PrintingSectionPanel() {
   const [data, setData] = useState(null);
+  const isMobile = useIsMobile();
   useEffect(() => {
   const load = () => api.printingSection().then(setIfChanged(setData)).catch(() => {});
   load();
@@ -5100,7 +5282,7 @@ function PrintingSectionPanel() {
 }, []);
 
   const rows = [
-    { key: "normal",         label: "Normal Prints",  accent: "var(--text-pri)" },
+    { key: "normal",         label: "Magazine Prints",  accent: "var(--text-pri)" },
     { key: "story",          label: "Story Albums",   accent: "var(--text-pri)" },
     { key: "rebind",         label: "Rebinds",        accent: "var(--text-pri)" },
   ];
@@ -5158,7 +5340,7 @@ function PrintingSectionPanel() {
                 border: "1px solid var(--border-strong)",
                 borderLeft: `5px solid ${r.accent}`,
                 borderRadius: 12,
-                padding: "14px 18px",
+                padding: isMobile ? "10px 12px" : "14px 18px",
                 transition: ".25s",
               }}
             >
@@ -5177,12 +5359,12 @@ function PrintingSectionPanel() {
               </div>
 
               {/* Stats */}
-              <div style={{ display: "flex", gap: 28 }}>
+              <div style={{ display: "flex", gap: isMobile ? 14 : 28 }}>
                 <div style={{ textAlign: "right" }}>
-                  <div style={{ fontSize: 12,fontweight:700 ,color: "var(--text-pri)", letterSpacing:".2em" }}>
+                  <div style={{ fontSize: 12,fontweight:700 ,color: "var(--text-pri)", letterSpacing:isMobile ? ".08em" : ".2em" }}>
                     Today
                   </div>
-                  <div style={{ fontSize: 24, fontWeight: 700, color: "#3c24a5" }}>
+                  <div style={{ fontSize: isMobile ? 18 : 24, fontWeight: 700, color: "#3c24a5" }}>
                     {d[r.key] ?? 0}
                   </div>
                 </div>
@@ -5208,19 +5390,22 @@ function PrintingSectionPanel() {
 
 function DamageSummaryPanel() {
   const [data, setData] = useState(null);
+  const [expanded, setExpanded] = useState(null); // "PRINTING" | "LAMINATING" | "BINDING" | null
   const isMobile = useIsMobile();
   useEffect(() => {
-  const load = () => api.damageStats().then(setIfChanged(setData)).catch(() => {});
-  load();
-  const t = setInterval(load, POLL_INTERVAL_MS);
-  return () => clearInterval(t);
-}, []);
+    const load = () => api.damageStats().then(setIfChanged(setData)).catch(() => {});
+    load();
+    const t = setInterval(load, POLL_INTERVAL_MS);
+    return () => clearInterval(t);
+  }, []);
 
   const rows = [
     { key: "PRINTING",   label: "Printing",   accent: "var(--blue)"  },
     { key: "LAMINATING", label: "Laminating", accent: "var(--cyan)"  },
     { key: "BINDING",    label: "Binding",    accent: "var(--green)" },
   ];
+
+  const SIZE_ORDER = ["9x13", "10x16", "12x16", "13x19"];
 
   return (
     <div style={{
@@ -5257,17 +5442,77 @@ function DamageSummaryPanel() {
             </div>
           </div>
 
+          <div style={{ fontSize: 10, color: "var(--text-dim)", letterSpacing: ".08em", marginTop: 2 }}>
+            tap a department for paper size breakdown
+          </div>
+
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {rows.map(r => {
-              const monthly = data.monthly.by_department[r.key] || { quantity: 0, value: 0 };
+              const monthly = data.monthly.by_department[r.key] || { quantity: 0, value: 0, by_size: {} };
+              const daily   = data.daily.by_department[r.key]   || { quantity: 0, value: 0, by_size: {} };
+              const isOpen  = expanded === r.key;
+              const sizeKeys = [
+                ...new Set([...Object.keys(monthly.by_size), ...Object.keys(daily.by_size)]),
+              ].sort((a, b) => {
+                const ia = SIZE_ORDER.indexOf(a), ib = SIZE_ORDER.indexOf(b);
+                return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+              });
+
               return (
                 <div key={r.key} style={{
-                  display: "flex", alignItems: "center", justifyContent: "space-between",
-                  background: "var(--surface-sunken)", border: "1px solid var(--border-strong)", borderLeft: `4px solid ${r.accent}`,
-                  borderRadius: 6, padding: "8px 12px",
+                  background: "var(--surface-sunken)", border: "1px solid var(--border-strong)",
+                  borderLeft: `4px solid ${r.accent}`, borderRadius: 6, overflow: "hidden",
                 }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: r.accent, textTransform: "uppercase", letterSpacing: ".06em" }}>{r.label}</span>
-                  <span style={{ fontSize: 13, fontWeight: 800, color: "var(--text-pri)" }}>Rs. {monthly.value} <span style={{ fontSize: 12, color: "var(--text-pri)", fontWeight: 600,letterSpacing:"0.1em" }}>({monthly.quantity} sheets)</span></span>
+                  <button
+                    onClick={() => setExpanded(isOpen ? null : r.key)}
+                    style={{
+                      width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+                      padding: "8px 12px", background: "transparent", textAlign: "left", flexWrap: "wrap", gap: 6,
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <ChevronDown size={14} style={{
+                        color: "var(--text-dim)", transition: "transform .2s ease",
+                        transform: isOpen ? "rotate(180deg)" : "rotate(0deg)", flexShrink: 0,
+                      }} />
+                      <span style={{ fontSize: 12, fontWeight: 700, color: r.accent, textTransform: "uppercase", letterSpacing: ".06em" }}>
+                        {r.label}
+                      </span>
+                    </div>
+                    <span style={{ fontSize: 13, fontWeight: 800, color: "var(--text-pri)" }}>
+                      Rs. {monthly.value} <span style={{ fontSize: 12, color: "var(--text-pri)", fontWeight: 600, letterSpacing: "0.1em" }}>({monthly.quantity} sheets)</span>
+                    </span>
+                  </button>
+
+                  {isOpen && (
+                    <div className="si" style={{ padding: "0 12px 10px", display: "flex", flexDirection: "column", gap: 6 }}>
+                      {sizeKeys.length === 0 ? (
+                        <div style={{ fontSize: 12, color: "var(--text-dim)", padding: "4px 0" }}>No damage recorded for this department.</div>
+                      ) : sizeKeys.map(size => {
+                        const mSize = monthly.by_size[size] || { quantity: 0, value: 0 };
+                        const dSize = daily.by_size[size]   || { quantity: 0, value: 0 };
+                        return (
+                          <div key={size} style={{
+                            display: "flex", justifyContent: "space-between", alignItems: "center",
+                            background: "var(--bg2)", border: "1px solid var(--border)",
+                            borderRadius: 6, padding: "7px 12px", marginLeft: isMobile ? 0 : 20,
+                          }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text-sec)" }}>{size}</span>
+                            <div style={{ display: "flex", gap: 16 }}>
+                              <div style={{ textAlign: "right" }}>
+                                <div style={{ fontSize: 9, color: "var(--text-dim)", letterSpacing: ".12em" }}>TODAY</div>
+                                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-pri)" }}>{dSize.quantity} sh · Rs.{dSize.value}</div>
+                              </div>
+                              <div style={{ textAlign: "right" }}>
+                                <div style={{ fontSize: 9, color: "var(--text-dim)", letterSpacing: ".12em" }}>MONTHLY</div>
+                                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--amber)" }}>{mSize.quantity} sh · Rs.{mSize.value}</div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -5324,6 +5569,116 @@ function PaperStockSummaryPanel() {
                 <div style={{ fontSize: 12, color: "var(--text-pri)", textTransform: "uppercase", letterSpacing: ".06em" }}>{size}</div>
                 <div style={{ fontFamily: "var(--fd)", fontSize: 24, fontWeight: 900, color: low ? "var(--red)" : "var(--text-pri)", marginTop: 4 }}>{balance}</div>
                 <div style={{ fontSize: 12, color: "var(--text-pri)" }}>left · {used} used this month</div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PaperUsageBreakdownPanel() {
+  const [data, setData] = useState(null);
+  const [expanded, setExpanded] = useState(null);
+  const isMobile = useIsMobile();
+
+  useEffect(() => {
+    const load = () => apiFetch(`/api/stats/paper-usage-breakdown`).then(setIfChanged(setData)).catch(() => {});
+    load();
+    const t = setInterval(load, POLL_INTERVAL_MS);
+    return () => clearInterval(t);
+  }, []);
+
+  const TYPE_LABELS = {
+    ok_pages: "OK Pages", print_damage: "Print Damage",
+    accu_rp: "Accu RP", bind_rp: "Bind RP",
+  };
+
+  return (
+    <div style={{
+      background: "var(--card-bg)", border: "1px solid var(--border)",
+      borderRadius: 10, padding: "14px 16px", gridColumn: isMobile ? "1" : "1 / -1",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+        <span style={{
+          fontFamily: "var(--fd)", fontSize: 14, fontWeight: 1000, letterSpacing: ".1em",
+          textTransform: "uppercase", color: "var(--text-pri)", textShadow: "var(--title-shadow)",
+        }}>
+          Paper Usage Summary
+        </span>
+        <button onClick={() => navigate("/papers")} style={{
+          padding: "5px 12px", fontSize: 11, fontWeight: 700, borderRadius: 5,
+          background: "var(--bg3)", color: "var(--blue)", border: "1px solid var(--blue)",
+        }}>View All →</button>
+      </div>
+
+      {!data ? (
+        <div style={{ textAlign: "center", padding: "24px 0", color: "var(--text-dim)", fontFamily: "var(--fd)", fontSize: 13, letterSpacing: ".08em" }}>LOADING…</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ fontSize: 10, color: "var(--text-dim)", letterSpacing: ".08em", marginBottom: 6 }}>
+            tap a size for usage-type breakdown
+          </div>
+          {PAPER_SIZES.map(size => {
+            const d = data.daily[size]   || { total: 0, ok_pages: 0, print_damage: 0, accu_rp: 0, bind_rp: 0 };
+            const m = data.monthly[size] || { total: 0, ok_pages: 0, print_damage: 0, accu_rp: 0, bind_rp: 0 };
+            const isOpen = expanded === size;
+
+            return (
+              <div key={size} style={{
+                background: "var(--surface-sunken)", border: "1px solid var(--border-strong)",
+                borderLeft: "4px solid var(--blue)", borderRadius: 6, overflow: "hidden",
+              }}>
+                <button
+                  onClick={() => setExpanded(isOpen ? null : size)}
+                  style={{
+                    width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+                    padding: "10px 14px", background: "transparent", textAlign: "left", flexWrap: "wrap", gap: 8,
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <ChevronDown size={14} style={{
+                      color: "var(--text-dim)", transition: "transform .2s ease",
+                      transform: isOpen ? "rotate(180deg)" : "rotate(0deg)", flexShrink: 0,
+                    }} />
+                    <span style={{ fontSize: 13, fontWeight: 700, color: "var(--blue)", letterSpacing: ".05em" }}>{size}</span>
+                  </div>
+                  <div style={{ display: "flex", gap: 20 }}>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontSize: 10, color: "var(--text-pri)", letterSpacing: ".15em" }}>TODAY</div>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: "#3c24a5" }}>{d.total}</div>
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontSize: 10, color: "var(--text-pri)", letterSpacing: ".15em" }}>MONTHLY</div>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: "#2ECC71" }}>{m.total}</div>
+                    </div>
+                  </div>
+                </button>
+
+                {isOpen && (
+                  <div className="si" style={{ padding: "0 14px 12px", display: "flex", flexDirection: "column", gap: 6 }}>
+                    {Object.keys(TYPE_LABELS).map(tk => (
+                      <div key={tk} style={{
+                        display: "flex", justifyContent: "space-between", alignItems: "center",
+                        background: "var(--bg2)", border: "1px solid var(--border)",
+                        borderRadius: 6, padding: "7px 12px", marginLeft: isMobile ? 0 : 20,
+                      }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text-sec)" }}>{TYPE_LABELS[tk]}</span>
+                        <div style={{ display: "flex", gap: 16 }}>
+                          <div style={{ textAlign: "right" }}>
+                            <div style={{ fontSize: 9, color: "var(--text-dim)", letterSpacing: ".12em" }}>TODAY</div>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-pri)" }}>{d[tk]}</div>
+                          </div>
+                          <div style={{ textAlign: "right" }}>
+                            <div style={{ fontSize: 9, color: "var(--text-dim)", letterSpacing: ".12em" }}>MONTHLY</div>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: "var(--amber)" }}>{m[tk]}</div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -5425,12 +5780,12 @@ const reload = useCallback(async () => {
         <div className="r-grid-intelligence" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
           <BottleneckRadar active={active} />
           <DailyGoalRing   active={active} done={done} />
-          <MachineStatsPanel />
-          <PrintingSectionPanel /> 
+          <PrintingBreakdownPanel /> 
           <AlbumCountPanel />
           <OperatorStatsPanel />
           <DamageSummaryPanel />
           <PaperStockSummaryPanel />
+          <PaperUsageBreakdownPanel />
         </div>
  
         {/* Throughput ticker */}
@@ -5900,6 +6255,7 @@ function buildPrintHTML(job) {
 }
 
 function PrintJobCardModal({ job, onClose }) {
+  const isMobile = useIsMobile();
   function doPrint() {
     const win = window.open("", "_blank", "width=800,height=600");
     win.document.write(buildPrintHTML(job));
@@ -5911,8 +6267,8 @@ function PrintJobCardModal({ job, onClose }) {
   const days = Math.ceil((new Date(job.dele_date) - new Date()) / 86400000);
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "var(--overlay)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9000 }} onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} style={{ background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: 12, padding: 24, width: "100%", maxWidth: 520, display: "flex", flexDirection: "column", gap: 16 }}>
+     <div style={{ position: "fixed", inset: 0, background: "var(--overlay)", display: "flex", alignItems: isMobile ? "flex-end" : "center", justifyContent: "center", zIndex: 9000 }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: isMobile ? "16px 16px 0 0" : 12, padding: 24, width: "100%", maxWidth: 520, maxHeight: isMobile ? "92dvh" : "90vh", overflowY: "auto", display: "flex", flexDirection: "column", gap: 16 }}>
         <div>
           <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 6 }}>Print Job Card</div>
           <div style={{ fontSize: 22, fontWeight: 800, color: "var(--amber)", fontFamily: "var(--fm)" }}>{job.job_no}</div>

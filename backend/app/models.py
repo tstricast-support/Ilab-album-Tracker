@@ -113,7 +113,7 @@ PRESET_DELAY_REASONS: dict[str, list[str]] = {
     ],
 }
 
-PAPER_SIZES = ["9x13", "10x16", "12x16", "13x19"]
+PAPER_SIZES = ["9x13", "10x16", "12x16","13x16", "13x19"]
 LOW_STOCK_THRESHOLD = 5
 
 class JobCard(Base):

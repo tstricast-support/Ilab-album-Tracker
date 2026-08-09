@@ -33,10 +33,10 @@ export const TIMEOUT_MINUTES = {
 };
 
 export const ALBUM_TYPES = [
-  { value: "NORMAL", label: "Normal" },
+  { value: "NORMAL", label: "Magazine Album" },
   { value: "STORY",  label: "Story Album" },
   { value: "REBIND", label: "Rebind Album" },
 ];
 
-export const PAPER_SIZES = ["9x13", "10x16", "12x16", "13x19"];
+export const PAPER_SIZES = ["9x13", "10x16", "12x16", "13x16", "13x19"];
 export const LOW_STOCK_THRESHOLD = 5;
