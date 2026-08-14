@@ -1379,7 +1379,7 @@ function OperatorTag({ log, dept }) {
   const showUnder    = dept === "PRINTING" && log.under_whom;
   const showMachine   = dept === "PRINTING" && log.machine;
   const isLaminating  = dept === "LAMINATING";
-  const machineLabel = { GREEN_2: "Green 2", GREEN_3: "Green 3",EPSON:"Epson" }[log.machine] || log.machine;
+  const machineLabel = { GREEN_2: "Green 2", GREEN_3: "Green 3", EPSON: "Epson", GREEN_3_NEW: "Green 3 New" }[log.machine] || log.machine;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", marginTop: 3 }}>
       <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 700, padding: "2px 7px", borderRadius: 4, background: isLaminating ? "var(--info-bg)" : "var(--info-bg)", border: `1px solid ${isLaminating ? "#06b6d4" : "var(--border-strong)"}`, color: "var(--text-pri)", letterSpacing: ".08em" }}>
@@ -5004,6 +5004,7 @@ function MachineStatsPanel() {
     { key: "GREEN_2", label: "Green II", accent: "var(--text-pri)" },
     { key: "GREEN_3", label: "Green III", accent: "var(--text-pri)" },
     { key: "EPSON", label: "Epson", accent: "var(--text-pri)" },
+    { key: "GREEN_3_NEW", label: "Green 3 New", accent: "var(--text-pri)" },
   ];
 
   return (
@@ -5164,8 +5165,8 @@ function PrintingBreakdownPanel() {
     { key: "REBIND", label: "Rebinds",         accent: "var(--text-pri)" },
   ];
 
-  const machineLabel  = { GREEN_2: "Green II", GREEN_3: "Green III", EPSON: "Epson" };
-  const MACHINE_ORDER = ["GREEN_2", "GREEN_3", "EPSON"];
+  const machineLabel  = { GREEN_2: "Green II", GREEN_3: "Green III", EPSON: "Epson", GREEN_3_NEW: "Green 3 New" };
+  const MACHINE_ORDER = ["GREEN_2", "GREEN_3", "EPSON", "GREEN_3_NEW"];
 
   return (
     <div style={{
