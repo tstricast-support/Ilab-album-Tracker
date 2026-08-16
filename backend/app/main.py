@@ -930,6 +930,17 @@ def get_dept_stats(db: Session = Depends(get_db)):
     )
     daily["ENTRY"] = entry_count
 
+    # Entry count this month — Sri Lanka calendar month
+    entry_count_monthly = (
+        db.query(func.count(JobCard.id))
+        .filter(
+            JobCard.created_at >= month_start,
+            JobCard.created_at <  month_end,
+        )
+        .scalar() or 0
+    )
+    result["ENTRY"] = entry_count_monthly
+
     # ── Per-machine breakdown for PRINTING ──────────────
     machine_monthly_rows = (
         db.query(DepartmentLog.machine, func.count(DepartmentLog.id))
@@ -1028,6 +1039,95 @@ def printing_breakdown_stats(db: Session = Depends(get_db)):
         return result
 
     return {"daily": counts_for(day_start, day_end), "monthly": counts_for(month_start, month_end)}
+
+@app.get("/api/stats/printing-jobs")
+def printing_jobs_list(
+    db: Session = Depends(get_db),
+    machine: str = Query(...),
+    album_type: str = Query(..., description="NORMAL / STORY / REBIND"),
+    date: Optional[str] = Query(None, description="YYYY-MM-DD, Sri Lanka day. Omit for current month."),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(15, ge=1, le=100),
+):
+    if date:
+        start = datetime.strptime(date, "%Y-%m-%d") - SL_TZ_OFFSET
+        end   = start + timedelta(days=1)
+    else:
+        utc_now = datetime.utcnow()
+        sl_now  = utc_now + SL_TZ_OFFSET
+        start = datetime(sl_now.year, sl_now.month, 1) - SL_TZ_OFFSET
+        end   = (
+            datetime(sl_now.year + 1, 1, 1) if sl_now.month == 12
+            else datetime(sl_now.year, sl_now.month + 1, 1)
+        ) - SL_TZ_OFFSET
+
+    q = (
+        db.query(JobCard.job_no, JobCard.customer, JobCard.couple_name)
+        .join(DepartmentLog, DepartmentLog.job_id == JobCard.id)
+        .filter(
+            DepartmentLog.department == DepartmentEnum.PRINTING,
+            DepartmentLog.machine    == machine.strip().upper(),
+            DepartmentLog.exited_at.isnot(None),
+            DepartmentLog.exited_at >= start,
+            DepartmentLog.exited_at <  end,
+        )
+    )
+    at = album_type.strip().upper()
+    if at == "NORMAL":
+        q = q.filter(or_(JobCard.album_type == "NORMAL", JobCard.album_type.is_(None)))
+    else:
+        q = q.filter(JobCard.album_type == at)
+
+    q = q.order_by(desc(DepartmentLog.exited_at))
+    total = q.count()
+    rows  = q.offset((page - 1) * page_size).limit(page_size).all()
+
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "pages": max(1, -(-total // page_size)),
+        "jobs": [
+            {"job_no": r[0], "customer": r[1], "couple_name": r[2]} for r in rows
+        ],
+    }
+
+@app.get("/api/stats/printing-jobs/dates-with-entries")
+def printing_jobs_dates_with_entries(
+    db: Session = Depends(get_db),
+    machine: str = Query(...),
+    album_type: str = Query(...),
+    year: int = Query(...),
+    month: int = Query(...),
+):
+    start = datetime(year, month, 1) - SL_TZ_OFFSET
+    end   = (datetime(year + 1, 1, 1) if month == 12 else datetime(year, month + 1, 1)) - SL_TZ_OFFSET
+
+    q = (
+        db.query(DepartmentLog.exited_at, func.count(DepartmentLog.id))
+        .join(JobCard, JobCard.id == DepartmentLog.job_id)
+        .filter(
+            DepartmentLog.department == DepartmentEnum.PRINTING,
+            DepartmentLog.machine    == machine.strip().upper(),
+            DepartmentLog.exited_at.isnot(None),
+            DepartmentLog.exited_at >= start,
+            DepartmentLog.exited_at <  end,
+        )
+    )
+    at = album_type.strip().upper()
+    if at == "NORMAL":
+        q = q.filter(or_(JobCard.album_type == "NORMAL", JobCard.album_type.is_(None)))
+    else:
+        q = q.filter(JobCard.album_type == at)
+
+    rows = q.group_by(DepartmentLog.exited_at).all()
+
+    day_counts: dict[str, int] = {}
+    for exited_at, cnt in rows:
+        lk_date = exited_at + SL_TZ_OFFSET
+        day_key = str(lk_date.day)
+        day_counts[day_key] = day_counts.get(day_key, 0) + cnt
+    return day_counts
 
 @app.get("/api/stats/operators")
 def operator_stats(

@@ -34,6 +34,10 @@ const api = {
   deptStats: () => apiFetch("/api/stats/departments"),
   printingSection: () => apiFetch("/api/stats/printing-section"),
   printingBreakdown: () => apiFetch(`/api/stats/printing-breakdown`),
+  printingJobsList: (machine, album_type, date, page) =>
+    apiFetch(`/api/stats/printing-jobs?machine=${machine}&album_type=${album_type}${date ? `&date=${date}` : ""}&page=${page}&page_size=15`),
+  printingJobsDates: (machine, album_type, year, month) =>
+    apiFetch(`/api/stats/printing-jobs/dates-with-entries?machine=${machine}&album_type=${album_type}&year=${year}&month=${month}`),
   setReason:     (id, dept, reason) => apiFetch(`/api/jobs/${id}/delay-reason/${dept}`, {
     method: "POST", body: JSON.stringify({ reason }),
   }),
@@ -3697,6 +3701,18 @@ function StationPage({ deptKey }) {
             width: isMobile ? "100%" : "auto",
             justifyContent: isMobile ? "flex-end" : "flex-start",
           }}>
+          {deptKey === "printing" && (
+            <button onClick={() => navigate("/entry")} style={{
+              padding: isMobile ? "6px 10px" : "8px 14px",
+              background: "var(--amber)", color: "#000",
+              border: "none", borderRadius: 6, fontWeight: 800, cursor: "pointer",
+              fontSize: isMobile ? 11 : 13,
+              display: "flex", alignItems: "center", gap: 5,
+              whiteSpace: "nowrap",
+            }}>
+              <Plus size={14} /> {isMobile ? "Job Card" : "Create Job Card"}
+            </button>
+          )}
           <DeptCompletedDropdown deptKey={cfg.dept} title={`Done Today - ${cfg.label}`} accent={cfg.accent} addToast={add} />
           {/* Queue count */}
           <div style={{
@@ -4989,6 +5005,104 @@ function ThroughputTicker({ done }) {
   );
 }
 
+function DeptTotalsPanel() {
+  const [data, setData] = useState(null);
+  const isMobile = useIsMobile();
+
+  useEffect(() => {
+    const load = () => api.deptStats().then(setIfChanged(setData)).catch(() => {});
+    load();
+    const t = setInterval(load, POLL_INTERVAL_MS);
+    return () => clearInterval(t);
+  }, []);
+
+  const rows = [
+    { key: "ENTRY",         label: "Pending",     tag: "JOB ENTRY" },
+    { key: "PRINTING",      label: "Printing",    tag: null        },
+    { key: "LASER_CUTTING", label: "Laser Cut",   tag: null        },
+    { key: "LAMINATING",    label: "Laminating",  tag: null        },
+    { key: "BINDING",       label: "Complete",    tag: "BINDING"   },
+  ];
+
+  return (
+    <div style={{
+      background: "#a8a5a5", border: "1px solid #8f8c8c",
+      borderRadius: 12, padding: "14px 16px", marginBottom: 16,
+    }}>
+      <div style={{
+        fontSize: 16, fontWeight: 800, color: "#111",
+        marginBottom: 12,
+      }}>
+        Department Totals
+      </div>
+
+      {!data ? (
+        <div style={{ textAlign: "center", padding: "20px 0", color: "#333", fontSize: 13, letterSpacing: ".05em" }}>
+          LOADING…
+        </div>
+      ) : (
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
+          gap: 10,
+        }}>
+          {rows.map(r => {
+            const daily   = data.daily?.[r.key]   ?? 0;
+            const monthly = data.monthly?.[r.key] ?? 0;
+            const isEntry = r.key === "ENTRY";
+
+            return (
+              <div key={r.key} style={{
+                background: "#e6e6e6",
+                borderLeft: "4px solid #111",
+                borderRadius: 8,
+                padding: "14px 18px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 10,
+                flexWrap: "wrap",
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 15, fontWeight: 800, color: "#111" }}>
+                    {r.label}
+                  </span>
+                  {r.tag && (
+                    <span style={{
+                      fontSize: 10, fontWeight: 700, color: "#555",
+                    }}>
+                      ({r.tag})
+                    </span>
+                  )}
+                </div>
+
+                {isEntry ? (
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontSize: 11, color: "#333", letterSpacing: ".08em" }}>PENDING</div>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: "#d97706" }}>{daily}</div>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", gap: 20, alignItems: "center" }}>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontSize: 11, color: "#333", letterSpacing: ".08em" }}>Today</div>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: "#3c24a5" }}>{daily}</div>
+                    </div>
+                    <div style={{ width: 1, height: 30, background: "#bbb" }} />
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontSize: 11, color: "#333", letterSpacing: ".08em" }}>Monthly</div>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: "#2ECC71" }}>{monthly}</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MachineStatsPanel() {
   const [data, setData] = useState(null);
   const isMobile = useIsMobile();
@@ -5147,9 +5261,26 @@ function MachineStatsPanel() {
   );
 }
 
-function PrintingBreakdownPanel() {
-  const [data, setData] = useState(null);
-  const [expanded, setExpanded] = useState(null); // "NORMAL" | "STORY" | "REBIND" | null
+const PRINTING_MACHINES = [
+  { key: "GREEN_2",     label: "Green II",     albumTypes: ["NORMAL", "STORY", "REBIND"] },
+  { key: "GREEN_3",     label: "Green III",    albumTypes: ["NORMAL", "STORY", "REBIND"] },
+  { key: "GREEN_3_NEW", label: "Green III New",albumTypes: ["NORMAL", "STORY", "REBIND"] },
+  { key: "EPSON",       label: "Epson",        albumTypes: ["STORY", "REBIND"] },
+];
+
+const ALBUM_TYPE_LABELS = { NORMAL: "Magazine Album", STORY: "Story Albums", REBIND: "Rebind Albums" };
+
+function PrintingMachineBreakdownPanel() {
+  const [data, setData]                 = useState(null);
+  const [expandedMachine, setExpMachine] = useState(null);
+  const [expandedAlbum, setExpAlbum]     = useState(null); // `${machine}-${albumType}`
+  const [dateByAlbum, setDateByAlbum]    = useState({});   // albumKey -> "YYYY-MM-DD" | null (null = this month)
+  const [pageByAlbum, setPageByAlbum]    = useState({});   // albumKey -> page number
+  const [jobsCache, setJobsCache]        = useState({});   // cacheKey -> result | "loading" | "error"
+  const [calOpenAlbum, setCalOpenAlbum]  = useState(null); // only one calendar popover open at a time
+  const [dotDays, setDotDays]            = useState({});
+  const [calYear, setCalYear]            = useState(new Date().getFullYear());
+  const [calMonth, setCalMonth]          = useState(new Date().getMonth() + 1);
   const isMobile = useIsMobile();
 
   useEffect(() => {
@@ -5159,108 +5290,226 @@ function PrintingBreakdownPanel() {
     return () => clearInterval(t);
   }, []);
 
-  const rows = [
-    { key: "NORMAL", label: "Magazine Prints", accent: "var(--text-pri)" },
-    { key: "STORY",  label: "Story Albums",    accent: "var(--text-pri)" },
-    { key: "REBIND", label: "Rebinds",         accent: "var(--text-pri)" },
-  ];
+  function toggleMachine(mKey) {
+    setExpMachine(prev => prev === mKey ? null : mKey);
+    setExpAlbum(null);
+    setCalOpenAlbum(null);
+  }
 
-  const machineLabel  = { GREEN_2: "Green II", GREEN_3: "Green III", EPSON: "Epson", GREEN_3_NEW: "Green 3 New" };
-  const MACHINE_ORDER = ["GREEN_2", "GREEN_3", "EPSON", "GREEN_3_NEW"];
+  function cacheKeyFor(machine, at, date, page) {
+    return `${machine}-${at}-${date || "month"}-${page}`;
+  }
+
+  async function loadJobs(machine, at, date, page) {
+    const key = cacheKeyFor(machine, at, date, page);
+    setJobsCache(c => ({ ...c, [key]: "loading" }));
+    try {
+      const res = await api.printingJobsList(machine, at, date, page);
+      setJobsCache(c => ({ ...c, [key]: res }));
+    } catch {
+      setJobsCache(c => ({ ...c, [key]: "error" }));
+    }
+  }
+
+  function openAlbum(albumKey, machine, at) {
+    if (expandedAlbum === albumKey) { setExpAlbum(null); setCalOpenAlbum(null); return; }
+    setExpAlbum(albumKey);
+    setCalOpenAlbum(null);
+    const date = dateByAlbum[albumKey] ?? null;
+    const page = pageByAlbum[albumKey] ?? 1;
+    loadJobs(machine, at, date, page);
+  }
+
+  function selectDate(albumKey, machine, at, date) {
+    setDateByAlbum(d => ({ ...d, [albumKey]: date }));
+    setPageByAlbum(p => ({ ...p, [albumKey]: 1 }));
+    setCalOpenAlbum(null);
+    loadJobs(machine, at, date, 1);
+  }
+
+  function selectThisMonth(albumKey, machine, at) {
+    setDateByAlbum(d => ({ ...d, [albumKey]: null }));
+    setPageByAlbum(p => ({ ...p, [albumKey]: 1 }));
+    setCalOpenAlbum(null);
+    loadJobs(machine, at, null, 1);
+  }
+
+  function changePage(albumKey, machine, at, newPage) {
+    setPageByAlbum(p => ({ ...p, [albumKey]: newPage }));
+    const date = dateByAlbum[albumKey] ?? null;
+    loadJobs(machine, at, date, newPage);
+  }
+
+  function openCalendar(albumKey, machine, at) {
+    const isOpen = calOpenAlbum === albumKey;
+    setCalOpenAlbum(isOpen ? null : albumKey);
+    if (!isOpen) {
+      const now = new Date();
+      setCalYear(now.getFullYear());
+      setCalMonth(now.getMonth() + 1);
+      api.printingJobsDates(machine, at, now.getFullYear(), now.getMonth() + 1)
+        .then(setDotDays).catch(() => setDotDays({}));
+    }
+  }
+
+  function calNav(machine, at, y, m) {
+    setCalYear(y); setCalMonth(m);
+    api.printingJobsDates(machine, at, y, m).then(setDotDays).catch(() => setDotDays({}));
+  }
 
   return (
     <div style={{
-      background: "var(--card-bg)", border: "1px solid var(--border)",
-      borderRadius: 16, padding: 20, boxShadow: "0 8px 30px rgba(0,0,0,0.20)",
+      background: "#a8a5a5", border: "1px solid #8f8c8c",
+      borderRadius: 12, padding: "14px 16px", marginBottom: 16,
       gridColumn: isMobile ? "1" : "1 / -1",
     }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18, flexWrap: "wrap", gap: 6 }}>
-        <div style={{
-          fontSize: 18, fontWeight: 700, color: "var(--text-pri)",
-          fontFamily: "var(--fd)", letterSpacing: ".04em", textShadow: "var(--title-shadow)",
-        }}>
-          Printing Section
-        </div>
-        <div style={{ fontSize: 11, color: "var(--text-dim)", letterSpacing: ".06em" }}>
-          tap a row for machine breakdown
-        </div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 6 }}>
+        <div style={{ fontSize: 16, fontWeight: 800, color: "#111" }}>Printing Section - By Machine</div>
+        <div style={{ fontSize: 11, color: "#444" }}>tap a machine, then an album type</div>
       </div>
 
       {!data ? (
-        <div style={{ textAlign: "center", padding: "24px 0", color: "var(--text-pri)", fontFamily: "var(--fd)", fontSize: 13, letterSpacing: ".08em" }}>
-          LOADING…
-        </div>
+        <div style={{ textAlign: "center", padding: "20px 0", color: "#333", fontSize: 13 }}>LOADING…</div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {rows.map(r => {
-            const d = data.daily[r.key]   || { total: 0, machines: {} };
-            const m = data.monthly[r.key] || { total: 0, machines: {} };
-            const isOpen = expanded === r.key;
-            const machineKeys = MACHINE_ORDER.filter(
-              mk => (m.machines[mk] || 0) > 0 || (d.machines[mk] || 0) > 0
-            );
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {PRINTING_MACHINES.map(m => {
+            const isMOpen = expandedMachine === m.key;
+            const dailyTotal   = m.albumTypes.reduce((s, at) => s + (data.daily[at]?.machines[m.key]   || 0), 0);
+            const monthlyTotal = m.albumTypes.reduce((s, at) => s + (data.monthly[at]?.machines[m.key] || 0), 0);
 
             return (
-              <div key={r.key} style={{
-                background: "var(--surface-sunken)", border: "1px solid var(--border-strong)",
-                borderLeft: `5px solid ${r.accent}`, borderRadius: 12, overflow: "hidden",
-              }}>
-                <button
-                  onClick={() => setExpanded(isOpen ? null : r.key)}
-                  style={{
-                    width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
-                    padding: "14px 18px", background: "transparent", textAlign: "left", flexWrap: "wrap", gap: 8,
-                  }}
-                >
+              <div key={m.key} style={{ background: "#e6e6e6", borderLeft: "4px solid #111", borderRadius: 8, overflow: "hidden" }}>
+                <button onClick={() => toggleMachine(m.key)} style={{
+                  width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+                  padding: "14px 18px", background: "transparent", textAlign: "left", flexWrap: "wrap", gap: 8,
+                }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <ChevronDown size={16} style={{
-                      color: "var(--text-dim)", transition: "transform .2s ease",
-                      transform: isOpen ? "rotate(180deg)" : "rotate(0deg)", flexShrink: 0,
-                    }} />
-                    <span style={{ color: r.accent, fontWeight: 700, fontSize: 15, letterSpacing: ".05em" }}>
-                      {r.label}
-                    </span>
+                    <ChevronDown size={16} style={{ color: "#444", transition: "transform .2s ease", transform: isMOpen ? "rotate(180deg)" : "rotate(0deg)" }} />
+                    <span style={{ fontSize: 15, fontWeight: 800, color: "#111" }}>{m.label}</span>
                   </div>
-                  <div style={{ display: "flex", gap: 28 }}>
+                  <div style={{ display: "flex", gap: 20 }}>
                     <div style={{ textAlign: "right" }}>
-                      <div style={{ fontSize: 12, color: "var(--text-pri)", letterSpacing: ".2em" }}>Today</div>
-                      <div style={{ fontSize: 24, fontWeight: 700, color: "#3c24a5" }}>{d.total}</div>
+                      <div style={{ fontSize: 11, color: "#333", letterSpacing: ".08em" }}>Today</div>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: "#3c24a5" }}>{dailyTotal}</div>
                     </div>
-                    <div style={{ width: 1, background: "var(--border-strong)" }} />
+                    <div style={{ width: 1, background: "#bbb" }} />
                     <div style={{ textAlign: "right" }}>
-                      <div style={{ fontSize: 12, color: "var(--text-pri)", letterSpacing: ".2em" }}>Monthly</div>
-                      <div style={{ fontSize: 24, fontWeight: 700, color: "#2ECC71" }}>{m.total}</div>
+                      <div style={{ fontSize: 11, color: "#333", letterSpacing: ".08em" }}>Monthly</div>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: "#2ECC71" }}>{monthlyTotal}</div>
                     </div>
                   </div>
                 </button>
 
-                {isOpen && (
-                  <div className="si" style={{ padding: "0 18px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
-                    {machineKeys.length === 0 ? (
-                      <div style={{ fontSize: 12, color: "var(--text-dim)", padding: "6px 0" }}>
-                        No machine data recorded yet for this category.
-                      </div>
-                    ) : machineKeys.map(mk => (
-                      <div key={mk} style={{
-                        display: "flex", justifyContent: "space-between", alignItems: "center",
-                        background: "var(--bg2)", border: "1px solid var(--border)",
-                        borderRadius: 8, padding: "9px 14px", marginLeft: isMobile ? 0 : 24,
-                      }}>
-                        <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-sec)" }}>
-                          {machineLabel[mk] || mk}
-                        </span>
-                        <div style={{ display: "flex", gap: 20 }}>
-                          <div style={{ textAlign: "right" }}>
-                            <div style={{ fontSize: 10, color: "var(--text-dim)", letterSpacing: ".15em" }}>TODAY</div>
-                            <div style={{ fontSize: 16, fontWeight: 700, color: "#5566e0" }}>{d.machines[mk] || 0}</div>
-                          </div>
-                          <div style={{ textAlign: "right" }}>
-                            <div style={{ fontSize: 10, color: "var(--text-dim)", letterSpacing: ".15em" }}>MONTHLY</div>
-                            <div style={{ fontSize: 16, fontWeight: 700, color: "#22c55e" }}>{m.machines[mk] || 0}</div>
-                          </div>
+                {isMOpen && (
+                  <div className="si" style={{ padding: "0 14px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+                    {m.albumTypes.map(at => {
+                      const albumKey = `${m.key}-${at}`;
+                      const isAOpen  = expandedAlbum === albumKey;
+                      const d        = data.daily[at]?.machines[m.key]   || 0;
+                      const mo       = data.monthly[at]?.machines[m.key] || 0;
+                      const selDate  = dateByAlbum[albumKey] ?? null;
+                      const page     = pageByAlbum[albumKey] ?? 1;
+                      const result   = jobsCache[cacheKeyFor(m.key, at, selDate, page)];
+                      const isCalOpen = calOpenAlbum === albumKey;
+
+                      return (
+                        <div key={at} style={{ background: "#f2f2f2", border: "1px solid #ccc", borderRadius: 6, overflow: "hidden" }}>
+                          <button onClick={() => openAlbum(albumKey, m.key, at)} style={{
+                            width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+                            padding: "10px 14px", background: "transparent", textAlign: "left", flexWrap: "wrap", gap: 8,
+                          }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                              <ChevronDown size={13} style={{ color: "#555", transition: "transform .2s ease", transform: isAOpen ? "rotate(180deg)" : "rotate(0deg)" }} />
+                              <span style={{ fontSize: 13, fontWeight: 700, color: "#111" }}>{ALBUM_TYPE_LABELS[at]}</span>
+                            </div>
+                            <div style={{ display: "flex", gap: 16 }}>
+                              <div style={{ textAlign: "right" }}>
+                                <div style={{ fontSize: 9, color: "#555", letterSpacing: ".1em" }}>TODAY</div>
+                                <div style={{ fontSize: 15, fontWeight: 800, color: "#3c24a5" }}>{d}</div>
+                              </div>
+                              <div style={{ textAlign: "right" }}>
+                                <div style={{ fontSize: 9, color: "#555", letterSpacing: ".1em" }}>MONTHLY</div>
+                                <div style={{ fontSize: 15, fontWeight: 800, color: "#2ECC71" }}>{mo}</div>
+                              </div>
+                            </div>
+                          </button>
+
+                          {isAOpen && (
+                            <div className="si" style={{ padding: "0 14px 12px", display: "flex", flexDirection: "column", gap: 10 }}>
+
+                              {/* ── Date controls ── */}
+                              <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", position: "relative" }}>
+                                <button onClick={() => selectThisMonth(albumKey, m.key, at)} style={{
+                                  padding: "5px 12px", fontSize: 11, fontWeight: 700, borderRadius: 4,
+                                  background: !selDate ? "#2ECC71" : "#ddd",
+                                  color: !selDate ? "#fff" : "#333",
+                                }}>This Month</button>
+
+                                <button onClick={() => openCalendar(albumKey, m.key, at)} style={{
+                                  padding: "5px 12px", fontSize: 11, fontWeight: 700, borderRadius: 4,
+                                  background: selDate ? "#3c24a5" : "#ddd",
+                                  color: selDate ? "#fff" : "#333",
+                                  display: "flex", alignItems: "center", gap: 5,
+                                }}>
+                                  <Calendar size={12} />
+                                  {selDate ? new Date(selDate + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short" }) : "Pick a day"}
+                                </button>
+
+                                {isCalOpen && (
+                                  <div style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 50, width: 230 }}>
+                                    <EntryCalendar
+                                      year={calYear} month={calMonth}
+                                      onYearMonth={(y, mo2) => calNav(m.key, at, y, mo2)}
+                                      dotDays={dotDays}
+                                      selectedDate={selDate || ""}
+                                      onSelect={dt => selectDate(albumKey, m.key, at, dt)}
+                                      accent="#3c24a5"
+                                    />
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* ── Job list ── */}
+                              {result === "loading" && <div style={{ fontSize: 12, color: "#555", padding: "6px 0" }}>Loading…</div>}
+                              {result === "error"   && <div style={{ fontSize: 12, color: "#b91c1c", padding: "6px 0" }}>Failed to load jobs.</div>}
+                              {result && result !== "loading" && result !== "error" && (
+                                <>
+                                  <div style={{ fontSize: 11, color: "#555" }}>
+                                    {result.total} job{result.total !== 1 ? "s" : ""} {selDate ? `on ${selDate}` : "this month"}
+                                  </div>
+                                  {result.jobs.length === 0 ? (
+                                    <div style={{ fontSize: 12, color: "#555", padding: "6px 0" }}>No jobs found.</div>
+                                  ) : (
+                                    <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 260, overflowY: "auto" }}>
+                                      {result.jobs.map((j, i) => (
+                                        <div key={i} style={{
+                                          display: "flex", justifyContent: "space-between", alignItems: "center",
+                                          background: "#fff", border: "1px solid #ddd", borderRadius: 4, padding: "6px 10px",
+                                        }}>
+                                          <span style={{ fontSize: 12, fontWeight: 700, color: "#111" }}>{j.job_no}</span>
+                                          <span style={{ fontSize: 12, color: "#333" }}>{j.customer}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                  {result.pages > 1 && (
+                                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 4 }}>
+                                      <button onClick={() => changePage(albumKey, m.key, at, Math.max(1, page - 1))} disabled={page === 1} style={{
+                                        padding: "4px 10px", background: "#ddd", color: "#333", borderRadius: 4, fontSize: 11, fontWeight: 700,
+                                      }}>◀ Prev</button>
+                                      <span style={{ fontSize: 11, color: "#333" }}>{page} / {result.pages}</span>
+                                      <button onClick={() => changePage(albumKey, m.key, at, Math.min(result.pages, page + 1))} disabled={page === result.pages} style={{
+                                        padding: "4px 10px", background: "#ddd", color: "#333", borderRadius: 4, fontSize: 11, fontWeight: 700,
+                                      }}>Next ▶</button>
+                                    </div>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          )}
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -5767,32 +6016,32 @@ const reload = useCallback(async () => {
           })}
         </div>
  
-        {/* Stats row — 3-col desktop, 2-col mobile */}
-        <div className="r-grid-stats" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
-          <Stat label="Active Jobs"     val={stats?.active_jobs}    clr="var(--amber)" />
-          <Stat label="Completed (24h)" val={stats?.completed_jobs} clr="var(--green)" sub="Auto-clears after 24 h" />
-          <Stat label="Delayed"         val={stats?.delayed_jobs}   clr={stats?.delayed_jobs > 0 ? "var(--red)" : "var(--text-sec)"} />
-        </div>
- 
-
-              
+        <DeptTotalsPanel />
+                      
  
         {/* Intelligence row — side-by-side on desktop, stacked on mobile */}
         <div className="r-grid-intelligence" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
           <BottleneckRadar active={active} />
           <DailyGoalRing   active={active} done={done} />
-          <PrintingBreakdownPanel /> 
+          <PrintingMachineBreakdownPanel /> 
           <AlbumCountPanel />
-          <OperatorStatsPanel />
           <DamageSummaryPanel />
           <PaperStockSummaryPanel />
           <PaperUsageBreakdownPanel />
+          <OperatorStatsPanel />
         </div>
  
         {/* Throughput ticker */}
         <div style={{ marginBottom: 16 }}>
           <ThroughputTicker done={done} />
         </div>
+
+        {/* <div className="r-grid-stats" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
+          <Stat label="Active Jobs"     val={stats?.active_jobs}    clr="var(--amber)" />
+          <Stat label="Completed (24h)" val={stats?.completed_jobs} clr="var(--green)" sub="Auto-clears after 24 h" />
+          <Stat label="Delayed"         val={stats?.delayed_jobs}   clr={stats?.delayed_jobs > 0 ? "var(--red)" : "var(--text-sec)"} />
+        </div> */}
+
                 {/* Urgent banner */}
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
   
