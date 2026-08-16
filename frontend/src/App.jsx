@@ -94,6 +94,8 @@ const api = {
 
   paperUsage: (search = "", page = 1, date = "") =>
   apiFetch(`/api/paper-usage?search=${encodeURIComponent(search)}&${date ? `date=${date}&` : ""}page=${page}&page_size=20`),
+
+  track: (jobNo) => apiFetch(`/api/track/${encodeURIComponent(jobNo)}`),
 };
 
 function parseUTC(s) {
@@ -453,6 +455,7 @@ function slDateStr(date) {
 // ── Router ────────────────────────────────────────────────────────────────────
 function getPage() {
   const p = window.location.pathname;
+  if (p === "/track")     return { page: "track" };
   if (p === "/entry")     return { page: "entry" };
   if (p === "/history")   return { page: "history" };
   if (p === "/analytics") return { page: "analytics" };
@@ -1104,6 +1107,139 @@ function ScrollToTopButton() {
     </button>
   );
 }
+
+const TRACK_STAGE_LABELS = { PENDING: "Pending", IN_PROGRESS: "In Progress", COMPLETED: "Done", SKIPPED: "Not Needed" };
+const TRACK_STAGE_COLORS = { PENDING: "#888", IN_PROGRESS: "#f5a623", COMPLETED: "#22c55e", SKIPPED: "#555" };
+
+function TrackPage() {
+  const [jobNo, setJobNo] = useState("");
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const isMobile = useIsMobile();
+
+  async function search(e) {
+    e?.preventDefault();
+    const q = jobNo.trim();
+    if (!q) return;
+    setLoading(true);
+    setError("");
+    setResult(null);
+    try {
+      const res = await api.track(q);
+      setResult(res);
+    } catch (err) {
+      setError(err.message || "Album not found.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const completedCount = result?.stages?.filter(s => s.status === "COMPLETED" || s.status === "SKIPPED").length || 0;
+  const totalStages = result?.stages?.length || 4;
+  const progressPct = result ? Math.round((completedCount / totalStages) * 100) : 0;
+
+  return (
+    <div style={{
+      minHeight: "100vh", background: "#0a0a0a", color: "#f0f0f0",
+      display: "flex", flexDirection: "column", alignItems: "center",
+      padding: isMobile ? "32px 16px" : "60px 20px",
+      fontFamily: "system-ui, -apple-system, sans-serif",
+    }}>
+      <img src={logo} alt="Logo" style={{ height: 64, borderRadius: 50, marginBottom: 16 }} />
+      <div style={{ fontSize: isMobile ? 20 : 24, fontWeight: 800, color: "#f5a623", marginBottom: 4, textAlign: "center" }}>
+        Track Your Album
+      </div>
+      <div style={{ fontSize: 13, color: "#999", marginBottom: 28, textAlign: "center" }}>
+        Enter your Job No to see production status
+      </div>
+
+      <form onSubmit={search} style={{ width: "100%", maxWidth: 420, display: "flex", gap: 8, marginBottom: 24 }}>
+        <input
+          value={jobNo}
+          onChange={e => setJobNo(e.target.value)}
+          placeholder="Ex. 0001"
+          autoFocus
+          style={{
+            flex: 1, margin: 0, padding: "14px 16px", fontSize: 16,
+            background: "#1a1a1a", border: "1px solid #333", borderRadius: 8, color: "#fff",
+          }}
+        />
+        <button type="submit" disabled={loading || !jobNo.trim()} style={{
+          padding: "14px 22px", background: loading ? "#333" : "#f5a623",
+          color: loading ? "#888" : "#000", borderRadius: 8, fontWeight: 800, fontSize: 15,
+        }}>{loading ? "…" : "Search"}</button>
+      </form>
+
+      {error && (
+        <div style={{
+          width: "100%", maxWidth: 420, background: "#2a0000", border: "1px solid #6a2a00",
+          color: "#ff9060", borderRadius: 8, padding: "14px 16px", fontSize: 14, textAlign: "center",
+        }}>
+          ⚠ {error}
+        </div>
+      )}
+
+      {result && (
+        <div style={{
+          width: "100%", maxWidth: 420, background: "#1a1a1a", border: "1px solid #333",
+          borderRadius: 12, padding: "20px 22px", display: "flex", flexDirection: "column", gap: 16,
+        }}>
+          <div>
+            <div style={{ fontSize: 22, fontWeight: 900, color: "#f5a623", fontFamily: "monospace" }}>{result.job_no}</div>
+            {result.couple_name && <div style={{ fontSize: 15, color: "#e0e0e0", marginTop: 2 }}>{result.couple_name}</div>}
+            <div style={{ fontSize: 12, color: "#999", marginTop: 6 }}>
+              Expected Delivery: {new Date(result.dele_date).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
+            </div>
+          </div>
+
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#999", marginBottom: 6 }}>
+              <span>Progress</span>
+              <span>{progressPct}%</span>
+            </div>
+            <div style={{ width: "100%", height: 8, background: "#0a0a0a", borderRadius: 4, overflow: "hidden" }}>
+              <div style={{
+                width: `${progressPct}%`, height: "100%",
+                background: result.is_fully_completed ? "#22c55e" : "#f5a623",
+                transition: "width .4s ease",
+              }} />
+            </div>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {result.stages.map((s, i) => (
+              <div key={i} style={{
+                display: "flex", justifyContent: "space-between", alignItems: "center",
+                background: "#0a0a0a", border: "1px solid #2a2a2a", borderRadius: 6, padding: "10px 14px",
+              }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: "#e0e0e0" }}>{s.label}</span>
+                <span style={{
+                  fontSize: 11, fontWeight: 800, padding: "3px 10px", borderRadius: 20,
+                  background: TRACK_STAGE_COLORS[s.status] + "22",
+                  color: TRACK_STAGE_COLORS[s.status],
+                  border: `1px solid ${TRACK_STAGE_COLORS[s.status]}55`,
+                }}>{TRACK_STAGE_LABELS[s.status] || s.status}</span>
+              </div>
+            ))}
+          </div>
+
+          {result.is_fully_completed && (
+            <div style={{
+              textAlign: "center", padding: "10px 0", background: "#001a00",
+              border: "1px solid #1a4a1a", color: "#6aaa6a", borderRadius: 6, fontWeight: 800, fontSize: 13,
+            }}>
+              ✓ Your album is ready!
+            </div>
+          )}
+        </div>
+      )}
+
+      <div style={{ marginTop: 32, fontSize: 11, color: "#eeecec" }}>i Lab Gampaha</div>
+    </div>
+  );
+}
+
 // ── Shell ─────────────────────────────────────────────────────────────────────
 function Shell({ title, accent = "var(--amber)", topRight, children }) {
   const [, forceUpdate] = useState(0);
@@ -6606,6 +6742,7 @@ export default function App() {
   }, []);
  
   const { page, dept } = route;
+  if (page === "track") return <TrackPage />;
  
   return (
     <AppearanceProvider>

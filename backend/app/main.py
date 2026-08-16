@@ -1612,15 +1612,48 @@ def paper_usage_breakdown(db: Session = Depends(get_db)):
         for e in rows:
             key = e.paper_size
             if key not in result:
-                result[key] = {"total": 0, "ok_pages": 0, "print_damage": 0, "accu_rp": 0, "bind_rp": 0}
-            result[key]["total"]        += e.total_used
-            result[key]["ok_pages"]     += e.ok_pages
-            result[key]["print_damage"] += e.print_damage
-            result[key]["accu_rp"]      += e.accu_rp
-            result[key]["bind_rp"]      += e.bind_rp
+                result[key] = {"total": 0, "ok_pages": 0, "print_damage": 0, "accu_rp": 0, "bind_rp": 0} #type:ignore
+            result[key]["total"]        += e.total_used #type:ignore
+            result[key]["ok_pages"]     += e.ok_pages #type:ignore
+            result[key]["print_damage"] += e.print_damage #type:ignore
+            result[key]["accu_rp"]      += e.accu_rp #type:ignore
+            result[key]["bind_rp"]      += e.bind_rp #type:ignore
         return result
 
     return {"daily": summary_for(day_start, day_end), "monthly": summary_for(month_start, month_end)}
+
+class TrackStageOut(BaseModel):
+    label: str
+    status: str  # PENDING / IN_PROGRESS / COMPLETED / SKIPPED
+
+class TrackOut(BaseModel):
+    job_no: str
+    couple_name: Optional[str] = None
+    dele_date: datetime
+    is_fully_completed: bool
+    stages: List[TrackStageOut]
+
+
+@app.get("/api/track/{job_no}", response_model=TrackOut)
+def track_job(job_no: str, db: Session = Depends(get_db)):
+    job = db.query(JobCard).filter(JobCard.job_no == job_no.strip()).first()
+    if not job:
+        raise HTTPException(404, "No album found with this Job No. Please check and try again.")
+
+    stages = [
+        {"label": "Printing",      "status": _str(job.status_printing)},
+        {"label": "Laser Cutting", "status": _str(job.status_laser_cutting)},
+        {"label": "Laminating",    "status": _str(job.status_laminating)},
+        {"label": "Binding",       "status": _str(job.status_binding)},
+    ]
+
+    return TrackOut(
+        job_no=job.job_no,               #type:ignore
+        couple_name=job.couple_name,     #type:ignore
+        dele_date=job.dele_date,         #type:ignore
+        is_fully_completed=job.is_fully_completed,  #type:ignore
+        stages=stages, #type:ignore
+    )
 
 @app.get("/api/health")
 def health():
@@ -1641,7 +1674,7 @@ def serve_index():
 if not os.path.exists(DIST_DIR):
     print("❌ DIST folder not found! Build frontend first.")
 else:
-    print("✅ Frontend dist found")
+    print(" Frontend dist found")
 # Debug: print the path so we can see it in logs
 print(f"BASE_DIR: {BASE_DIR}")
 print(f"DIST_DIR: {DIST_DIR}")
