@@ -257,6 +257,22 @@ def update_job(job_id: int, payload: JobCardUpdate, db: Session = Depends(get_db
     db.refresh(job)
     return _out(job, db)
 
+@app.get("/api/jobs/search")
+def search_jobs(q: str = Query(..., min_length=1), db: Session = Depends(get_db)):
+    term = f"%{q.strip()}%"
+    rows = (
+        db.query(JobCard)
+        .filter(or_(
+            JobCard.job_no.ilike(term),
+            JobCard.customer.ilike(term),
+            JobCard.couple_name.ilike(term),
+        ))
+        .order_by(desc(JobCard.created_at))
+        .limit(10)
+        .all()
+    )
+    return {"jobs": [_out(j, db).model_dump() for j in rows]}
+
 @app.get("/api/jobs", response_model=List[JobCardOut])
 def list_jobs(completed: bool = False, db: Session = Depends(get_db)):
     q = db.query(JobCard).filter(JobCard.is_fully_completed == completed)

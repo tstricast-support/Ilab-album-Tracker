@@ -30,6 +30,7 @@ const api = {
   advance: (id, dept, action, extra = {}) => apiFetch(`/api/jobs/${id}/advance/${dept}`, {
     method: "POST", body: JSON.stringify({ action, ...extra }),
   }),
+  searchJobs: (q) => apiFetch(`/api/jobs/search?q=${encodeURIComponent(q)}`),
   stats:         ()             => apiFetch("/api/stats"),
   deptStats: () => apiFetch("/api/stats/departments"),
   printingSection: () => apiFetch("/api/stats/printing-section"),
@@ -858,6 +859,131 @@ function GlobalResponsiveStyles() {
   }, []);
   return null;
 }
+
+function GlobalSearchBar() {
+  const [query, setQuery]       = useState("");
+  const [debounced, setDebounced] = useState("");
+  const [results, setResults]   = useState([]);
+  const [loading, setLoading]   = useState(false);
+  const [open, setOpen]         = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [previewJob, setPreviewJob] = useState(null);   // ← compact modal
+  const [viewJob, setViewJob]       = useState(null);   // ← full modal (opened from preview)
+  const wrapRef = useRef(null);
+  const isMobile = useIsMobile();
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(query.trim()), 300);
+    return () => clearTimeout(t);
+  }, [query]);
+
+  useEffect(() => {
+    if (!debounced) { setResults([]); setOpen(false); return; }
+    setLoading(true);
+    api.searchJobs(debounced)
+      .then(d => { setResults(d.jobs || []); setOpen(true); })
+      .catch(() => setResults([]))
+      .finally(() => setLoading(false));
+  }, [debounced]);
+
+  useEffect(() => {
+    function handler(e) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  function pick(job) {
+    setPreviewJob(job);
+    setOpen(false);
+    setMobileOpen(false);
+    setQuery("");
+  }
+
+  function statusOf(job) {
+    if (job.is_fully_completed) return { label: "Completed", color: "var(--green)" };
+    const anyDelayed = job.logs?.some(l => l.is_delayed && !l.exited_at);
+    if (anyDelayed) return { label: "Delayed", color: "var(--red)" };
+    return { label: "In Progress", color: "var(--amber)" };
+  }
+
+  const box = (
+    <div ref={wrapRef} style={{ position: "relative", width: isMobile ? "100%" : 240 }}>
+      <div style={{ position: "relative" }}>
+        <Search size={14} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text-dim)" }} />
+        <input
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          onFocus={() => results.length > 0 && setOpen(true)}
+          placeholder="Search job no / customer…"
+          style={{ margin: 0, paddingLeft: 30, fontSize: 13, padding: "7px 10px 7px 30px" }}
+        />
+      </div>
+
+      {open && (
+        <div className="si" style={{
+          position: "absolute", top: "calc(100% + 6px)",
+          left: isMobile ? 0 : "auto", right: 0,
+          width: isMobile ? "100%" : 320, maxWidth: "94vw",
+          background: "var(--bg1)", border: "1px solid var(--amber)", borderRadius: 8,
+          boxShadow: "0 8px 30px rgba(0,0,0,.6)", zIndex: 9000,
+          maxHeight: 360, overflowY: "auto", padding: 6,
+        }}>
+          {loading && <div style={{ padding: "10px 12px", fontSize: 12, color: "var(--text-dim)" }}>Searching…</div>}
+          {!loading && results.length === 0 && (
+            <div style={{ padding: "10px 12px", fontSize: 12, color: "var(--text-dim)" }}>No jobs found.</div>
+          )}
+          {!loading && results.map(job => {
+            const st = statusOf(job);
+            return (
+              <button key={job.id} onClick={() => pick(job)} style={{
+                width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+                gap: 8, padding: "8px 10px", background: "transparent", borderRadius: 6, textAlign: "left",
+              }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontFamily: "var(--fm)", fontSize: 13, color: "var(--amber)", fontWeight: 800 }}>{job.job_no}</div>
+                  <div style={{ fontSize: 12, color: "var(--text-sec)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{job.customer}</div>
+                </div>
+                <span style={{
+                  fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 20, flexShrink: 0,
+                  background: st.color + "22", color: st.color, border: `1px solid ${st.color}55`,
+                }}>{st.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <>
+      {isMobile ? (
+        mobileOpen ? (
+          <div style={{ position: "fixed", top: 60, left: 0, right: 0, padding: "8px 10px", background: "var(--bg1)", borderBottom: "1px solid var(--border)", zIndex: 200, display: "flex", gap: 6 }}>
+            <div style={{ flex: 1 }}>{box}</div>
+            <button onClick={() => { setMobileOpen(false); setQuery(""); }} style={{ padding: "0 10px", background: "var(--bg3)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 6 }}>✕</button>
+          </div>
+        ) : (
+          <button onClick={() => setMobileOpen(true)} title="Search jobs" style={{
+            padding: "6px 10px", background: "var(--bg3)", color: "var(--text-sec)",
+            border: "1px solid var(--border)", borderRadius: 6,
+          }}><Search size={14} /></button>
+        )
+      ) : box}
+
+      {previewJob && (
+        <CompactJobPreviewModal
+          job={previewJob}
+          onClose={() => setPreviewJob(null)}
+          onViewFull={() => { setViewJob(previewJob); setPreviewJob(null); }}
+        />
+      )}
+      {viewJob && <JobCardViewModal job={viewJob} onClose={() => setViewJob(null)} addToast={() => {}} />}
+    </>
+  );
+}
  // ── Search bar ────────────────────────────────────────────────────────────────
 function SearchBar({ value, onChange, placeholder = "Search Job No / Studio / Couple…" }) {
   return (
@@ -916,6 +1042,92 @@ function CompactHistoryRow({ job, onView }) {
         {job.print_pages && <Chip label="Pages" value={job.print_pages} accent="#3b82f6" />}
       </div>
     </button>
+  );
+}
+
+function CompactJobPreviewModal({ job, onClose, onViewFull }) {
+  const isMobile = useIsMobile();
+  const delayed = job.logs?.some(l => l.is_delayed && !l.exited_at);
+  const days = Math.ceil((new Date(job.dele_date) - new Date()) / 86400000);
+
+  const stageList = [
+    { label: "Print",  field: "status_printing" },
+    { label: "Laser",  field: "status_laser_cutting" },
+    { label: "Lam",    field: "status_laminating" },
+    { label: "Bind",   field: "status_binding" },
+  ];
+
+  function stageColor(v) {
+    if (v === "COMPLETED")   return "#22c55e";
+    if (v === "IN_PROGRESS") return "#f5a623";
+    if (v === "SKIPPED")     return "#666";
+    return "#444";
+  }
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "var(--overlay)",
+      display: "flex", alignItems: isMobile ? "flex-end" : "center", justifyContent: "center",
+      zIndex: 9200, padding: isMobile ? 0 : 16,
+    }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: "var(--bg1)", border: "1px solid var(--border)",
+        borderRadius: isMobile ? "16px 16px 0 0" : 12,
+        padding: 18, width: "100%", maxWidth: 380,
+        maxHeight: isMobile ? "80dvh" : "85vh", overflowY: "auto",
+        display: "flex", flexDirection: "column", gap: 12,
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+              <span style={{ fontFamily: "var(--fm)", fontSize: 17, fontWeight: 800, color: "var(--amber)" }}>{job.job_no}</span>
+              {job.priority === "URGENT" && <span style={{ fontSize: 10, padding: "2px 6px", borderRadius: 4, background: "var(--red)", color: "#000", fontWeight: 800 }}>URGENT</span>}
+              {delayed && <span style={{ fontSize: 10, padding: "2px 6px", borderRadius: 4, background: "var(--danger-bg)", color: "var(--red)", fontWeight: 800, border: "1px solid var(--red)" }}>DELAYED</span>}
+            </div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text-pri)", marginTop: 2 }}>{job.customer}</div>
+            {job.couple_name && <div style={{ fontSize: 12, color: "var(--text-sec)" }}>{job.couple_name}</div>}
+          </div>
+          <button onClick={onClose} style={{ padding: "5px 9px", background: "var(--bg3)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 6, flexShrink: 0 }}>✕</button>
+        </div>
+
+        <div style={{
+          background: "var(--bg3)", borderRadius: 6, padding: "8px 12px",
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+        }}>
+          <span style={{ fontSize: 11, color: "var(--text-dim)" }}>Delivery</span>
+          <span style={{ fontSize: 13, fontWeight: 700, color: days < 2 ? "var(--red)" : "var(--text-pri)" }}>
+            {new Date(job.dele_date).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}
+            {" · "}{days < 0 ? `${Math.abs(days)}d overdue` : days === 0 ? "Today" : `${days}d left`}
+          </span>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6 }}>
+          {stageList.map(s => (
+            <div key={s.label} style={{
+              background: "var(--bg2)", border: `1px solid ${stageColor(job[s.field])}55`,
+              borderTop: `2px solid ${stageColor(job[s.field])}`,
+              borderRadius: 6, padding: "6px 4px", textAlign: "center",
+            }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text-sec)", textTransform: "uppercase" }}>{s.label}</div>
+              <div style={{ fontSize: 10, fontWeight: 800, color: stageColor(job[s.field]), marginTop: 2 }}>
+                {job[s.field] === "IN_PROGRESS" ? "Active" : job[s.field] === "COMPLETED" ? "Done" : job[s.field] === "SKIPPED" ? "N/A" : "Pending"}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+          {job.print_size  && <Chip label="Size"  value={job.print_size}  accent="#3b82f6" />}
+          {job.album_type  && <AlbumTypeBadge type={job.album_type} />}
+          {job.payment_by  && <Chip label="Payment" value={job.payment_by} accent="#16a34a" />}
+        </div>
+
+        <button onClick={onViewFull} style={{
+          padding: "11px 0", background: "var(--amber)", color: "#000",
+          borderRadius: 8, fontWeight: 800, fontSize: 14,
+        }}>View Full Job Card</button>
+      </div>
+    </div>
   );
 }
 
@@ -1363,7 +1575,8 @@ function Shell({ title, accent = "var(--amber)", topRight, children }) {
               fontSize: isMobile ? 11 : 13,
             }}>← {getDeptLabel()}</button>
           )}
- 
+
+        <GlobalSearchBar />
         <AppearanceButton isMobile={isMobile} />
         {topRight}        
             </div>
