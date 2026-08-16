@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef,createContext, useContext } from "react";
 import { API_BASE, POLL_INTERVAL_MS, APP_NAME,MACHINES,ALBUM_TYPES,DAMAGE_DEPTS, PAPER_SIZES, LOW_STOCK_THRESHOLD} from "./config.js";
-import {ArrowRight, Calendar,Pen,SquareX, Trash,Printer,TriangleAlert,Flame,Activity, Speech, Scissors,BookOpen,Plus, Timer,ChevronDown ,Search,Palette,Check}from "lucide-react";
+import {ArrowRight, Calendar,Pen,SquareX, Trash,Printer,TriangleAlert,Flame,Activity, Speech, Scissors,BookOpen,Plus, Timer,ChevronDown ,Search,Palette,Check,ArrowUp}from "lucide-react";
 import logo from "./assets/logo.jpg";
 import "./index.css";
 
@@ -1065,6 +1065,45 @@ function useLowStockBlink() {
   return low;
 }
 
+function ScrollToTopButton() {
+  const [visible, setVisible] = useState(false);
+  const isMobile = useIsMobile();
+
+  useEffect(() => {
+    const onScroll = () => setVisible(window.scrollY > 400);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  if (!visible) return null;
+
+  return (
+    <button
+      onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+      title="Scroll to top"
+      style={{
+        position: "fixed",
+        bottom: isMobile ? 18 : 26,
+        right: isMobile ? 14 : 24,
+        width: isMobile ? 42 : 48,
+        height: isMobile ? 42 : 48,
+        borderRadius: "50%",
+        background: "var(--bg3)",
+        color: "var(--amber)",
+        border: "1px solid var(--border-strong)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        boxShadow: "0 4px 16px rgba(0,0,0,.4)",
+        zIndex: 8000,
+        cursor: "pointer",
+      }}
+    >
+      <ArrowUp size={isMobile ? 18 : 20} />
+    </button>
+  );
+}
 // ── Shell ─────────────────────────────────────────────────────────────────────
 function Shell({ title, accent = "var(--amber)", topRight, children }) {
   const [, forceUpdate] = useState(0);
@@ -1217,6 +1256,7 @@ function Shell({ title, accent = "var(--amber)", topRight, children }) {
             </span>
             {" "}— All rights reserved
         </footer>
+        <ScrollToTopButton />
     </div>
   );
 }
@@ -5438,7 +5478,7 @@ function PrintingMachineBreakdownPanel() {
                             <div className="si" style={{ padding: "0 14px 12px", display: "flex", flexDirection: "column", gap: 10 }}>
 
                               {/* ── Date controls ── */}
-                              <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", position: "relative" }}>
+                              <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                                 <button onClick={() => selectThisMonth(albumKey, m.key, at)} style={{
                                   padding: "5px 12px", fontSize: 11, fontWeight: 700, borderRadius: 4,
                                   background: !selDate ? "#2ECC71" : "#ddd",
@@ -5454,20 +5494,20 @@ function PrintingMachineBreakdownPanel() {
                                   <Calendar size={12} />
                                   {selDate ? new Date(selDate + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short" }) : "Pick a day"}
                                 </button>
-
-                                {isCalOpen && (
-                                  <div style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 50, width: 230 }}>
-                                    <EntryCalendar
-                                      year={calYear} month={calMonth}
-                                      onYearMonth={(y, mo2) => calNav(m.key, at, y, mo2)}
-                                      dotDays={dotDays}
-                                      selectedDate={selDate || ""}
-                                      onSelect={dt => selectDate(albumKey, m.key, at, dt)}
-                                      accent="#3c24a5"
-                                    />
-                                  </div>
-                                )}
                               </div>
+
+                              {isCalOpen && (
+                                <div style={{ width: "100%", maxWidth: 260 }}>
+                                  <EntryCalendar
+                                    year={calYear} month={calMonth}
+                                    onYearMonth={(y, mo2) => calNav(m.key, at, y, mo2)}
+                                    dotDays={dotDays}
+                                    selectedDate={selDate || ""}
+                                    onSelect={dt => selectDate(albumKey, m.key, at, dt)}
+                                    accent="#3c24a5"
+                                  />
+                                </div>
+                              )}
 
                               {/* ── Job list ── */}
                               {result === "loading" && <div style={{ fontSize: 12, color: "#555", padding: "6px 0" }}>Loading…</div>}
