@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef,createContext, useContext } from "react";
 import { API_BASE, POLL_INTERVAL_MS, APP_NAME,MACHINES,ALBUM_TYPES,DAMAGE_DEPTS, PAPER_SIZES, LOW_STOCK_THRESHOLD} from "./config.js";
-import {ArrowRight, Calendar,Pen,SquareX, Trash,Printer,TriangleAlert,Flame,Activity, Speech, Scissors,BookOpen,Plus, Timer,ChevronDown ,Search,Palette,Check,ArrowUp}from "lucide-react";
+import {ArrowRight, Calendar,Pen,SquareX, Trash,Printer,TriangleAlert,Flame,Activity, Speech, Scissors,BookOpen,Plus, Timer,ChevronDown ,Search,Palette,Check,ArrowUp,Download}from "lucide-react";
 import logo from "./assets/logo.jpg";
+import trackQR from "./assets/track-qr.png";
 import "./index.css";
 
 
@@ -143,6 +144,15 @@ function getDeptLabel() {
     LASER_CUTTING: "Laser Cutting", BINDING: "Binding", ENTRY: "Entry",
   };
   return map[ROLE] || "Station";
+}
+
+function downloadQR() {
+  const a = document.createElement("a");
+  a.href = trackQR;
+  a.download = "ilab-album-tracking-qr.png";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
 }
 
 // ── Appearance / Theme customization ──────────────────────────────────────────
@@ -1577,6 +1587,14 @@ function Shell({ title, accent = "var(--amber)", topRight, children }) {
           )}
 
         <GlobalSearchBar />
+        <button onClick={downloadQR} title="Download Album Tracking QR" style={{
+          padding: isMobile ? "6px 10px" : "8px 14px",
+          background: "var(--bg3)", color: "var(--cyan)",
+          border: "1px solid var(--cyan)", borderRadius: 6, fontWeight: 700, cursor: "pointer",
+          fontSize: isMobile ? 11 : 13, display: "flex", alignItems: "center", gap: 6,
+        }}>
+          <Download size={14} /> {isMobile ? "" : "Track QR"}
+        </button>
         <AppearanceButton isMobile={isMobile} />
         {topRight}        
             </div>
@@ -6537,6 +6555,7 @@ const reload = useCallback(async () => {
               }}>{item.label}</button>
             );
           })}
+
         </div>
  
         <DeptTotalsPanel addToast={add} />
