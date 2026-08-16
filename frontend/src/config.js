@@ -22,7 +22,7 @@ export const DAMAGE_DEPTS = ["PRINTING", "LAMINATING", "BINDING"];
 export const MACHINES = [
   { value: "GREEN_2", label: "Green 2" },
   { value: "GREEN_3", label: "Green 3" },
-  { value: "GREEN_3_NEW", label: "Green 3 New" },
+  { value: "GREEN_3_NEW", label: "Green 4" },
   { value: "EPSON", label: "Epson" },
 ];
 

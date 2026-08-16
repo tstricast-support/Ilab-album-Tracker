@@ -790,6 +790,7 @@ def station_history(
     department: str,
     db: Session = Depends(get_db),
     search: Optional[str] = Query(None, description="job_no / customer / couple_name"),
+    date: Optional[str] = Query(None, description="YYYY-MM-DD, Sri Lanka day. Omit for today."),
     page: int = Query(1, ge=1),
     page_size: int = Query(15, ge=1, le=100),
 ):
@@ -805,11 +806,14 @@ def station_history(
         q = db.query(JobCard).filter(getattr(JobCard, field) == StageStatusEnum.COMPLETED)
         order_col = JobCard.updated_at
 
-    # ── Reset daily: only today's completions, Sri Lanka calendar day ──
-    utc_now   = datetime.utcnow()
-    sl_now    = utc_now + SL_TZ_OFFSET
-    day_start = datetime(sl_now.year, sl_now.month, sl_now.day) - SL_TZ_OFFSET
-    day_end   = day_start + timedelta(days=1)
+    # ── Day window: given date, or today if omitted (Sri Lanka calendar day) ──
+    if date:
+        day_start = datetime.strptime(date, "%Y-%m-%d") - SL_TZ_OFFSET
+    else:
+        utc_now   = datetime.utcnow()
+        sl_now    = utc_now + SL_TZ_OFFSET
+        day_start = datetime(sl_now.year, sl_now.month, sl_now.day) - SL_TZ_OFFSET
+    day_end = day_start + timedelta(days=1)
     q = q.filter(order_col >= day_start, order_col < day_end)
 
     if search and search.strip():
@@ -835,6 +839,34 @@ def station_history(
         "jobs": [_out(j, db).model_dump() for j in jobs],
     }
 
+@app.get("/api/station/{department}/history/dates-with-entries")
+def station_history_dates(
+    department: str,
+    db: Session = Depends(get_db),
+    year: int = Query(...),
+    month: int = Query(...),
+):
+    dept = department.upper()
+    if dept == "ENTRY":
+        col = JobCard.created_at
+        q = db.query(col, func.count(JobCard.id))
+    else:
+        if dept not in DEPT_FIELD:
+            raise HTTPException(400, f"Unknown department: {department}")
+        field = DEPT_FIELD[dept]
+        col = JobCard.updated_at
+        q = db.query(col, func.count(JobCard.id)).filter(getattr(JobCard, field) == StageStatusEnum.COMPLETED)
+
+    start = datetime(year, month, 1) - SL_TZ_OFFSET
+    end   = (datetime(year + 1, 1, 1) if month == 12 else datetime(year, month + 1, 1)) - SL_TZ_OFFSET
+    rows  = q.filter(col >= start, col < end).group_by(col).all()
+
+    day_counts: dict[str, int] = {}
+    for dt, cnt in rows:
+        lk_date = dt + SL_TZ_OFFSET
+        day_key = str(lk_date.day)
+        day_counts[day_key] = day_counts.get(day_key, 0) + cnt
+    return day_counts
 
 @app.get("/api/stats", response_model=StatsOut)
 def get_stats(db: Session = Depends(get_db)):

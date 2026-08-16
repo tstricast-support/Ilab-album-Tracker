@@ -46,8 +46,10 @@ const api = {
     method: "PATCH", body: JSON.stringify({ payment_by }),
   }),
   knownPaymentNames: () => apiFetch(`/api/payment/known-names`),  analytics:     (from, to)     => apiFetch(`/api/analytics?from=${from}&to=${to}`),
-  stationHistory: (dept, search = "", page = 1) =>
-    apiFetch(`/api/station/${dept}/history?search=${encodeURIComponent(search)}&page=${page}&page_size=15`),
+  stationHistory: (dept, search = "", page = 1, date = "") =>
+    apiFetch(`/api/station/${dept}/history?search=${encodeURIComponent(search)}&${date ? `date=${date}&` : ""}page=${page}&page_size=15`),
+  stationHistoryDates: (dept, year, month) =>
+    apiFetch(`/api/station/${dept}/history/dates-with-entries?year=${year}&month=${month}`),
   
   updateBoxPouch: (id, status) => apiFetch(`/api/jobs/${id}/box-pouch`, {
     method: "PATCH", body: JSON.stringify({ box_pouch_status: status }),
@@ -1559,7 +1561,7 @@ function OperatorTag({ log, dept }) {
   const showUnder    = dept === "PRINTING" && log.under_whom;
   const showMachine   = dept === "PRINTING" && log.machine;
   const isLaminating  = dept === "LAMINATING";
-  const machineLabel = { GREEN_2: "Green 2", GREEN_3: "Green 3", EPSON: "Epson", GREEN_3_NEW: "Green 3 New" }[log.machine] || log.machine;
+  const machineLabel = { GREEN_2: "Green 2", GREEN_3: "Green 3", EPSON: "Epson", GREEN_3_NEW: "Green IV" }[log.machine] || log.machine;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", marginTop: 3 }}>
       <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 700, padding: "2px 7px", borderRadius: 4, background: isLaminating ? "var(--info-bg)" : "var(--info-bg)", border: `1px solid ${isLaminating ? "#06b6d4" : "var(--border-strong)"}`, color: "var(--text-pri)", letterSpacing: ".08em" }}>
@@ -5181,8 +5183,17 @@ function ThroughputTicker({ done }) {
   );
 }
 
-function DeptTotalsPanel() {
-  const [data, setData] = useState(null);
+function DeptTotalsPanel({ addToast }) {
+  const [data, setData]           = useState(null);
+  const [expanded, setExpanded]   = useState(null); // dept key
+  const [dateByDept, setDateByDept] = useState({});   // deptKey -> "YYYY-MM-DD" | null (null = today)
+  const [pageByDept, setPageByDept] = useState({});
+  const [jobsCache, setJobsCache] = useState({});
+  const [calOpenDept, setCalOpenDept] = useState(null);
+  const [dotDays, setDotDays]     = useState({});
+  const [calYear, setCalYear]     = useState(new Date().getFullYear());
+  const [calMonth, setCalMonth]   = useState(new Date().getMonth() + 1);
+  const [viewJob, setViewJob]     = useState(null);
   const isMobile = useIsMobile();
 
   useEffect(() => {
@@ -5195,20 +5206,78 @@ function DeptTotalsPanel() {
   const rows = [
     { key: "ENTRY",         label: "Pending",     tag: "JOB ENTRY" },
     { key: "PRINTING",      label: "Printing",    tag: null        },
-    { key: "LASER_CUTTING", label: "Laser Cut",   tag: null        },
-    { key: "LAMINATING",    label: "Laminating",  tag: null        },
-    { key: "BINDING",       label: "Complete",    tag: "BINDING"   },
+    { key: "LAMINATING",    label: "Accubinding",  tag: null        },
+    { key: "LASER_CUTTING", label: "Laser cut cover",   tag: null        },
+    { key: "BINDING",       label: "Binding",    tag: "COMPLETE"   },
   ];
+
+  function cacheKeyFor(dept, date, page) {
+    return `${dept}-${date || "today"}-${page}`;
+  }
+
+  async function loadJobs(dept, date, page) {
+    const key = cacheKeyFor(dept, date, page);
+    setJobsCache(c => ({ ...c, [key]: "loading" }));
+    try {
+      const res = await api.stationHistory(dept, "", page, date || "");
+      setJobsCache(c => ({ ...c, [key]: res }));
+    } catch {
+      setJobsCache(c => ({ ...c, [key]: "error" }));
+    }
+  }
+
+  function toggleDept(deptKey) {
+    if (expanded === deptKey) { setExpanded(null); setCalOpenDept(null); return; }
+    setExpanded(deptKey);
+    setCalOpenDept(null);
+    const date = dateByDept[deptKey] ?? null;
+    const page = pageByDept[deptKey] ?? 1;
+    loadJobs(deptKey, date, page);
+  }
+
+  function selectDate(deptKey, date) {
+    setDateByDept(d => ({ ...d, [deptKey]: date }));
+    setPageByDept(p => ({ ...p, [deptKey]: 1 }));
+    setCalOpenDept(null);
+    loadJobs(deptKey, date, 1);
+  }
+
+  function selectToday(deptKey) {
+    setDateByDept(d => ({ ...d, [deptKey]: null }));
+    setPageByDept(p => ({ ...p, [deptKey]: 1 }));
+    setCalOpenDept(null);
+    loadJobs(deptKey, null, 1);
+  }
+
+  function changePage(deptKey, newPage) {
+    setPageByDept(p => ({ ...p, [deptKey]: newPage }));
+    const date = dateByDept[deptKey] ?? null;
+    loadJobs(deptKey, date, newPage);
+  }
+
+  function openCalendar(deptKey) {
+    const isOpen = calOpenDept === deptKey;
+    setCalOpenDept(isOpen ? null : deptKey);
+    if (!isOpen) {
+      const now = new Date();
+      setCalYear(now.getFullYear());
+      setCalMonth(now.getMonth() + 1);
+      api.stationHistoryDates(deptKey, now.getFullYear(), now.getMonth() + 1)
+        .then(setDotDays).catch(() => setDotDays({}));
+    }
+  }
+
+  function calNav(deptKey, y, m) {
+    setCalYear(y); setCalMonth(m);
+    api.stationHistoryDates(deptKey, y, m).then(setDotDays).catch(() => setDotDays({}));
+  }
 
   return (
     <div style={{
       background: "#a8a5a5", border: "1px solid #8f8c8c",
       borderRadius: 12, padding: "14px 16px", marginBottom: 16,
     }}>
-      <div style={{
-        fontSize: 16, fontWeight: 800, color: "#111",
-        marginBottom: 12,
-      }}>
+      <div style={{ fontSize: 16, fontWeight: 800, color: "#111", marginBottom: 12 }}>
         Department Totals
       </div>
 
@@ -5217,57 +5286,120 @@ function DeptTotalsPanel() {
           LOADING…
         </div>
       ) : (
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
-          gap: 10,
-        }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {rows.map(r => {
             const daily   = data.daily?.[r.key]   ?? 0;
             const monthly = data.monthly?.[r.key] ?? 0;
             const isEntry = r.key === "ENTRY";
+            const isOpen  = expanded === r.key;
+            const selDate = dateByDept[r.key] ?? null;
+            const page    = pageByDept[r.key] ?? 1;
+            const result  = jobsCache[cacheKeyFor(r.key, selDate, page)];
+            const isCalOpen = calOpenDept === r.key;
 
             return (
               <div key={r.key} style={{
-                background: "#e6e6e6",
-                borderLeft: "4px solid #111",
-                borderRadius: 8,
-                padding: "14px 18px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 10,
-                flexWrap: "wrap",
+                background: "#e6e6e6", borderLeft: "4px solid #111", borderRadius: 8, overflow: "hidden",
               }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontSize: 15, fontWeight: 800, color: "#111" }}>
-                    {r.label}
-                  </span>
-                  {r.tag && (
-                    <span style={{
-                      fontSize: 10, fontWeight: 700, color: "#555",
-                    }}>
-                      ({r.tag})
-                    </span>
-                  )}
-                </div>
-
-                {isEntry ? (
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontSize: 11, color: "#333", letterSpacing: ".08em" }}>PENDING</div>
-                    <div style={{ fontSize: 20, fontWeight: 800, color: "#d97706" }}>{daily}</div>
+                <button onClick={() => toggleDept(r.key)} style={{
+                  width: "100%", padding: "14px 18px",
+                  display: "flex", alignItems: "center", justifyContent: "space-between",
+                  gap: 10, flexWrap: "wrap", background: "transparent", textAlign: "left",
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <ChevronDown size={16} style={{ color: "#444", transition: "transform .2s ease", transform: isOpen ? "rotate(180deg)" : "rotate(0deg)" }} />
+                    <span style={{ fontSize: 15, fontWeight: 800, color: "#111" }}>{r.label}</span>
+                    {r.tag && <span style={{ fontSize: 10, fontWeight: 700, color: "#555" }}>({r.tag})</span>}
                   </div>
-                ) : (
-                  <div style={{ display: "flex", gap: 20, alignItems: "center" }}>
+
+                  {isEntry ? (
                     <div style={{ textAlign: "right" }}>
-                      <div style={{ fontSize: 11, color: "#333", letterSpacing: ".08em" }}>Today</div>
-                      <div style={{ fontSize: 20, fontWeight: 800, color: "#3c24a5" }}>{daily}</div>
+                      <div style={{ fontSize: 11, color: "#333", letterSpacing: ".08em" }}>PENDING</div>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: "#d97706" }}>{daily}</div>
                     </div>
-                    <div style={{ width: 1, height: 30, background: "#bbb" }} />
-                    <div style={{ textAlign: "right" }}>
-                      <div style={{ fontSize: 11, color: "#333", letterSpacing: ".08em" }}>Monthly</div>
-                      <div style={{ fontSize: 20, fontWeight: 800, color: "#2ECC71" }}>{monthly}</div>
+                  ) : (
+                    <div style={{ display: "flex", gap: 20, alignItems: "center" }}>
+                      <div style={{ textAlign: "right" }}>
+                        <div style={{ fontSize: 11, color: "#333", letterSpacing: ".08em" }}>Today</div>
+                        <div style={{ fontSize: 20, fontWeight: 800, color: "#3c24a5" }}>{daily}</div>
+                      </div>
+                      <div style={{ width: 1, height: 30, background: "#bbb" }} />
+                      <div style={{ textAlign: "right" }}>
+                        <div style={{ fontSize: 11, color: "#333", letterSpacing: ".08em" }}>Monthly</div>
+                        <div style={{ fontSize: 20, fontWeight: 800, color: "#2ECC71" }}>{monthly}</div>
+                      </div>
                     </div>
+                  )}
+                </button>
+
+                {isOpen && (
+                  <div className="si" style={{ padding: "0 14px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
+
+                    <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                      <button onClick={() => selectToday(r.key)} style={{
+                        padding: "5px 12px", fontSize: 11, fontWeight: 700, borderRadius: 4,
+                        background: !selDate ? "#2ECC71" : "#ddd", color: !selDate ? "#fff" : "#333",
+                      }}>Today</button>
+
+                      <button onClick={() => openCalendar(r.key)} style={{
+                        padding: "5px 12px", fontSize: 11, fontWeight: 700, borderRadius: 4,
+                        background: selDate ? "#3c24a5" : "#ddd", color: selDate ? "#fff" : "#333",
+                        display: "flex", alignItems: "center", gap: 5,
+                      }}>
+                        <Calendar size={12} />
+                        {selDate ? new Date(selDate + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short" }) : "Pick a day"}
+                      </button>
+                    </div>
+
+                    {isCalOpen && (
+                      <div style={{ width: "100%", maxWidth: 260 }}>
+                        <EntryCalendar
+                          year={calYear} month={calMonth}
+                          onYearMonth={(y, m) => calNav(r.key, y, m)}
+                          dotDays={dotDays}
+                          selectedDate={selDate || ""}
+                          onSelect={dt => selectDate(r.key, dt)}
+                          accent="#3c24a5"
+                        />
+                      </div>
+                    )}
+
+                    {result === "loading" && <div style={{ fontSize: 12, color: "#555", padding: "6px 0" }}>Loading…</div>}
+                    {result === "error"   && <div style={{ fontSize: 12, color: "#b91c1c", padding: "6px 0" }}>Failed to load jobs.</div>}
+                    {result && result !== "loading" && result !== "error" && (
+                      <>
+                        <div style={{ fontSize: 11, color: "#555" }}>
+                          {result.total} job{result.total !== 1 ? "s" : ""} {selDate ? `on ${selDate}` : "today"}
+                        </div>
+                        {result.jobs.length === 0 ? (
+                          <div style={{ fontSize: 12, color: "#555", padding: "6px 0" }}>No jobs found.</div>
+                        ) : (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 260, overflowY: "auto" }}>
+                            {result.jobs.map(j => (
+                              <button key={j.id} onClick={() => setViewJob(j)} style={{
+                                display: "flex", justifyContent: "space-between", alignItems: "center",
+                                background: "#fff", border: "1px solid #ddd", borderRadius: 4, padding: "8px 10px",
+                                textAlign: "left", cursor: "pointer",
+                              }}>
+                                <span style={{ fontSize: 12, fontWeight: 700, color: "#111" }}>{j.job_no}</span>
+                                <span style={{ fontSize: 12, color: "#333" }}>{j.customer}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        {result.pages > 1 && (
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 4 }}>
+                            <button onClick={() => changePage(r.key, Math.max(1, page - 1))} disabled={page === 1} style={{
+                              padding: "4px 10px", background: "#ddd", color: "#333", borderRadius: 4, fontSize: 11, fontWeight: 700,
+                            }}>◀ Prev</button>
+                            <span style={{ fontSize: 11, color: "#333" }}>{page} / {result.pages}</span>
+                            <button onClick={() => changePage(r.key, Math.min(result.pages, page + 1))} disabled={page === result.pages} style={{
+                              padding: "4px 10px", background: "#ddd", color: "#333", borderRadius: 4, fontSize: 11, fontWeight: 700,
+                            }}>Next ▶</button>
+                          </div>
+                        )}
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -5275,6 +5407,8 @@ function DeptTotalsPanel() {
           })}
         </div>
       )}
+
+      {viewJob && <JobCardViewModal job={viewJob} onClose={() => setViewJob(null)} addToast={addToast} />}
     </div>
   );
 }
@@ -5294,7 +5428,7 @@ function MachineStatsPanel() {
     { key: "GREEN_2", label: "Green II", accent: "var(--text-pri)" },
     { key: "GREEN_3", label: "Green III", accent: "var(--text-pri)" },
     { key: "EPSON", label: "Epson", accent: "var(--text-pri)" },
-    { key: "GREEN_3_NEW", label: "Green 3 New", accent: "var(--text-pri)" },
+    { key: "GREEN_3_NEW", label: "Green IV", accent: "var(--text-pri)" },
   ];
 
   return (
@@ -5440,7 +5574,7 @@ function MachineStatsPanel() {
 const PRINTING_MACHINES = [
   { key: "GREEN_2",     label: "Green II",     albumTypes: ["NORMAL", "STORY", "REBIND"] },
   { key: "GREEN_3",     label: "Green III",    albumTypes: ["NORMAL", "STORY", "REBIND"] },
-  { key: "GREEN_3_NEW", label: "Green III New",albumTypes: ["NORMAL", "STORY", "REBIND"] },
+  { key: "GREEN_3_NEW", label: "Green IV",albumTypes: ["NORMAL", "STORY", "REBIND"] },
   { key: "EPSON",       label: "Epson",        albumTypes: ["STORY", "REBIND"] },
 ];
 
@@ -6192,7 +6326,7 @@ const reload = useCallback(async () => {
           })}
         </div>
  
-        <DeptTotalsPanel />
+        <DeptTotalsPanel addToast={add} />
                       
  
         {/* Intelligence row — side-by-side on desktop, stacked on mobile */}
