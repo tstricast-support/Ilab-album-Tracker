@@ -7,7 +7,7 @@ export const API_BASE = isLocal
   ? "http://localhost:8000"
   : "";
 
-export const POLL_INTERVAL_MS = 4000;
+export const POLL_INTERVAL_MS = 8000;
 
 export const APP_NAME = "i Lab Gampaha";
 
