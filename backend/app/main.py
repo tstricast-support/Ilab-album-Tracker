@@ -296,11 +296,11 @@ def delete_job(job_id: int, db: Session = Depends(get_db)):
         _str(job.status_binding)       != "PENDING",
         _str(job.status_laser_cutting) not in ("PENDING", "SKIPPED"),
     ])
-    if in_production:
-        raise HTTPException(403, "Job is already in production and cannot be deleted.")
+    # if in_production:
+    #     raise HTTPException(403, "Job is already in production and cannot be deleted.")
 
-    if (datetime.utcnow() - job.created_at) > timedelta(minutes=4):#type: ignore 
-        raise HTTPException(403, "Edit window has expired. Job can no longer be deleted.")
+    # if (datetime.utcnow() - job.created_at) > timedelta(minutes=4):#type: ignore 
+    #     raise HTTPException(403, "Edit window has expired. Job can no longer be deleted.")
 
     db.delete(job)
     db.commit()
