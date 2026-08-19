@@ -1169,6 +1169,166 @@ def pending_print_jobs(
         "jobs": [_out(j, db).model_dump() for j in rows],
     }
 
+_ALBUM_DEPTS = ("ENTRY", "PRINTING", "LAMINATING", "BINDING")
+
+def _album_counts_for(db, dept, start, end):
+    if dept == "ENTRY":
+        rows = (
+            db.query(JobCard.album_type, func.count(JobCard.id))
+            .filter(JobCard.created_at >= start, JobCard.created_at < end)
+            .group_by(JobCard.album_type)
+            .all()
+        )
+    else:
+        dept_enum = DepartmentEnum[dept]
+        rows = (
+            db.query(JobCard.album_type, func.count(DepartmentLog.id))
+            .join(DepartmentLog, DepartmentLog.job_id == JobCard.id)
+            .filter(
+                DepartmentLog.department == dept_enum,
+                DepartmentLog.exited_at.isnot(None),
+                DepartmentLog.exited_at >= start,
+                DepartmentLog.exited_at < end,
+            )
+            .group_by(JobCard.album_type)
+            .all()
+        )
+    result = {"NORMAL": 0, "STORY": 0, "REBIND": 0}
+    for album_type, cnt in rows:
+        key = album_type if album_type in ("STORY", "REBIND") else "NORMAL"
+        result[key] += cnt
+    return result
+
+
+@app.get("/api/stats/album-breakdown")
+def album_breakdown_stats(
+    dept: str = Query(...),
+    date: Optional[str] = Query(None, description="YYYY-MM-DD, Sri Lanka day. Omit for today."),
+    db: Session = Depends(get_db),
+):
+    dept = dept.upper()
+    if dept not in _ALBUM_DEPTS:
+        raise HTTPException(400, f"Unknown department: {dept}")
+
+    if date:
+        sel = datetime.strptime(date, "%Y-%m-%d")
+    else:
+        sel = datetime.utcnow() + SL_TZ_OFFSET
+
+    day_start = datetime(sel.year, sel.month, sel.day) - SL_TZ_OFFSET
+    day_end   = day_start + timedelta(days=1)
+    month_start = datetime(sel.year, sel.month, 1) - SL_TZ_OFFSET
+    month_end   = (
+        datetime(sel.year + 1, 1, 1) if sel.month == 12
+        else datetime(sel.year, sel.month + 1, 1)
+    ) - SL_TZ_OFFSET
+
+    return {
+        "selected_date": sel.strftime("%Y-%m-%d"),
+        "daily":   _album_counts_for(db, dept, day_start, day_end),
+        "monthly": _album_counts_for(db, dept, month_start, month_end),
+    }
+
+
+@app.get("/api/stats/album-breakdown/dates-with-entries")
+def album_breakdown_dates(
+    dept: str = Query(...),
+    year: int = Query(...),
+    month: int = Query(...),
+    db: Session = Depends(get_db),
+):
+    dept = dept.upper()
+    if dept not in _ALBUM_DEPTS:
+        raise HTTPException(400, f"Unknown department: {dept}")
+
+    start = datetime(year, month, 1) - SL_TZ_OFFSET
+    end   = (datetime(year + 1, 1, 1) if month == 12 else datetime(year, month + 1, 1)) - SL_TZ_OFFSET
+
+    if dept == "ENTRY":
+        rows = (
+            db.query(JobCard.created_at)
+            .filter(JobCard.created_at >= start, JobCard.created_at < end)
+            .all()
+        )
+        dates = [r[0] for r in rows]
+    else:
+        dept_enum = DepartmentEnum[dept]
+        rows = (
+            db.query(DepartmentLog.exited_at)
+            .filter(
+                DepartmentLog.department == dept_enum,
+                DepartmentLog.exited_at.isnot(None),
+                DepartmentLog.exited_at >= start,
+                DepartmentLog.exited_at < end,
+            )
+            .all()
+        )
+        dates = [r[0] for r in rows]
+
+    day_counts: dict[str, int] = {}
+    for dt in dates:
+        lk_date = dt + SL_TZ_OFFSET
+        day_key = str(lk_date.day)
+        day_counts[day_key] = day_counts.get(day_key, 0) + 1
+    return day_counts
+
+
+@app.get("/api/stats/album-jobs")
+def album_jobs_list(
+    dept: str = Query(...),
+    album_type: str = Query(...),
+    date: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(15, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    dept = dept.upper()
+    if dept not in _ALBUM_DEPTS:
+        raise HTTPException(400, f"Unknown department: {dept}")
+
+    if date:
+        sel = datetime.strptime(date, "%Y-%m-%d")
+    else:
+        sel = datetime.utcnow() + SL_TZ_OFFSET
+    day_start = datetime(sel.year, sel.month, sel.day) - SL_TZ_OFFSET
+    day_end   = day_start + timedelta(days=1)
+
+    at = album_type.strip().upper()
+
+    if dept == "ENTRY":
+        q = db.query(JobCard).filter(JobCard.created_at >= day_start, JobCard.created_at < day_end)
+        order_col = JobCard.created_at
+    else:
+        dept_enum = DepartmentEnum[dept]
+        q = (
+            db.query(JobCard)
+            .join(DepartmentLog, DepartmentLog.job_id == JobCard.id)
+            .filter(
+                DepartmentLog.department == dept_enum,
+                DepartmentLog.exited_at.isnot(None),
+                DepartmentLog.exited_at >= day_start,
+                DepartmentLog.exited_at < day_end,
+            )
+        )
+        order_col = DepartmentLog.exited_at
+
+    if at == "NORMAL":
+        q = q.filter(or_(JobCard.album_type == "NORMAL", JobCard.album_type.is_(None)))
+    else:
+        q = q.filter(JobCard.album_type == at)
+
+    q = q.order_by(desc(order_col))
+    total = q.count()
+    rows  = q.offset((page - 1) * page_size).limit(page_size).all()
+
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "pages": max(1, -(-total // page_size)),
+        "jobs": [_out(j, db).model_dump() for j in rows],
+    }
+
 @app.get("/api/stats/printing-section")
 def printing_section_stats(db: Session = Depends(get_db)):
     utc_now = datetime.utcnow()

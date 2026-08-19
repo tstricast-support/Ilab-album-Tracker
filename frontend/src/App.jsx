@@ -36,6 +36,12 @@ const api = {
   deptStats: () => apiFetch("/api/stats/departments"),
   pendingPrintJobs: (search = "", page = 1) =>
     apiFetch(`/api/stats/pending-print-jobs?search=${encodeURIComponent(search)}&page=${page}&page_size=15`),
+  albumBreakdown: (dept, date) =>
+    apiFetch(`/api/stats/album-breakdown?dept=${dept}${date ? `&date=${date}` : ""}`),
+  albumBreakdownDates: (dept, year, month) =>
+    apiFetch(`/api/stats/album-breakdown/dates-with-entries?dept=${dept}&year=${year}&month=${month}`),
+  albumJobsList: (dept, albumType, date, page = 1) =>
+    apiFetch(`/api/stats/album-jobs?dept=${dept}&album_type=${albumType}${date ? `&date=${date}` : ""}&page=${page}&page_size=15`),
   printingSection: () => apiFetch("/api/stats/printing-section"),
   printingBreakdown: () => apiFetch(`/api/stats/printing-breakdown`),
   printingJobsList: (machine, album_type, date, page) =>
@@ -1189,7 +1195,7 @@ function JobCardViewModal({ job, onClose, addToast }) {
 }
 
 // ── Completed / Dispatched dropdown (lives in the header topRight space) ────────
-function DeptCompletedDropdown({ deptKey, title = "Dispatched", accent = "var(--amber)", mrb="0px", addToast }) {
+function DeptCompletedDropdown({ deptKey, title = "Dispatched", accent = "var(--amber)", mrb="0px", addToast, showBreakdown = false }) {
   const [open,            setOpen]            = useState(false);
   const [search,          setSearch]          = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -1212,7 +1218,6 @@ function DeptCompletedDropdown({ deptKey, title = "Dispatched", accent = "var(--
       .catch(() => {});
   }, [deptKey]);
 
-  
   useEffect(() => {
     if (!open) return;
     setLoading(true);
@@ -1250,13 +1255,18 @@ function DeptCompletedDropdown({ deptKey, title = "Dispatched", accent = "var(--
           left: isMobile ? "3vw" : "auto",
           right: isMobile ? "3vw" : 0,
           zIndex: 500,
-          width: isMobile ? "94vw" : 380,
+          width: isMobile ? "94vw" : (showBreakdown ? 420 : 380),
           maxWidth: "94vw",
           background: "var(--bg1)", border: `1px solid ${accent}`, borderRadius: 10,
           boxShadow: "0 8px 30px rgba(0,0,0,.6)", padding: 12,
           display: "flex", flexDirection: "column", gap: 10,
           maxHeight: "80vh", overflowY: "auto",
         }}>
+          {/* ── NEW: Album Type Breakdown, only inside this dropdown ── */}
+          {showBreakdown && (
+            <AlbumTypeBreakdownPanel dept={deptKey} accent={accent} />
+          )}
+
           <SearchBar value={search} onChange={setSearch} placeholder="Job No / Studio / Couple…" />
 
           {error && <div style={{ fontSize: 12, color: "var(--red)", padding: "4px 0" }}>⚠ {error}</div>}
@@ -2710,7 +2720,7 @@ async function handleSubmit(e) {
           </div>
         </div>
       }>
-       <DeptCompletedDropdown deptKey="ENTRY" title="Dispatched Today" accent="var(--amber)" mrb="10px" addToast={add} />
+      <DeptCompletedDropdown deptKey="ENTRY" title="Dispatched Today" accent="var(--amber)" mrb="10px" addToast={add} showBreakdown={true} />
         {/* ── Create form ── */}
         <form ref={formRef} onSubmit={handleSubmit} autoComplete="off"
           style={{ maxWidth: 900, display: "flex", flexDirection: "column", gap: 14, marginBottom: 32 }}>
@@ -4132,7 +4142,13 @@ function StationPage({ deptKey }) {
               <Plus size={14} /> {isMobile ? "Job Card" : "Create Job Card"}
             </button>
           )}
-          <DeptCompletedDropdown deptKey={cfg.dept} title={`Done Today - ${cfg.label}`} accent={cfg.accent} addToast={add} />
+          <DeptCompletedDropdown
+            deptKey={cfg.dept}
+            title={`Done Today - ${cfg.label}`}
+            accent={cfg.accent}
+            addToast={add}
+            showBreakdown={cfg.dept !== "LASER_CUTTING"}
+          />
           {/* Queue count */}
           <div style={{
             display: "flex", alignItems: "center", gap: isMobile ? 4 : 10,
@@ -4193,6 +4209,7 @@ function StationPage({ deptKey }) {
         </div>
       }>
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+         
           <SearchBar value={search} onChange={setSearch} />
 
           {queue.filter(j => matchesSearch(j, search)).length === 0
@@ -5805,8 +5822,17 @@ function DeptTotalsPanel({ addToast }) {
                     {result === "error"   && <div style={{ fontSize: 12, color: "#b91c1c", padding: "6px 0" }}>Failed to load jobs.</div>}
                     {result && result !== "loading" && result !== "error" && (
                       <>
-                        <div style={{ fontSize: 11, color: "#555" }}>
-                          {result.total} job{result.total !== 1 ? "s" : ""} {isPending ? "awaiting printing" : (selDate ? `on ${selDate}` : "today")}
+                       <div style={{
+                          display: "flex", alignItems: "center", justifyContent: "space-between",
+                          background: "#fff", border: "1px solid #ccc", borderLeft: "4px solid #3c24a5",
+                          borderRadius: 8, padding: "10px 14px", marginBottom: 4,
+                        }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: "#333" }}>
+                            {isPending ? "Awaiting Printing" : (selDate ? new Date(selDate + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "Today")}
+                          </div>
+                          <div style={{ fontSize: 20, fontWeight: 900, color: "#3c24a5", lineHeight: 1 }}>
+                            {result.total}
+                          </div>
                         </div>
                         {result.jobs.length === 0 ? (
                           <div style={{ fontSize: 12, color: "#555", padding: "6px 0" }}>No jobs found.</div>
@@ -5846,6 +5872,165 @@ function DeptTotalsPanel({ addToast }) {
       )}
 
       {viewJob && <JobCardViewModal job={viewJob} onClose={() => setViewJob(null)} addToast={addToast} />}
+    </div>
+  );
+}
+
+const ALBUM_BREAKDOWN_TYPES = [
+  { key: "NORMAL", label: "Magazine Album", accent: "#16a34a" },
+  { key: "STORY",  label: "Story Album",    accent: "#7c3aed" },
+  { key: "REBIND", label: "Rebind Album",   accent: "#0ea5e9" },
+];
+
+function AlbumTypeBreakdownPanel({ dept, accent = "var(--amber)" }) {
+  const [data, setData]           = useState(null);
+  const [selectedDate, setSelDate] = useState(null); // null = today
+  const [showCal, setShowCal]     = useState(false);
+  const [calYear, setCalYear]     = useState(new Date().getFullYear());
+  const [calMonth, setCalMonth]   = useState(new Date().getMonth() + 1);
+  const [dotDays, setDotDays]     = useState({});
+  const [expandedType, setExpandedType] = useState(null);
+  const [page, setPage]           = useState(1);
+  const [jobsResult, setJobsResult] = useState(null);
+  const [viewJob, setViewJob]     = useState(null);
+
+  const reload = useCallback(() => {
+    api.albumBreakdown(dept, selectedDate || undefined).then(setData).catch(() => {});
+  }, [dept, selectedDate]);
+
+  useEffect(() => { reload(); }, [reload]);
+  useEffect(() => {
+    const t = setInterval(reload, POLL_INTERVAL_MS);
+    return () => clearInterval(t);
+  }, [reload]);
+
+  useEffect(() => {
+    if (!showCal) return;
+    api.albumBreakdownDates(dept, calYear, calMonth).then(setDotDays).catch(() => setDotDays({}));
+  }, [dept, calYear, calMonth, showCal]);
+
+  async function loadJobs(type, pg) {
+    setJobsResult("loading");
+    try { setJobsResult(await api.albumJobsList(dept, type, selectedDate || undefined, pg)); }
+    catch { setJobsResult("error"); }
+  }
+
+  function toggleType(key) {
+    if (expandedType === key) { setExpandedType(null); setJobsResult(null); return; }
+    setExpandedType(key);
+    setPage(1);
+    loadJobs(key, 1);
+  }
+
+  function changePage(pg) {
+    setPage(pg);
+    loadJobs(expandedType, pg);
+  }
+
+  const dateLabel = selectedDate
+    ? new Date(selectedDate + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short" })
+    : "Today";
+
+  return (
+    <div style={{ background: "var(--card-bg)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 14px" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, flexWrap: "wrap", gap: 6 }}>
+        <span style={{ fontFamily: "var(--fd)", fontSize: 12, fontWeight: 900, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--text-pri)" }}>
+          Album Type Breakdown
+        </span>
+        <button onClick={() => setShowCal(p => !p)} style={{
+          padding: "4px 10px", fontSize: 11, fontWeight: 700, borderRadius: 5,
+          background: selectedDate ? accent : "var(--bg3)", color: selectedDate ? "#000" : "var(--text-sec)",
+          border: `1px solid ${selectedDate ? accent : "var(--border)"}`, display: "flex", alignItems: "center", gap: 5,
+        }}><Calendar size={12} /> {dateLabel}</button>
+      </div>
+
+      {showCal && (
+        <div style={{ marginBottom: 10, maxWidth: 260 }}>
+          <EntryCalendar
+            year={calYear} month={calMonth}
+            onYearMonth={(y, m) => { setCalYear(y); setCalMonth(m); }}
+            dotDays={dotDays}
+            selectedDate={selectedDate || slDateStr(new Date())}
+            onSelect={dt => { setSelDate(dt); setExpandedType(null); }}
+            onAfterSelect={() => setShowCal(false)}
+            accent={accent}
+          />
+          {selectedDate && (
+            <button onClick={() => { setSelDate(null); setExpandedType(null); setShowCal(false); }} style={{
+              marginTop: 6, width: "100%", padding: "6px 0", fontSize: 11, fontWeight: 700,
+              color: "var(--red)", background: "var(--bg2)", borderRadius: 4, border: "1px solid var(--border)",
+            }}>✕ Clear — back to Today</button>
+          )}
+        </div>
+      )}
+
+      {!data ? (
+        <div style={{ textAlign: "center", padding: "14px 0", color: "var(--text-dim)", fontSize: 12 }}>Loading…</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {ALBUM_BREAKDOWN_TYPES.map(t => {
+            const d = data.daily?.[t.key] ?? 0;
+            const m = data.monthly?.[t.key] ?? 0;
+            const isOpen = expandedType === t.key;
+            return (
+              <div key={t.key} style={{ background: "var(--surface-sunken)", border: `1px solid ${t.accent}33`, borderLeft: `3px solid ${t.accent}`, borderRadius: 6, overflow: "hidden" }}>
+                <button onClick={() => toggleType(t.key)} style={{
+                  width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+                  padding: "8px 10px", background: "transparent", textAlign: "left", flexWrap: "wrap", gap: 6,
+                }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: t.accent, textTransform: "uppercase", letterSpacing: ".05em" }}>{t.label}</span>
+                  <div style={{ display: "flex", gap: 14 }}>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontSize: 9, color: "var(--text-dim)", letterSpacing: ".1em" }}>{selectedDate ? "DAY" : "TODAY"}</div>
+                      <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text-pri)" }}>{d}</div>
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontSize: 9, color: "var(--text-dim)", letterSpacing: ".1em" }}>MONTH</div>
+                      <div style={{ fontSize: 15, fontWeight: 800, color: "var(--amber)" }}>{m}</div>
+                    </div>
+                  </div>
+                </button>
+
+                {isOpen && (
+                  <div className="si" style={{ padding: "0 10px 10px", display: "flex", flexDirection: "column", gap: 6 }}>
+                    {jobsResult === "loading" && <div style={{ fontSize: 11, color: "var(--text-dim)", padding: "4px 0" }}>Loading…</div>}
+                    {jobsResult === "error" && <div style={{ fontSize: 11, color: "var(--red)", padding: "4px 0" }}>Failed to load.</div>}
+                    {jobsResult && jobsResult !== "loading" && jobsResult !== "error" && (
+                      <>
+                        {jobsResult.jobs.length === 0 ? (
+                          <div style={{ fontSize: 11, color: "var(--text-dim)", padding: "4px 0" }}>No jobs.</div>
+                        ) : (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 220, overflowY: "auto" }}>
+                            {jobsResult.jobs.map(j => (
+                              <button key={j.id} onClick={() => setViewJob(j)} style={{
+                                display: "flex", justifyContent: "space-between", alignItems: "center",
+                                background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 4,
+                                padding: "6px 10px", textAlign: "left",
+                              }}>
+                                <span style={{ fontFamily: "var(--fm)", fontSize: 12, fontWeight: 800, color: t.accent }}>{j.job_no}</span>
+                                <span style={{ fontSize: 12, color: "var(--text-sec)" }}>{j.customer}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        {jobsResult.pages > 1 && (
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 2 }}>
+                            <button onClick={() => changePage(Math.max(1, page - 1))} disabled={page === 1} style={{ padding: "3px 9px", background: "var(--bg2)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 4, fontSize: 10, fontWeight: 700 }}>◀</button>
+                            <span style={{ fontSize: 11, color: "var(--text-dim)" }}>{page}/{jobsResult.pages}</span>
+                            <button onClick={() => changePage(Math.min(jobsResult.pages, page + 1))} disabled={page === jobsResult.pages} style={{ padding: "3px 9px", background: "var(--bg2)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 4, fontSize: 10, fontWeight: 700 }}>▶</button>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {viewJob && <JobCardViewModal job={viewJob} onClose={() => setViewJob(null)} addToast={() => {}} />}
     </div>
   );
 }
