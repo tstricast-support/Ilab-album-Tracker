@@ -304,6 +304,8 @@ def delete_job(job_id: int, db: Session = Depends(get_db)):
 
     db.delete(job)
     db.commit()
+    
+
 
 class PaymentUpdate(BaseModel):
     payment_by: str
@@ -472,6 +474,110 @@ def damage_dates_with_entries(
         day_key = str(lk_date.day)
         day_counts[day_key] = day_counts.get(day_key, 0) + r.cnt
     return day_counts
+
+# main.py — insert AFTER station_history_dates(), BEFORE @app.get("/api/stats")
+
+# ── Admin: Date Correction ────────────────────────────────────────────
+class DateCorrectionRequest(BaseModel):
+    department: str
+    new_date: str
+
+_DEPT_LOG_ENUM = {
+    "PRINTING":      DepartmentEnum.PRINTING,
+    "LAMINATING":    DepartmentEnum.LAMINATING,
+    "LASER_CUTTING": DepartmentEnum.LASER_CUTTING,
+    "BINDING":       DepartmentEnum.BINDING,
+}
+
+def _sl_date(dt: datetime) -> str:
+    return (dt + SL_TZ_OFFSET).strftime("%Y-%m-%d")
+
+def _shift_to_new_date(dt: datetime, new_date_str: str) -> datetime:
+    sl_dt = dt + SL_TZ_OFFSET
+    y, m, d = map(int, new_date_str.split("-"))
+    shifted_sl = datetime(y, m, d, sl_dt.hour, sl_dt.minute, sl_dt.second, sl_dt.microsecond)
+    return shifted_sl - SL_TZ_OFFSET
+
+
+@app.get("/api/admin/jobs/{job_id}/timeline")
+def admin_job_timeline(job_id: int, db: Session = Depends(get_db)):
+    job = _job_or_404(job_id, db)
+    logs = (
+        db.query(DepartmentLog)
+        .filter(DepartmentLog.job_id == job.id)
+        .order_by(DepartmentLog.entered_at)
+        .all()
+    )
+    return {
+        "id": job.id,
+        "job_no": job.job_no,
+        "customer": job.customer,
+        "created_at": job.created_at,
+        "created_date_sl": _sl_date(job.created_at),
+        "completed_at": job.completed_at,
+        "completed_date_sl": _sl_date(job.completed_at) if job.completed_at else None,  #type:ignore
+        "is_fully_completed": job.is_fully_completed,
+        "logs": [
+            {
+                "id": l.id,
+                "department": _str(l.department),
+                "entered_at": l.entered_at,
+                "exited_at": l.exited_at,
+                "entered_date_sl": _sl_date(l.entered_at),
+                "exited_date_sl": _sl_date(l.exited_at) if l.exited_at else None,  #type:ignore
+                "duration_minutes": l.duration_minutes,
+                "machine": l.machine,
+                "operator_name": l.operator_name,
+            }
+            for l in logs
+        ],
+    }
+
+
+@app.patch("/api/admin/jobs/{job_id}/date-correction", response_model=JobCardOut)
+def admin_fix_date(job_id: int, payload: DateCorrectionRequest, db: Session = Depends(get_db)):
+    job  = _job_or_404(job_id, db)
+    dept = payload.department.upper()
+
+    try:
+        datetime.strptime(payload.new_date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(400, "new_date must be in YYYY-MM-DD format")
+
+    if dept == "ENTRY":
+        old_date = _sl_date(job.created_at)
+        job.created_at = _shift_to_new_date(job.created_at, payload.new_date)  #type:ignore
+        if _sl_date(job.updated_at) == old_date:
+            job.updated_at = _shift_to_new_date(job.updated_at, payload.new_date)  #type:ignore
+
+    elif dept in _DEPT_LOG_ENUM:
+        log = (
+            db.query(DepartmentLog)
+            .filter(DepartmentLog.job_id == job.id, DepartmentLog.department == _DEPT_LOG_ENUM[dept])
+            .order_by(desc(DepartmentLog.entered_at))
+            .first()
+        )
+        if not log:
+            raise HTTPException(404, f"No {dept} log found for this job.")
+        if not log.exited_at:
+            raise HTTPException(400, f"{dept} is not yet completed for this job — nothing to correct.")
+
+        old_exit_date = _sl_date(log.exited_at)  #type:ignore
+
+        log.entered_at = _shift_to_new_date(log.entered_at, payload.new_date)  #type:ignore
+        log.exited_at  = _shift_to_new_date(log.exited_at, payload.new_date)   #type:ignore
+
+        if _sl_date(job.updated_at) == old_exit_date:
+            job.updated_at = log.exited_at  #type:ignore
+
+        if job.completed_at and _sl_date(job.completed_at) == old_exit_date:  #type:ignore
+            job.completed_at = _shift_to_new_date(job.completed_at, payload.new_date)  #type:ignore
+    else:
+        raise HTTPException(400, f"Unknown department: {dept}")
+
+    db.commit()
+    db.refresh(job)
+    return _out(job, db)
 
 class DamageUpdate(BaseModel):
     paper_price_id: Optional[int] = None
@@ -1019,8 +1125,49 @@ def get_dept_stats(db: Session = Depends(get_db)):
         "daily":   {r[0]: r[1] for r in machine_daily_rows},
     }
 
-    return {"monthly": result, "daily": daily, "machines": machines}
+    # ── Pending-print backlog: entered but printing not yet started ──
+    pending_print_count = (
+        db.query(func.count(JobCard.id))
+        .filter(
+            JobCard.status_printing == StageStatusEnum.PENDING,
+            JobCard.is_fully_completed == False,  # noqa
+        )
+        .scalar() or 0
+    )
 
+    return {
+        "monthly": result, "daily": daily, "machines": machines,
+        "pending_print_count": pending_print_count,
+    }
+
+@app.get("/api/stats/pending-print-jobs")
+def pending_print_jobs(
+    db: Session = Depends(get_db),
+    search: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(15, ge=1, le=100),
+):
+    q = db.query(JobCard).filter(
+        JobCard.status_printing == StageStatusEnum.PENDING,
+        JobCard.is_fully_completed == False,  # noqa
+    )
+    if search and search.strip():
+        term = f"%{search.strip()}%"
+        q = q.filter(or_(
+            JobCard.job_no.ilike(term),
+            JobCard.customer.ilike(term),
+            JobCard.couple_name.ilike(term),
+        ))
+    q = q.order_by(_urgent_first(), JobCard.created_at.asc())
+    total = q.count()
+    rows = q.offset((page - 1) * page_size).limit(page_size).all()
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "pages": max(1, -(-total // page_size)),
+        "jobs": [_out(j, db).model_dump() for j in rows],
+    }
 
 @app.get("/api/stats/printing-section")
 def printing_section_stats(db: Session = Depends(get_db)):

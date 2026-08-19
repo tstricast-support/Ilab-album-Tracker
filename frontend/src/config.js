@@ -41,3 +41,13 @@ export const ALBUM_TYPES = [
 
 export const PAPER_SIZES = ["9x13", "10x16", "12x16", "13x16", "13x19"];
 export const LOW_STOCK_THRESHOLD = 5;
+
+
+
+export const CORRECTABLE_DEPTS = [
+  { value: "ENTRY",         label: "Entry" },
+  { value: "PRINTING",      label: "Printing" },
+  { value: "LASER_CUTTING", label: "Laser Cutting" },
+  { value: "LAMINATING",    label: "Laminating" },
+  { value: "BINDING",       label: "Binding" },
+];

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef,createContext, useContext } from "react";
-import { API_BASE, POLL_INTERVAL_MS, APP_NAME,MACHINES,ALBUM_TYPES,DAMAGE_DEPTS, PAPER_SIZES, LOW_STOCK_THRESHOLD} from "./config.js";
+import { API_BASE, POLL_INTERVAL_MS, APP_NAME,MACHINES,ALBUM_TYPES,DAMAGE_DEPTS, PAPER_SIZES, LOW_STOCK_THRESHOLD,CORRECTABLE_DEPTS} from "./config.js";
 import {ArrowRight, Calendar,Pen,SquareX, Trash,Printer,TriangleAlert,Flame,Activity, Speech, Scissors,BookOpen,Plus, Timer,ChevronDown ,Search,Palette,Check,ArrowUp,Download}from "lucide-react";
 import logo from "./assets/logo.jpg";
 import trackQR from "./assets/track-qr.png";
@@ -34,6 +34,8 @@ const api = {
   searchJobs: (q) => apiFetch(`/api/jobs/search?q=${encodeURIComponent(q)}`),
   stats:         ()             => apiFetch("/api/stats"),
   deptStats: () => apiFetch("/api/stats/departments"),
+  pendingPrintJobs: (search = "", page = 1) =>
+    apiFetch(`/api/stats/pending-print-jobs?search=${encodeURIComponent(search)}&page=${page}&page_size=15`),
   printingSection: () => apiFetch("/api/stats/printing-section"),
   printingBreakdown: () => apiFetch(`/api/stats/printing-breakdown`),
   printingJobsList: (machine, album_type, date, page) =>
@@ -100,6 +102,12 @@ const api = {
   apiFetch(`/api/paper-usage?search=${encodeURIComponent(search)}&${date ? `date=${date}&` : ""}page=${page}&page_size=20`),
 
   track: (jobNo) => apiFetch(`/api/track/${encodeURIComponent(jobNo)}`),
+
+  adminSearchJob:    (q) => apiFetch(`/api/jobs/search?q=${encodeURIComponent(q)}`),
+  adminJobTimeline:  (jobId) => apiFetch(`/api/admin/jobs/${jobId}/timeline`),
+  adminFixDate:      (jobId, department, new_date) => apiFetch(`/api/admin/jobs/${jobId}/date-correction`, {
+    method: "PATCH", body: JSON.stringify({ department, new_date }),
+  }),
 };
 
 function parseUTC(s) {
@@ -473,7 +481,8 @@ function getPage() {
   if (p === "/history")   return { page: "history" };
   if (p === "/analytics") return { page: "analytics" };
   if (p === "/damages")   return { page: "damages" };
-  if (p === "/papers")    return { page: "papers" }; 
+  if (p === "/papers")    return { page: "papers" };
+  if (p === "/admin/date-fix") return { page: "date-fix" }; 
   const md = p.match(/^\/station\/([\w]+)\/damages$/);
   if (md) return { page: "damages", dept: md[1] };
   const m = p.match(/^\/station\/([\w]+)$/);
@@ -498,6 +507,7 @@ const NAV_ITEMS = [
   { label: "Binding",       path: "/station/binding",      accent: "#22c55e"       },
   { label: "Damages",       path: "/damages",              accent: "var(--red)"    },
   { label: "Papers",        path: "/papers",               accent: "#3b82f6"       },
+    { label: "Fix Dates",     path: "/admin/date-fix",       accent: "var(--red)"    },
 ];
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
@@ -3885,7 +3895,7 @@ function OperatorIdentityModal({ dept, onConfirm, onCancel }) {
               <option value="Jeewan">Jeewan</option>
               <option value="Hirusha">Hirusha</option>
               <option value="Suresh">Suresh</option>
-              <option value="Boss">Sandeepa</option>
+              <option value="sandeepa">Sandeepa</option>
               <option value="Boss">Boss</option>
             </select>
           </div>
@@ -5174,6 +5184,191 @@ function PapersPage() {
     </>
   );
 }
+
+const DEPT_FIX_LABELS = {
+  PRINTING: "Printing", LAMINATING: "Laminating",
+  LASER_CUTTING: "Laser Cutting", BINDING: "Binding",
+};
+const DEPT_FIX_COLORS = {
+  PRINTING: "var(--blue)", LAMINATING: "var(--cyan)",
+  LASER_CUTTING: "var(--purple)", BINDING: "var(--green)",
+};
+
+function DateFixRow({ label, accent, currentDateSl, disabled, disabledReason, onFix }) {
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap",
+      background: "var(--bg2)", border: "1px solid var(--border)", borderLeft: `4px solid ${accent}`,
+      borderRadius: 8, padding: "12px 14px",
+    }}>
+      <div>
+        <div style={{ fontSize: 12, fontWeight: 800, color: accent, textTransform: "uppercase", letterSpacing: ".06em" }}>{label}</div>
+        <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-pri)", marginTop: 3, fontFamily: "var(--fm)" }}>
+          {currentDateSl || "—"}
+        </div>
+        {disabled && <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 2 }}>{disabledReason}</div>}
+      </div>
+      <button onClick={onFix} disabled={disabled} style={{
+        padding: "8px 16px", fontSize: 12, fontWeight: 700, borderRadius: 6,
+        background: disabled ? "var(--bg3)" : "var(--amber)",
+        color: disabled ? "var(--text-dim)" : "#000",
+      }}>✏ Fix Date</button>
+    </div>
+  );
+}
+
+function FixDateModal({ title, currentDateSl, onSave, onClose }) {
+  const [date, setDate] = useState(currentDateSl || "");
+  const [saving, setSaving] = useState(false);
+  const isMobile = useIsMobile();
+  async function save() {
+    if (!date) return;
+    setSaving(true);
+    try { await onSave(date); onClose(); } finally { setSaving(false); }
+  }
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "var(--overlay)", display: "flex", alignItems: isMobile ? "flex-end" : "center", justifyContent: "center", zIndex: 9300 }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "var(--bg1)", border: "1px solid var(--border)", borderRadius: isMobile ? "16px 16px 0 0" : 12, padding: 24, width: "100%", maxWidth: 380, display: "flex", flexDirection: "column", gap: 16 }}>
+        <div>
+          <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".1em" }}>Fix Date</div>
+          <div style={{ fontSize: 16, fontWeight: 800, color: "var(--amber)" }}>{title}</div>
+        </div>
+        <div>
+          <label>Correct calendar date (Sri Lanka)</label>
+          <input type="date" value={date} onChange={e => setDate(e.target.value)} />
+        </div>
+        <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
+          Time-of-day stays the same — only the date moves. Duration &amp; delay status won't change.
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={save} disabled={saving || !date} style={{ flex: 1, padding: "12px 0", background: "var(--amber)", color: "#000", borderRadius: 8, fontWeight: 800, fontSize: 14 }}>{saving ? "Saving…" : "✓ Save"}</button>
+          <button onClick={onClose} style={{ padding: "12px 18px", background: "var(--bg3)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 8, fontWeight: 700 }}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AdminDateFixPage() {
+  const { toasts, add } = useToast();
+
+  if (!IS_ADMIN) {
+    return (
+      <Shell title="ACCESS DENIED" accent="var(--red)">
+        <div style={{ textAlign: "center", padding: "60px 0", color: "var(--red)" }}>
+          This page is admin-only.
+        </div>
+      </Shell>
+    );
+  }
+
+  const [query, setQuery]     = useState("");
+  const [results, setResults] = useState([]);
+  const [job, setJob]         = useState(null);      // selected job (basic)
+  const [timeline, setTimeline] = useState(null);     // full timeline
+  const [fixTarget, setFixTarget] = useState(null);   // { key, label, dateSl }
+  const [loading, setLoading] = useState(false);
+
+  async function search() {
+    if (!query.trim()) return;
+    try { const d = await api.adminSearchJob(query.trim()); setResults(d.jobs || []); }
+    catch (err) { add(err.message, "error"); }
+  }
+
+  async function pick(j) {
+    setJob(j); setResults([]); setQuery("");
+    setLoading(true);
+    try { setTimeline(await api.adminJobTimeline(j.id)); }
+    catch (err) { add(err.message, "error"); }
+    finally { setLoading(false); }
+  }
+
+  async function reloadTimeline() {
+    if (!job) return;
+    try { setTimeline(await api.adminJobTimeline(job.id)); } catch {}
+  }
+
+  async function applyFix(newDate) {
+    try {
+      await api.adminFixDate(job.id, fixTarget.key, newDate);
+      add(`✓ ${fixTarget.label} date updated to ${newDate}`, "success");
+      await reloadTimeline();
+    } catch (err) { add(err.message, "error"); throw err; }
+  }
+
+  return (
+    <>
+      <Shell title="ADMIN — FIX DATES" accent="var(--red)">
+        <div style={{ maxWidth: 640, display: "flex", flexDirection: "column", gap: 16 }}>
+          <Sec title="Find Job" accent="var(--red)">
+            <div style={{ display: "flex", gap: 8 }}>
+              <input value={query} onChange={e => setQuery(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && search()}
+                placeholder="Job No / Customer / Couple…" style={{ flex: 1, margin: 0 }} />
+              <button onClick={search} style={{ padding: "0 18px", background: "var(--amber)", color: "#000", borderRadius: 8, fontWeight: 800 }}>Search</button>
+            </div>
+            {results.length > 0 && (
+              <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+                {results.map(r => (
+                  <button key={r.id} onClick={() => pick(r)} style={{
+                    display: "flex", justifyContent: "space-between", padding: "9px 12px",
+                    background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 6, textAlign: "left",
+                  }}>
+                    <span style={{ fontFamily: "var(--fm)", color: "var(--amber)", fontWeight: 800 }}>{r.job_no}</span>
+                    <span style={{ color: "var(--text-sec)" }}>{r.customer}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </Sec>
+
+          {loading && <div style={{ textAlign: "center", padding: 20, color: "var(--text-dim)" }}>LOADING…</div>}
+
+          {timeline && (
+            <Sec title={`Timeline — ${timeline.job_no}`} accent="var(--amber)">
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <DateFixRow
+                  label="Entry" accent="var(--amber)" currentDateSl={timeline.created_date_sl}
+                  onFix={() => setFixTarget({ key: "ENTRY", label: "Entry", dateSl: timeline.created_date_sl })}
+                />
+                {["PRINTING","LASER_CUTTING","LAMINATING","BINDING"].map(dk => {
+                  const log = [...timeline.logs].reverse().find(l => l.department === dk);
+                  const done = log && log.exited_at;
+                  return (
+                    <DateFixRow
+                      key={dk}
+                      label={DEPT_FIX_LABELS[dk]} accent={DEPT_FIX_COLORS[dk]}
+                      currentDateSl={done ? log.exited_date_sl : null}
+                      disabled={!done}
+                      disabledReason={!log ? "Not started yet" : "Still in progress / not completed"}
+                      onFix={() => setFixTarget({ key: dk, label: DEPT_FIX_LABELS[dk], dateSl: log.exited_date_sl })}
+                    />
+                  );
+                })}
+                {timeline.is_fully_completed && (
+                  <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 4 }}>
+                    Job fully completed on <b style={{ color: "var(--green)" }}>{timeline.completed_date_sl}</b> — this follows the Binding date automatically.
+                  </div>
+                )}
+              </div>
+            </Sec>
+          )}
+        </div>
+      </Shell>
+
+      {fixTarget && (
+        <FixDateModal
+          title={fixTarget.label}
+          currentDateSl={fixTarget.dateSl}
+          onSave={date => applyFix(date)}
+          onClose={() => setFixTarget(null)}
+        />
+      )}
+      <ToastStack toasts={toasts} />
+    </>
+  );
+}
+
 // ── 3. OVERDUE DELIVERY ALERT ─────────────────────────────────────────────────
 // Jobs that are past their delivery date but still in the pipeline.
 // Computed from `active` jobs — no backend needed.
@@ -5435,11 +5630,11 @@ function DeptTotalsPanel({ addToast }) {
   }, []);
 
   const rows = [
-    { key: "ENTRY",         label: "Pending",     tag: "JOB ENTRY" },
-    { key: "PRINTING",      label: "Printing",    tag: null        },
-    { key: "LAMINATING",    label: "Accubinding",  tag: null        },
-    { key: "LASER_CUTTING", label: "Laser cut cover",   tag: null        },
-    { key: "BINDING",       label: "Binding",    tag: "COMPLETE"   },
+    { key: "PENDING_PRINT", label: "Pending",     tag: "AWAITING PRINT" },
+    { key: "PRINTING",      label: "Printing",    tag: null             },
+    { key: "LAMINATING",    label: "Accubinding", tag: null             },
+    { key: "LASER_CUTTING", label: "Laser cut cover", tag: null         },
+    { key: "BINDING",       label: "Binding",     tag: "COMPLETE"       },
   ];
 
   function cacheKeyFor(dept, date, page) {
@@ -5450,7 +5645,9 @@ function DeptTotalsPanel({ addToast }) {
     const key = cacheKeyFor(dept, date, page);
     setJobsCache(c => ({ ...c, [key]: "loading" }));
     try {
-      const res = await api.stationHistory(dept, "", page, date || "");
+      const res = dept === "PENDING_PRINT"
+        ? await api.pendingPrintJobs("", page)
+        : await api.stationHistory(dept, "", page, date || "");
       setJobsCache(c => ({ ...c, [key]: res }));
     } catch {
       setJobsCache(c => ({ ...c, [key]: "error" }));
@@ -5521,7 +5718,8 @@ function DeptTotalsPanel({ addToast }) {
           {rows.map(r => {
             const daily   = data.daily?.[r.key]   ?? 0;
             const monthly = data.monthly?.[r.key] ?? 0;
-            const isEntry = r.key === "ENTRY";
+            const isPending = r.key === "PENDING_PRINT";
+            const pendingCount = data.pending_print_count ?? 0;
             const isOpen  = expanded === r.key;
             const selDate = dateByDept[r.key] ?? null;
             const page    = pageByDept[r.key] ?? 1;
@@ -5543,10 +5741,10 @@ function DeptTotalsPanel({ addToast }) {
                     {r.tag && <span style={{ fontSize: 10, fontWeight: 700, color: "#555" }}>({r.tag})</span>}
                   </div>
 
-                  {isEntry ? (
+                  {isPending ? (
                     <div style={{ textAlign: "right" }}>
-                      <div style={{ fontSize: 11, color: "#333", letterSpacing: ".08em" }}>PENDING</div>
-                      <div style={{ fontSize: 20, fontWeight: 800, color: "#d97706" }}>{daily}</div>
+                      <div style={{ fontSize: 11, color: "#333", letterSpacing: ".08em" }}>NOT PRINTED YET</div>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: "#d97706" }}>{pendingCount}</div>
                     </div>
                   ) : (
                     <div style={{ display: "flex", gap: 20, alignItems: "center" }}>
@@ -5566,23 +5764,31 @@ function DeptTotalsPanel({ addToast }) {
                 {isOpen && (
                   <div className="si" style={{ padding: "0 14px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
 
-                    <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                      <button onClick={() => selectToday(r.key)} style={{
-                        padding: "5px 12px", fontSize: 11, fontWeight: 700, borderRadius: 4,
-                        background: !selDate ? "#2ECC71" : "#ddd", color: !selDate ? "#fff" : "#333",
-                      }}>Today</button>
+                    {!isPending && (
+                      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                        <button onClick={() => selectToday(r.key)} style={{
+                          padding: "5px 12px", fontSize: 11, fontWeight: 700, borderRadius: 4,
+                          background: !selDate ? "#2ECC71" : "#ddd", color: !selDate ? "#fff" : "#333",
+                        }}>Today</button>
 
-                      <button onClick={() => openCalendar(r.key)} style={{
-                        padding: "5px 12px", fontSize: 11, fontWeight: 700, borderRadius: 4,
-                        background: selDate ? "#3c24a5" : "#ddd", color: selDate ? "#fff" : "#333",
-                        display: "flex", alignItems: "center", gap: 5,
-                      }}>
-                        <Calendar size={12} />
-                        {selDate ? new Date(selDate + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short" }) : "Pick a day"}
-                      </button>
-                    </div>
+                        <button onClick={() => openCalendar(r.key)} style={{
+                          padding: "5px 12px", fontSize: 11, fontWeight: 700, borderRadius: 4,
+                          background: selDate ? "#3c24a5" : "#ddd", color: selDate ? "#fff" : "#333",
+                          display: "flex", alignItems: "center", gap: 5,
+                        }}>
+                          <Calendar size={12} />
+                          {selDate ? new Date(selDate + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short" }) : "Pick a day"}
+                        </button>
+                      </div>
+                    )}
 
-                    {isCalOpen && (
+                    {isPending && (
+                      <div style={{ fontSize: 11, color: "#555" }}>
+                        Live backlog — jobs entered but printing hasn't started yet (any date).
+                      </div>
+                    )}
+
+                    {!isPending && isCalOpen && (
                       <div style={{ width: "100%", maxWidth: 260 }}>
                         <EntryCalendar
                           year={calYear} month={calMonth}
@@ -5600,7 +5806,7 @@ function DeptTotalsPanel({ addToast }) {
                     {result && result !== "loading" && result !== "error" && (
                       <>
                         <div style={{ fontSize: 11, color: "#555" }}>
-                          {result.total} job{result.total !== 1 ? "s" : ""} {selDate ? `on ${selDate}` : "today"}
+                          {result.total} job{result.total !== 1 ? "s" : ""} {isPending ? "awaiting printing" : (selDate ? `on ${selDate}` : "today")}
                         </div>
                         {result.jobs.length === 0 ? (
                           <div style={{ fontSize: 12, color: "#555", padding: "6px 0" }}>No jobs found.</div>
@@ -7118,6 +7324,7 @@ export default function App() {
        page === "damages"   ? <DamagesPage deptKey={dept} /> :
        page === "papers"    ? <PapersPage /> :
        page === "history"   ? <HistoryPage /> :
+       page === "date-fix"  ? <AdminDateFixPage /> :
        <DashboardPage />}
     </AppearanceProvider>
   );
