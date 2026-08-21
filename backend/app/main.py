@@ -911,54 +911,115 @@ def station_queue(department: str, db: Session = Depends(get_db)):
 def station_history(
     department: str,
     db: Session = Depends(get_db),
-    search: Optional[str] = Query(None, description="job_no / customer / couple_name"),
-    date: Optional[str] = Query(None, description="YYYY-MM-DD, Sri Lanka day. Omit for today."),
+    search: Optional[str] = Query(
+        None,
+        description="job_no / customer / couple_name"
+    ),
+    date: Optional[str] = Query(
+        None,
+        description="YYYY-MM-DD, Sri Lanka day. Omit for today."
+    ),
     page: int = Query(1, ge=1),
     page_size: int = Query(15, ge=1, le=100),
 ):
     dept = department.upper()
 
+    
     if dept == "ENTRY":
         q = db.query(JobCard)
         order_col = JobCard.created_at
+
+    
     else:
         if dept not in DEPT_FIELD:
-            raise HTTPException(400, f"Unknown department: {department}")
-        field = DEPT_FIELD[dept]
-        q = db.query(JobCard).filter(getattr(JobCard, field) == StageStatusEnum.COMPLETED)
-        order_col = JobCard.updated_at
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown department: {department}"
+            )
 
-    # ── Day window: given date, or today if omitted (Sri Lanka calendar day) ──
+        dept_enum = DepartmentEnum[dept]
+
+        q = (
+            db.query(JobCard)
+            .join(
+                DepartmentLog,
+                DepartmentLog.job_id == JobCard.id
+            )
+            .filter(
+                DepartmentLog.department == dept_enum,
+                DepartmentLog.exited_at.isnot(None),
+            )
+        )
+
+        order_col = DepartmentLog.exited_at
+
+    
     if date:
-        day_start = datetime.strptime(date, "%Y-%m-%d") - SL_TZ_OFFSET
-    else:
-        utc_now   = datetime.utcnow()
-        sl_now    = utc_now + SL_TZ_OFFSET
-        day_start = datetime(sl_now.year, sl_now.month, sl_now.day) - SL_TZ_OFFSET
-    day_end = day_start + timedelta(days=1)
-    q = q.filter(order_col >= day_start, order_col < day_end)
+        try:
+            selected_date = datetime.strptime(
+                date,
+                "%Y-%m-%d"
+            )
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid date format. Use YYYY-MM-DD."
+            )
 
+        day_start = selected_date - SL_TZ_OFFSET
+
+    else:
+        utc_now = datetime.utcnow()
+        sl_now = utc_now + SL_TZ_OFFSET
+
+        day_start = (
+            datetime(
+                sl_now.year,
+                sl_now.month,
+                sl_now.day
+            )
+            - SL_TZ_OFFSET
+        )
+
+    day_end = day_start + timedelta(days=1)
+
+    q = q.filter(
+        order_col >= day_start,
+        order_col < day_end
+    )
+
+    
     if search and search.strip():
         term = f"%{search.strip()}%"
-        q = q.filter(or_(
-            JobCard.job_no.ilike(term),
-            JobCard.customer.ilike(term),
-            JobCard.couple_name.ilike(term),
-        ))
 
+        q = q.filter(
+            or_(
+                JobCard.job_no.ilike(term),
+                JobCard.customer.ilike(term),
+                JobCard.couple_name.ilike(term),
+            )
+        )
+
+    
     total = q.count()
+
+    
     jobs = (
         q.order_by(desc(order_col))
-         .offset((page - 1) * page_size)
-         .limit(page_size)
-         .all()
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
     )
+
     return {
         "total": total,
         "page": page,
         "page_size": page_size,
         "pages": max(1, -(-total // page_size)),
-        "jobs": [_out(j, db).model_dump() for j in jobs],
+        "jobs": [
+            _out(job, db).model_dump()
+            for job in jobs
+        ],
     }
 
 @app.get("/api/station/{department}/history/dates-with-entries")
@@ -969,25 +1030,73 @@ def station_history_dates(
     month: int = Query(...),
 ):
     dept = department.upper()
+
+  
     if dept == "ENTRY":
         col = JobCard.created_at
-        q = db.query(col, func.count(JobCard.id))
+
+        q = db.query(
+            col,
+            func.count(JobCard.id).label("cnt")
+        )
+
+    
     else:
         if dept not in DEPT_FIELD:
-            raise HTTPException(400, f"Unknown department: {department}")
-        field = DEPT_FIELD[dept]
-        col = JobCard.updated_at
-        q = db.query(col, func.count(JobCard.id)).filter(getattr(JobCard, field) == StageStatusEnum.COMPLETED)
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown department: {department}"
+            )
 
-    start = datetime(year, month, 1) - SL_TZ_OFFSET
-    end   = (datetime(year + 1, 1, 1) if month == 12 else datetime(year, month + 1, 1)) - SL_TZ_OFFSET
-    rows  = q.filter(col >= start, col < end).group_by(col).all()
+        dept_enum = DepartmentEnum[dept]
 
+        col = DepartmentLog.exited_at
+
+        q = (
+            db.query(
+                col,
+                func.count(DepartmentLog.id).label("cnt")
+            )
+            .filter(
+                DepartmentLog.department == dept_enum,
+                DepartmentLog.exited_at.isnot(None),
+            )
+        )
+
+   
+    start = (
+        datetime(year, month, 1)
+        - SL_TZ_OFFSET
+    )
+
+    if month == 12:
+        next_month = datetime(year + 1, 1, 1)
+    else:
+        next_month = datetime(year, month + 1, 1)
+
+    end = next_month - SL_TZ_OFFSET
+
+   
+    rows = (
+        q.filter(
+            col >= start,
+            col < end
+        )
+        .group_by(col)
+        .all()
+    )
+
+    
     day_counts: dict[str, int] = {}
+
     for dt, cnt in rows:
         lk_date = dt + SL_TZ_OFFSET
         day_key = str(lk_date.day)
-        day_counts[day_key] = day_counts.get(day_key, 0) + cnt
+
+        day_counts[day_key] = (
+            day_counts.get(day_key, 0) + cnt
+        )
+
     return day_counts
 
 @app.get("/api/stats", response_model=StatsOut)

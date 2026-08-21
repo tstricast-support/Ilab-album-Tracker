@@ -3992,9 +3992,35 @@ function BoxPouchEditModal({ job, onClose, onSaved, addToast }) {
   );
 }
 
-// ── Daily 5PM Damage-Reporting Reminder (Station pages only) ────────────────
-const DAMAGE_ALERT_DEPTS = ["PRINTING", "LAMINATING", "LASER_CUTTING", "BINDING"];
-const SL_OFFSET_MS = (5 * 60 + 30) * 60000;
+// ── Daily 5:00 PM Sri Lanka Damage-Reporting Reminder ────────────────
+const DAMAGE_ALERT_DEPTS = [
+  "PRINTING",
+  "LAMINATING",
+  "LASER_CUTTING",
+  "BINDING",
+];
+
+const DAMAGE_ALERT_STORAGE_PREFIX = "ilab-damage-alert-shown:";
+
+function getSriLankaDateTime() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Colombo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  })
+    .formatToParts(new Date())
+    .reduce((obj, part) => {
+      if (part.type !== "literal") {
+        obj[part.type] = part.value;
+      }
+      return obj;
+    }, {});
+}
 
 function DamageTimeAlertModal() {
   const [show, setShow] = useState(false);
@@ -4003,84 +4029,172 @@ function DamageTimeAlertModal() {
   useEffect(() => {
     if (!DAMAGE_ALERT_DEPTS.includes(ROLE)) return;
 
-    function check() {
-      const slNow = new Date(Date.now() + SL_OFFSET_MS);
-      const todayKey = slNow.toISOString().slice(0, 10); // YYYY-MM-DD (SL day)
-      const storageKey = `ilab-damage-alert-shown:${ROLE}`;
+    const storageKey = `${DAMAGE_ALERT_STORAGE_PREFIX}${ROLE}`;
+
+    function checkDamageAlert() {
+      const sl = getSriLankaDateTime();
+
+      const todayKey = `${sl.year}-${sl.month}-${sl.day}`;
       const lastShown = localStorage.getItem(storageKey);
 
-      if (slNow.getHours() === 17 && lastShown !== todayKey) {
+      const hour = Number(sl.hour);
+      const minute = Number(sl.minute);
+
+      // Sri Lanka time: exactly during 5:00 PM minute
+      const isExactly5PM =
+        hour === 17 &&
+        minute === 0;
+
+      if (isExactly5PM && lastShown !== todayKey) {
+        console.log("🚨 5:00 PM DAMAGE ALERT");
+
+        // Save immediately so this browser/device
+        // cannot trigger the alert again today.
+        localStorage.setItem(storageKey, todayKey);
+
         setShow(true);
       }
     }
 
-    check();
-    const t = setInterval(check, 30000); // re-check every 30s
-    return () => clearInterval(t);
+    checkDamageAlert();
+
+    // Check every second so the 5:00 PM minute is not missed.
+    const timer = setInterval(checkDamageAlert, 1000);
+
+    return () => clearInterval(timer);
   }, []);
 
   function dismiss() {
-    const slNow = new Date(Date.now() + SL_OFFSET_MS);
-    const todayKey = slNow.toISOString().slice(0, 10);
-    localStorage.setItem(`ilab-damage-alert-shown:${ROLE}`, todayKey);
     setShow(false);
   }
 
   if (!show) return null;
 
   return (
-    <div style={{
-      position: "fixed", inset: 0, background: "rgba(0,0,0,.75)",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      zIndex: 99999, padding: 16,
-    }}>
-      <div style={{
-        background: "var(--bg1)", border: "2px solid var(--red)",
-        borderRadius: 14, padding: isMobile ? 22 : 30,
-        width: "100%", maxWidth: 440,
-        boxShadow: "0 12px 50px rgba(0,0,0,.6)",
-        display: "flex", flexDirection: "column", gap: 16, textAlign: "center",
-      }}>
-
-        <div style={{
-          fontSize: 11, color: "var(--red)", fontWeight: 800,
-          textTransform: "uppercase", letterSpacing: ".12em",
-        }}>
-          Damage Reporting Time         </div>
-
-        <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-pri)", lineHeight: 1.6 }}>
-          දැන් තමයි ඔබගේ <b style={{ color: "var(--amber)" }}>Damages</b> (හානි) පෙන්විය යුතු වේලාව.
-          <br />ඒ සඳහා කරුණාකර ඔබගේ කළමනාකාරීවරයා හමුවන්න.
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,.75)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 99999,
+        padding: 16,
+      }}
+    >
+      <div
+        style={{
+          background: "var(--bg1)",
+          border: "2px solid var(--red)",
+          borderRadius: 14,
+          padding: isMobile ? 22 : 30,
+          width: "100%",
+          maxWidth: 440,
+          boxShadow: "0 12px 50px rgba(0,0,0,.6)",
+          display: "flex",
+          flexDirection: "column",
+          gap: 16,
+          textAlign: "center",
+        }}
+      >
+        {/* Title */}
+        <div
+          style={{
+            fontSize: 11,
+            color: "var(--red)",
+            fontWeight: 800,
+            textTransform: "uppercase",
+            letterSpacing: ".12em",
+          }}
+        >
+          Damage Reporting Time
         </div>
 
-        <div style={{ fontSize: 13, color: "var(--text-sec)", lineHeight: 1.6, borderTop: "1px solid var(--border)", paddingTop: 12 }}>
-          It is now time to report your damages for today.
-          <br />Please meet your manager to hand this over.
+        {/* Sinhala Message */}
+        <div
+          style={{
+            fontSize: 16,
+            fontWeight: 700,
+            color: "var(--text-pri)",
+            lineHeight: 1.6,
+          }}
+        >
+          අද දින සිදුවූ{" "}
+          <b style={{ color: "var(--amber)" }}>Damage</b>{" "}
+          පිළිබඳ වාර්තා ඉදිරිපත් කිරීම සඳහා නියමිත වේලාව දැන් එළඹ ඇත.
+          <br />
+          කරුණාකර ඔබ විසින් සිදුවූ සියලුම හානි පිළිබඳව
+          <br />
+          ඔබගේ කළමනාකාරීවරයා වෙත වාර්තා කරන්න.
         </div>
 
-        <div style={{
-          background: "var(--bg3)", border: "1px solid var(--border)",
-          borderRadius: 8, padding: "12px 16px",
-        }}>
-          <div style={{ fontSize: 12, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 4 }}>
+        {/* English Message */}
+        <div
+          style={{
+            fontSize: 13,
+            color: "var(--text-sec)",
+            lineHeight: 1.6,
+            borderTop: "1px solid var(--border)",
+            paddingTop: 12,
+          }}
+        >
+          The designated time for reporting today's damages has now arrived.
+          <br />
+          Please report all damages that occurred today to your manager.
+        </div>
+
+        {/* Contact */}
+        <div
+          style={{
+            background: "var(--bg3)",
+            border: "1px solid var(--border)",
+            borderRadius: 8,
+            padding: "12px 16px",
+          }}
+        >
+          <div
+            style={{
+              fontSize: 12,
+              color: "var(--text-dim)",
+              textTransform: "uppercase",
+              letterSpacing: ".08em",
+              marginBottom: 4,
+            }}
+          >
             Contact
           </div>
-          <div style={{ fontSize: 17, fontWeight: 800, color: "var(--amber)" }}>
-            Mr. Suresh — 071 032 1032
+
+          <div
+            style={{
+              fontSize: 17,
+              fontWeight: 800,
+              color: "var(--amber)",
+            }}
+          >
+            Mr. Suresh - 071 032 1032
           </div>
         </div>
 
-        <button onClick={dismiss} style={{
-          padding: "13px 0", background: "var(--amber)", color: "#000",
-          borderRadius: 8, fontWeight: 800, fontSize: 15, marginTop: 4,
-        }}>
+        {/* OK Button */}
+        <button
+          onClick={dismiss}
+          style={{
+            padding: "13px 0",
+            background: "var(--amber)",
+            color: "#000",
+            borderRadius: 8,
+            fontWeight: 800,
+            fontSize: 15,
+            marginTop: 4,
+          }}
+        >
           OK
         </button>
       </div>
     </div>
   );
 }
-
 
 function StationPage({ deptKey }) {
   const cfg = STATION_CFG[deptKey];
