@@ -140,9 +140,10 @@ class PaperUsageEntryOut(BaseModel):
 
 class ThankYouCardOut(BaseModel):
     id: int
+    job_no:Optional[str] = None
     customer: str
     couple_name: Optional[str] = None
-    machine: str                     # ← ADD
+    machine: str                     
     size: str
     quantity: int
     price: int

@@ -516,6 +516,7 @@ function ThankYouCardModal({ onClose }) {
 }
 
 function ThankYouCardForm({ onClose }) {
+  const [jobNo, setJobNo] = useState("");
   const [customer, setCustomer]       = useState("");
   const [knownNames, setKnownNames]   = useState([]);
   const [showNewName, setShowNewName] = useState(false);
@@ -554,6 +555,7 @@ function ThankYouCardForm({ onClose }) {
         quantity: qtyNum,
         price: priceNum,
         date: selectedDate,
+        job_no: jobNo.trim() || undefined,
       });
       setSuccess(true);
       setTimeout(onClose, 1100);
@@ -563,6 +565,10 @@ function ThankYouCardForm({ onClose }) {
 
   return (
     <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div>
+        <label>Job No <span style={{ color: "var(--text-dim)", fontWeight: 400 }}>(optional)</span></label>
+        <input value={jobNo} onChange={e => setJobNo(e.target.value)} placeholder="e.g. JOB-0012" />
+      </div>
       <div>
         <label>Photographer / Studio *</label>
         {knownNames.length > 0 && !showNewName ? (
@@ -702,7 +708,9 @@ function ThankYouCardHistory() {
         {data?.cards?.map(c => (
           <div key={c.id} style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 6, padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-pri)" }}>{c.customer}</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-pri)" }}>
+                {c.job_no && <span style={{ color: "var(--amber)", marginRight: 6 }}>{c.job_no}</span>}
+                {c.customer}</div>
               {c.couple_name && <div style={{ fontSize: 11, color: "var(--text-sec)" }}>{c.couple_name}</div>}
               <div style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 2 }}>
                 {machineLabel[c.machine] || c.machine} · {c.size} · × {c.quantity}
@@ -1885,7 +1893,9 @@ function Shell({ title, accent = "var(--amber)", topRight, children }) {
       }}>
         <Download size={14} />
       </button>
-        {!IS_ADMIN && <ThankYouCardButton isMobile={isMobile} />}
+        {ROLE === "PRINTING" && !IS_ADMIN && (
+         <ThankYouCardButton isMobile={isMobile} />
+      )}
         <AppearanceButton isMobile={isMobile} />
         {topRight}        
             </div>

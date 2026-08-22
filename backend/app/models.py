@@ -323,6 +323,7 @@ class ThankYouCard(Base):
     __tablename__ = "thankyou_cards"
 
     id            = Column(Integer, primary_key=True, autoincrement=True)
+    job_no        = Column(String(64),  nullable=True)
     customer      = Column(String(256), nullable=False)
     couple_name   = Column(String(256), nullable=True)
     machine       = Column(String(32),  nullable=False)   # GREEN_2 / GREEN_3 / GREEN_3_NEW
@@ -383,6 +384,10 @@ def run_migration():
         if tyc_cols and "machine" not in tyc_cols:
             with engine.connect() as conn:
                 conn.execute(text("ALTER TABLE thankyou_cards ADD COLUMN machine VARCHAR(32)"))
+                conn.commit()
+        if tyc_cols and "job_no" not in tyc_cols:            
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE thankyou_cards ADD COLUMN job_no VARCHAR(64)"))
                 conn.commit()
 
         return
@@ -461,6 +466,10 @@ def run_migration():
         conn.execute(text("""
             ALTER TABLE thankyou_cards
             ADD COLUMN IF NOT EXISTS machine VARCHAR(32);
+        """))
+        conn.execute(text("""
+            ALTER TABLE thankyou_cards
+            ADD COLUMN IF NOT EXISTS job_no VARCHAR(64);
         """))
 
         conn.commit()

@@ -2030,6 +2030,7 @@ class ThankYouCardCreate(BaseModel):
     quantity: int = 1
     price: int
     date: Optional[str] = None
+    job_no: Optional[str] = None
 
 
 TYC_MACHINES = ("GREEN_2", "GREEN_3", "GREEN_3_NEW")   # Epson excluded on purpose
@@ -2049,6 +2050,12 @@ def create_thankyou_card(payload: ThankYouCardCreate, db: Session = Depends(get_
     if payload.price < 0:
         raise HTTPException(400, "Price cannot be negative")
 
+    job_no = (payload.job_no or "").strip().upper() or None
+    if job_no:
+        dup = db.query(ThankYouCard).filter(ThankYouCard.job_no == job_no).first()
+        if dup:
+            raise HTTPException(409, f"Job No '{job_no}' is already used on a thank-you card entry.")
+
     if payload.date:
         try:
             y, m, d = map(int, payload.date.split("-"))
@@ -2063,7 +2070,8 @@ def create_thankyou_card(payload: ThankYouCardCreate, db: Session = Depends(get_
     entry = ThankYouCard(
         customer=payload.customer.strip().title(),
         couple_name=(payload.couple_name or "").strip() or None,
-        machine=machine,                          # ← ADD
+        machine=machine,
+        job_no=job_no,                 
         size=payload.size.strip(),
         quantity=payload.quantity,
         price=payload.price,
