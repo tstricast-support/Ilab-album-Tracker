@@ -95,6 +95,8 @@ const api = {
   deletePaperUsage: (id) => apiFetch(`/api/paper-usage/${id}`, { method: "DELETE" }),
   knownPaperOperators: () => apiFetch(`/api/paper-usage/known-operators`),
   createThankYouCard: (body) => apiFetch(`/api/thankyou-cards`, { method: "POST", body: JSON.stringify(body) }),
+  updateThankYouCard: (id, body) => apiFetch(`/api/thankyou-cards/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteThankYouCard: (id) => apiFetch(`/api/thankyou-cards/${id}`, { method: "DELETE" }),
   thankYouCards: (machine = "", date = "", page = 1) =>
     apiFetch(`/api/thankyou-cards?${machine ? `machine=${machine}&` : ""}${date ? `date=${date}&` : ""}page=${page}&page_size=15`),
   thankYouCardDates: (year, month, machine = "") =>
@@ -478,6 +480,243 @@ function AppearanceButton({ isMobile }) {
   );
 }
 
+// ── Professional preview modal ──────────────────────────────────────
+function ThankYouCardViewModal({ card, onClose }) {
+  const isMobile = useIsMobile();
+  const machineLabel = { GREEN_2: "Green II", GREEN_3: "Green III", GREEN_3_NEW: "Green IV" };
+  const createdDate = parseUTC(card.created_at);
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "var(--overlay)",
+      display: "flex", alignItems: isMobile ? "flex-end" : "center", justifyContent: "center",
+      zIndex: 9600, padding: isMobile ? 0 : 16,
+    }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{
+        width: "100%", maxWidth: 460,
+        background: "var(--card-bg)",
+        border: "4px solid var(--amber)",
+        borderRadius: isMobile ? "16px 16px 0 0" : 12,
+        maxHeight: isMobile ? "92dvh" : "88vh", overflowY: "auto",
+      }}>
+        <div style={{ padding: "18px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".12em", marginBottom: 4 }}>
+                <Gift size={12} style={{ marginRight: 5, verticalAlign: -1 }} />Thank You Card
+              </div>
+              {card.job_no && (
+                <div style={{ fontFamily: "var(--fm)", fontSize: 20, color: "var(--amber)", fontWeight: 800, letterSpacing: ".04em" }}>
+                  {card.job_no}
+                </div>
+              )}
+              <div style={{ fontSize: 17, fontWeight: 700, color: "var(--text-pri)", marginTop: card.job_no ? 2 : 0 }}>
+                {card.customer}
+              </div>
+              {card.couple_name && <div style={{ fontSize: 13, color: "var(--text-sec)", marginTop: 2 }}>{card.couple_name}</div>}
+            </div>
+            <button onClick={onClose} style={{ padding: "6px 10px", background: "var(--bg3)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 6, flexShrink: 0 }}>✕</button>
+          </div>
+
+          <div style={{ height: 1, background: "var(--border)" }} />
+
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            <Chip label="Machine"  value={machineLabel[card.machine] || card.machine} accent="#3b82f6" />
+            <Chip label="Size"     value={card.size}      accent="#a855f7" />
+            <Chip label="Quantity" value={`× ${card.quantity}`} accent="#06b6d4" />
+          </div>
+
+          <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
+            <div style={{
+              padding: "8px 14px", background: "var(--bg3)", borderBottom: "1px solid var(--border)",
+              fontSize: 11, fontWeight: 800, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--text-sec)",
+            }}>Price Breakdown</div>
+            <div style={{ padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+                <span style={{ color: "var(--text-sec)" }}>Unit Price</span>
+                <span style={{ fontWeight: 700, color: "var(--text-pri)" }}>Rs. {card.price}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+                <span style={{ color: "var(--text-sec)" }}>Quantity</span>
+                <span style={{ fontWeight: 700, color: "var(--text-pri)" }}>× {card.quantity}</span>
+              </div>
+              <div style={{ height: 1, background: "var(--border)", margin: "2px 0" }} />
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: "var(--text-pri)" }}>Total</span>
+                <span style={{ fontFamily: "var(--fm)", fontSize: 21, fontWeight: 900, color: "var(--amber)" }}>Rs. {card.total_price}</span>
+              </div>
+            </div>
+          </div>
+
+          <div style={{
+            display: "flex", justifyContent: "space-between", alignItems: "center",
+            background: "var(--bg3)", borderRadius: 6, padding: "10px 14px",
+          }}>
+            <span style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".08em" }}>Date Recorded</span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-pri)" }}>
+              {createdDate?.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
+              {" · "}
+              {createdDate?.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Edit modal ───────────────────────────────────────────────────────
+function ThankYouCardEditModal({ card, onClose, onSaved, addToast }) {
+  const isMobile = useIsMobile();
+  const [jobNo, setJobNo]         = useState(card.job_no || "");
+  const [customer, setCustomer]   = useState(card.customer);
+  const [coupleName, setCoupleName] = useState(card.couple_name || "");
+  const [machine, setMachine]     = useState(card.machine);
+  const [size, setSize]           = useState(card.size);
+  const [quantity, setQuantity]   = useState(String(card.quantity));
+  const [price, setPrice]         = useState(String(card.price));
+  const [saving, setSaving]       = useState(false);
+  const [error, setError]         = useState("");
+
+  const qtyNum   = Number(quantity) || 0;
+  const priceNum = Number(price) || 0;
+
+  async function save() {
+    if (!customer.trim() || !machine || !size || qtyNum <= 0 || !price) return;
+    setSaving(true); setError("");
+    try {
+      await api.updateThankYouCard(card.id, {
+        job_no: jobNo.trim() || null,
+        customer: customer.trim(),
+        couple_name: coupleName.trim() || null,
+        machine, size: size.trim(),
+        quantity: qtyNum, price: priceNum,
+      });
+      addToast?.("✓ Thank you card updated.", "success");
+      onSaved?.(); onClose();
+    } catch (err) { setError(err.message); addToast?.(err.message, "error"); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "var(--overlay)", display: "flex", alignItems: isMobile ? "flex-end" : "center", justifyContent: "center", zIndex: 9700 }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: "var(--bg1)", border: "1px solid var(--border)",
+        borderRadius: isMobile ? "16px 16px 0 0" : 12, padding: 24,
+        width: "100%", maxWidth: 480, maxHeight: isMobile ? "92dvh" : "90vh", overflowY: "auto",
+        display: "flex", flexDirection: "column", gap: 14,
+      }}>
+        <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".1em" }}>Edit Thank You Card</div>
+
+        <div>
+          <label>Job No <span style={{ color: "var(--text-dim)", fontWeight: 400 }}>(optional)</span></label>
+          <input value={jobNo} onChange={e => setJobNo(e.target.value)} placeholder="e.g. JOB-0012" />
+        </div>
+        <div><label>Photographer / Studio *</label><input value={customer} onChange={e => setCustomer(e.target.value)} /></div>
+        <div><label>Couple Name</label><input value={coupleName} onChange={e => setCoupleName(e.target.value)} placeholder="Optional" /></div>
+        <div>
+          <label>Machine *</label>
+          <select value={machine} onChange={e => setMachine(e.target.value)}>
+            {TYC_MACHINES_UI.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+          </select>
+        </div>
+        <div className="r-grid-3">
+          <div><label>Size *</label>
+            <select value={size} onChange={e => setSize(e.target.value)}>
+              {THANK_U_CARDS_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <div><label>Quantity *</label><input type="number" min="1" value={quantity} onChange={e => setQuantity(e.target.value)} /></div>
+          <div><label>Unit Price (Rs.) *</label><input type="number" min="0" value={price} onChange={e => setPrice(e.target.value)} /></div>
+        </div>
+
+        {qtyNum > 0 && priceNum > 0 && (
+          <div style={{ background: "#807a7a", border: "1px solid var(--border)", borderRadius: 6, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ fontSize: 12, color: "var(--text-pri)", textTransform: "uppercase", letterSpacing: ".06em", fontWeight: 700 }}>Total Price</span>
+            <span style={{ fontFamily: "var(--fm)", fontSize: 18, fontWeight: 900, color: "var(--text-pri)" }}>Rs. {qtyNum * priceNum}</span>
+          </div>
+        )}
+
+        {error && <div style={{ fontSize: 12, color: "var(--red)" }}>⚠ {error}</div>}
+
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={save} disabled={saving} style={{ flex: 1, padding: "12px 0", background: "var(--amber)", color: "#000", borderRadius: 8, fontWeight: 800, fontSize: 15 }}>
+            {saving ? "Saving…" : "✓ Save Changes"}
+          </button>
+          <button onClick={onClose} style={{ padding: "12px 18px", background: "var(--bg3)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 8, fontWeight: 700 }}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Row: click to preview, edit/delete within 24h ───────────────────
+function ThankYouCardRow({ card, onChanged, addToast }) {
+  const [viewing, setViewing] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
+
+  function createdMs() {
+    const s = card.created_at;
+    return new Date(s.endsWith("Z") ? s : s + "Z").getTime();
+  }
+  const WINDOW_MS = 24 * 3600 * 1000;
+  const remaining = WINDOW_MS - (now - createdMs());
+  const withinWindow = remaining > 0;
+
+  async function del(e) {
+    e.stopPropagation();
+    if (!window.confirm(`Delete this thank you card for ${card.customer} (× ${card.quantity})?`)) return;
+    try {
+      await api.deleteThankYouCard(card.id);
+      addToast?.("Thank you card deleted.", "info");
+      onChanged();
+    } catch (err) { addToast?.(err.message, "error"); }
+  }
+
+  function fmtRemaining() {
+    const h = Math.floor(remaining / 3600000);
+    const m = Math.floor((remaining % 3600000) / 60000);
+    return `${h}h ${m}m left to edit`;
+  }
+
+  const machineLabel = { GREEN_2: "Green II", GREEN_3: "Green III", GREEN_3_NEW: "Green IV" };
+
+  return (
+    <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}>
+      <button onClick={() => setViewing(true)} style={{
+        width: "100%", padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, textAlign: "left", background: "transparent",
+      }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-pri)" }}>
+            {card.job_no && <span style={{ color: "var(--amber)", marginRight: 6 }}>{card.job_no}</span>}
+            {card.customer}
+          </div>
+          {card.couple_name && <div style={{ fontSize: 11, color: "var(--text-sec)" }}>{card.couple_name}</div>}
+          <div style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 2 }}>
+            {machineLabel[card.machine] || card.machine} · {card.size} · × {card.quantity}
+          </div>
+        </div>
+        <div style={{ fontFamily: "var(--fm)", fontWeight: 800, color: "var(--amber)", flexShrink: 0 }}>Rs. {card.total_price}</div>
+      </button>
+
+      {withinWindow && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "0 10px 8px" }}>
+          <span style={{ fontSize: 11, color: "var(--text-dim)" }}>{fmtRemaining()}</span>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button onClick={(e) => { e.stopPropagation(); setEditing(true); }} style={{ padding: "4px 10px", fontSize: 11, fontWeight: 700, borderRadius: 5, background: "var(--bg3)", color: "var(--amber)", border: "1px solid var(--amber)" }}><Pen size={11} /></button>
+            <button onClick={del} style={{ padding: "4px 10px", fontSize: 11, fontWeight: 700, borderRadius: 5, background: "var(--danger-bg)", color: "var(--red)", border: "1px solid var(--red)" }}><Trash size={11} /></button>
+          </div>
+        </div>
+      )}
+
+      {viewing && <ThankYouCardViewModal card={card} onClose={() => setViewing(false)} />}
+      {editing && <ThankYouCardEditModal card={card} onClose={() => setEditing(false)} onSaved={onChanged} addToast={addToast} />}
+    </div>
+  );
+}
+
 const TYC_MACHINES_UI = [
   { value: "GREEN_2",     label: "Green II" },
   { value: "GREEN_3",     label: "Green III" },
@@ -653,6 +892,7 @@ function ThankYouCardForm({ onClose }) {
 }
 
 function ThankYouCardHistory() {
+  const { toasts, add } = useToast();
   const [machine, setMachine]         = useState("");
   const [selectedDate, setSelectedDate] = useState(() => slDateStr(new Date()));
   const [calYear, setCalYear]         = useState(new Date().getFullYear());
@@ -668,14 +908,14 @@ function ThankYouCardHistory() {
 
   useEffect(() => { setPage(1); }, [selectedDate, machine]);
 
-  useEffect(() => {
+  const reload = useCallback(() => {
     setLoading(true);
     api.thankYouCards(machine, selectedDate, page)
       .then(d => { setData(d); setLoading(false); })
       .catch(() => setLoading(false));
   }, [machine, selectedDate, page]);
 
-  const machineLabel = { GREEN_2: "Green II", GREEN_3: "Green III", GREEN_3_NEW: "Green IV" };
+  useEffect(() => { reload(); }, [reload]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -706,18 +946,7 @@ function ThankYouCardHistory() {
       )}
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {data?.cards?.map(c => (
-          <div key={c.id} style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 6, padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-pri)" }}>
-                {c.job_no && <span style={{ color: "var(--amber)", marginRight: 6 }}>{c.job_no}</span>}
-                {c.customer}</div>
-              {c.couple_name && <div style={{ fontSize: 11, color: "var(--text-sec)" }}>{c.couple_name}</div>}
-              <div style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 2 }}>
-                {machineLabel[c.machine] || c.machine} · {c.size} · × {c.quantity}
-              </div>
-            </div>
-            <div style={{ fontFamily: "var(--fm)", fontWeight: 800, color: "var(--amber)", flexShrink: 0 }}>Rs. {c.total_price}</div>
-          </div>
+          <ThankYouCardRow key={c.id} card={c} onChanged={reload} addToast={add} />
         ))}
       </div>
       {data && data.pages > 1 && (
@@ -727,6 +956,7 @@ function ThankYouCardHistory() {
           <button onClick={() => setPage(p => Math.min(data.pages, p + 1))} disabled={page === data.pages} style={{ padding: "5px 10px", background: "var(--bg2)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 4, fontSize: 12, fontWeight: 700 }}>▶</button>
         </div>
       )}
+      <ToastStack toasts={toasts} />
     </div>
   );
 }
@@ -6946,8 +7176,8 @@ function calNav(machine, at, y, m) {
   const at = "THANKYOU";
   const albumKey = `${m.key}-${at}`;
   const isAOpen  = expandedAlbum === albumKey;
-  const d        = tycData?.daily?.[m.key]?.quantity   || 0;
-  const mo       = tycData?.monthly?.[m.key]?.quantity || 0;
+  const d        = tycData?.daily?.[m.key]?.entries   || 0;
+  const mo       = tycData?.monthly?.[m.key]?.entries || 0;
   const selDate  = dateByAlbum[albumKey] ?? null;
   const page     = pageByAlbum[albumKey] ?? 1;
   const result   = jobsCache[cacheKeyFor(m.key, at, selDate, page)];
@@ -6955,18 +7185,18 @@ function calNav(machine, at, y, m) {
   const jobList = result && result !== "loading" && result !== "error" ? (result.jobs || result.cards || []) : [];
 
   return (
-    <div key="THANKYOU" style={{ background: "#fff7e6", border: "1px solid #e0c080", borderRadius: 6, overflow: "hidden" }}>
+    <div key="THANKYOU" style={{ background: "#f2f2f2", border: "1px solid #ddd", borderRadius: 6, overflow: "hidden" }}>
       <button onClick={() => openAlbum(albumKey, m.key, at)} style={{
         width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
         padding: "10px 14px", background: "transparent", textAlign: "left", flexWrap: "wrap", gap: 8,
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <ChevronDown size={13} style={{ color: "#7a4e00", transition: "transform .2s ease", transform: isAOpen ? "rotate(180deg)" : "rotate(0deg)" }} />
-          <span style={{ fontSize: 13, fontWeight: 700, color: "#7a4e00" }}>Thank You Cards</span>
+          <span style={{ fontSize: 13, fontWeight: 700, color: "#020202" }}>Thank You Cards</span>
         </div>
         <div style={{ display: "flex", gap: 16 }}>
-          <div style={{ textAlign: "right" }}><div style={{ fontSize: 9, color: "#7a4e00", letterSpacing: ".1em" }}>TODAY</div><div style={{ fontSize: 15, fontWeight: 800, color: "#3c24a5" }}>{d}</div></div>
-          <div style={{ textAlign: "right" }}><div style={{ fontSize: 9, color: "#7a4e00", letterSpacing: ".1em" }}>MONTHLY</div><div style={{ fontSize: 15, fontWeight: 800, color: "#2ECC71" }}>{mo}</div></div>
+          <div style={{ textAlign: "right" }}><div style={{ fontSize: 9, color: "#060606", letterSpacing: ".1em" }}>TODAY</div><div style={{ fontSize: 15, fontWeight: 800, color: "#3c24a5" }}>{d}</div></div>
+          <div style={{ textAlign: "right" }}><div style={{ fontSize: 9, color: "#040403", letterSpacing: ".1em" }}>MONTHLY</div><div style={{ fontSize: 15, fontWeight: 800, color: "#2ECC71" }}>{mo}</div></div>
         </div>
       </button>
 
@@ -6990,7 +7220,7 @@ function calNav(machine, at, y, m) {
           {result === "error"   && <div style={{ fontSize: 12, color: "#b91c1c", padding: "6px 0" }}>Failed to load.</div>}
           {result && result !== "loading" && result !== "error" && (
             <>
-              <div style={{ fontSize: 11, color: "#7a4e00" }}>{result.total} card{result.total !== 1 ? "s" : ""} {selDate ? `on ${selDate}` : "this month"}</div>
+              <div style={{ fontSize: 20, color: "#3c24a5" }}>{result.total} card{result.total !== 1 ? "s" : ""} {selDate ? `on ${selDate}` : "this month"}</div>
               {jobList.length === 0 ? (
                 <div style={{ fontSize: 12, color: "#555", padding: "6px 0" }}>No thank you cards found.</div>
               ) : (

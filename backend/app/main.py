@@ -2114,6 +2114,89 @@ def list_thankyou_cards(
         "cards": [ThankYouCardOut.model_validate(r).model_dump() for r in rows],
     }
 
+class ThankYouCardUpdate(BaseModel):
+    job_no: Optional[str] = None
+    customer: Optional[str] = None
+    couple_name: Optional[str] = None
+    machine: Optional[str] = None
+    size: Optional[str] = None
+    quantity: Optional[int] = None
+    price: Optional[int] = None
+
+
+TYC_EDIT_WINDOW_HOURS = 24
+
+
+def _tyc_check_editable(entry: ThankYouCard):
+    if (datetime.utcnow() - entry.created_at) > timedelta(hours=TYC_EDIT_WINDOW_HOURS):  #type:ignore
+        raise HTTPException(403, "Edit window has expired. This entry can no longer be changed.")
+
+
+def _tyc_or_404(card_id: int, db: Session) -> ThankYouCard:
+    entry = db.query(ThankYouCard).filter(ThankYouCard.id == card_id).first()
+    if not entry:
+        raise HTTPException(404, f"Thank you card {card_id} not found")
+    return entry
+
+
+@app.patch("/api/thankyou-cards/{card_id}", response_model=ThankYouCardOut)
+def update_thankyou_card(card_id: int, payload: ThankYouCardUpdate, db: Session = Depends(get_db)):
+    entry = _tyc_or_404(card_id, db)
+    _tyc_check_editable(entry)
+
+    if payload.job_no is not None:
+        new_job_no = payload.job_no.strip().upper() or None
+        if new_job_no and new_job_no != entry.job_no:
+            dup = db.query(ThankYouCard).filter(
+                ThankYouCard.job_no == new_job_no,
+                ThankYouCard.id != card_id,
+            ).first()
+            if dup:
+                raise HTTPException(409, f"Job No '{new_job_no}' is already used on another thank-you card entry.")
+        entry.job_no = new_job_no  #type:ignore
+
+    if payload.customer is not None:
+        if not payload.customer.strip():
+            raise HTTPException(400, "Photographer / Studio name cannot be empty")
+        entry.customer = payload.customer.strip().title()  #type:ignore
+
+    if payload.couple_name is not None:
+        entry.couple_name = payload.couple_name.strip() or None  #type:ignore
+
+    if payload.machine is not None:
+        machine = payload.machine.strip().upper()
+        if machine not in TYC_MACHINES:
+            raise HTTPException(400, f"machine must be one of {TYC_MACHINES}")
+        entry.machine = machine  #type:ignore
+
+    if payload.size is not None:
+        if not payload.size.strip():
+            raise HTTPException(400, "Size cannot be empty")
+        entry.size = payload.size.strip()  #type:ignore
+
+    if payload.quantity is not None:
+        if payload.quantity <= 0:
+            raise HTTPException(400, "Quantity must be greater than 0")
+        entry.quantity = payload.quantity  #type:ignore
+
+    if payload.price is not None:
+        if payload.price < 0:
+            raise HTTPException(400, "Price cannot be negative")
+        entry.price = payload.price  #type:ignore
+
+    entry.total_price = entry.quantity * entry.price  #type:ignore
+    entry.updated_at = datetime.utcnow()  #type:ignore
+    db.commit()
+    db.refresh(entry)
+    return entry
+
+
+@app.delete("/api/thankyou-cards/{card_id}", status_code=204)
+def delete_thankyou_card(card_id: int, db: Session = Depends(get_db)):
+    entry = _tyc_or_404(card_id, db)
+    _tyc_check_editable(entry)
+    db.delete(entry)
+    db.commit()
 
 @app.get("/api/thankyou-cards/dates-with-entries")
 def thankyou_dates_with_entries(
