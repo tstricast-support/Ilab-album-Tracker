@@ -40,6 +40,7 @@ export const ALBUM_TYPES = [
 ];
 
 export const PAPER_SIZES = ["9x13", "10x16", "12x16", "13x16", "13x19"];
+export const THANK_U_CARDS_SIZES =["4 x 6", "4 x 8", "4 x 10","5 x 7", "5 x 8", "6 x 8","6 x 9"]
 export const LOW_STOCK_THRESHOLD = 5;
 
 

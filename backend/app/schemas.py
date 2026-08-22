@@ -12,6 +12,7 @@ from .models import (
     DepartmentLog,
     JobCard,
     TIMEOUT_MINUTES,
+    ThankYouCard
 )
 
 
@@ -135,7 +136,21 @@ class PaperUsageEntryOut(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    model_config = {"from_attributes": True}    
+    model_config = {"from_attributes": True} 
+
+class ThankYouCardOut(BaseModel):
+    id: int
+    customer: str
+    couple_name: Optional[str] = None
+    machine: str                     # ← ADD
+    size: str
+    quantity: int
+    price: int
+    total_price: int
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
 # ── Helpers ─────────────────────────────────────────
 
 def _str(val) -> str:

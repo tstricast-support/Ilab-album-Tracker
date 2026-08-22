@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef,createContext, useContext } from "react";
-import { API_BASE, POLL_INTERVAL_MS, APP_NAME,MACHINES,ALBUM_TYPES,DAMAGE_DEPTS, PAPER_SIZES, LOW_STOCK_THRESHOLD,CORRECTABLE_DEPTS} from "./config.js";
-import {ArrowRight, Calendar,Pen,SquareX, Trash,Printer,TriangleAlert,Flame,Activity, Speech, Scissors,BookOpen,Plus, Timer,ChevronDown ,Search,Palette,Check,ArrowUp,Download}from "lucide-react";
+import { API_BASE, POLL_INTERVAL_MS, APP_NAME,MACHINES,ALBUM_TYPES,DAMAGE_DEPTS, PAPER_SIZES, LOW_STOCK_THRESHOLD,CORRECTABLE_DEPTS,THANK_U_CARDS_SIZES} from "./config.js";
+import {ArrowRight, Calendar,Pen,SquareX, Trash,Printer,TriangleAlert,Flame,Activity, Speech, Scissors,BookOpen,Plus, Timer,ChevronDown ,Search,Palette,Check,ArrowUp,Download,Gift}from "lucide-react";
 import logo from "./assets/logo.jpg";
 import trackQR from "./assets/track-qr.png";
 import "./index.css";
@@ -94,6 +94,14 @@ const api = {
   updatePaperUsage: (id, body) => apiFetch(`/api/paper-usage/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deletePaperUsage: (id) => apiFetch(`/api/paper-usage/${id}`, { method: "DELETE" }),
   knownPaperOperators: () => apiFetch(`/api/paper-usage/known-operators`),
+  createThankYouCard: (body) => apiFetch(`/api/thankyou-cards`, { method: "POST", body: JSON.stringify(body) }),
+  thankYouCards: (machine = "", date = "", page = 1) =>
+    apiFetch(`/api/thankyou-cards?${machine ? `machine=${machine}&` : ""}${date ? `date=${date}&` : ""}page=${page}&page_size=15`),
+  thankYouCardDates: (year, month, machine = "") =>
+    apiFetch(`/api/thankyou-cards/dates-with-entries?year=${year}&month=${month}${machine ? `&machine=${machine}` : ""}`),
+  thankYouCardsByMachine: () => apiFetch(`/api/stats/thankyou-cards-by-machine`),
+  thankYouCardStats: () => apiFetch(`/api/stats/thankyou-cards`),
+  knownThankYouNames: () => apiFetch(`/api/thankyou-cards/known-names`),
   paperStockStats: () => apiFetch(`/api/stats/paper-stock`),
   damageDates: (year, month, department) =>
   apiFetch(`/api/damages/dates-with-entries?year=${year}&month=${month}${department ? `&department=${department}` : ""}`),
@@ -463,9 +471,271 @@ function AppearanceButton({ isMobile }) {
         border: "1px solid var(--border)", borderRadius: 6, fontWeight: 700,
         fontSize: isMobile ? 11 : 13, display: "flex", alignItems: "center", gap: 6,
       }}>
-        <Palette size={14} /> {isMobile ? "" : "Appearance"}
+        <Palette size={14} />
       </button>
       {open && <AppearanceModal onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
+const TYC_MACHINES_UI = [
+  { value: "GREEN_2",     label: "Green II" },
+  { value: "GREEN_3",     label: "Green III" },
+  { value: "GREEN_3_NEW", label: "Green IV" },
+];
+
+function ThankYouCardModal({ onClose }) {
+  const [tab, setTab] = useState("new");
+  const isMobile = useIsMobile();
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "var(--overlay)", display: "flex", alignItems: isMobile ? "flex-end" : "center", justifyContent: "center", zIndex: 9300 }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: "var(--bg1)", border: "1px solid var(--border)",
+        borderRadius: isMobile ? "16px 16px 0 0" : 12, padding: 24,
+        width: "100%", maxWidth: 520, maxHeight: isMobile ? "92dvh" : "90vh",
+        overflowY: "auto", display: "flex", flexDirection: "column", gap: 16,
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 4 }}>Thank You Cards</div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: "var(--amber)" }}>{tab === "new" ? "New Entry" : "History"}</div>
+          </div>
+          <button onClick={onClose} style={{ padding: "8px 12px", background: "var(--bg3)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 6, fontWeight: 700 }}>✕</button>
+        </div>
+
+        <div style={{ display: "flex", gap: 4 }}>
+          <button onClick={() => setTab("new")} style={{ flex: 1, padding: "8px 0", fontSize: 12, fontWeight: 700, borderRadius: 6, background: tab === "new" ? "var(--amber)" : "var(--bg3)", color: tab === "new" ? "#000" : "var(--text-sec)" }}>+ New</button>
+          <button onClick={() => setTab("history")} style={{ flex: 1, padding: "8px 0", fontSize: 12, fontWeight: 700, borderRadius: 6, background: tab === "history" ? "var(--amber)" : "var(--bg3)", color: tab === "history" ? "#000" : "var(--text-sec)" }}>Today / History</button>
+        </div>
+
+        {tab === "new" ? <ThankYouCardForm onClose={onClose} /> : <ThankYouCardHistory />}
+      </div>
+    </div>
+  );
+}
+
+function ThankYouCardForm({ onClose }) {
+  const [customer, setCustomer]       = useState("");
+  const [knownNames, setKnownNames]   = useState([]);
+  const [showNewName, setShowNewName] = useState(false);
+  const [coupleName, setCoupleName]   = useState("");
+  const [machine, setMachine]         = useState("");
+  const [size, setSize]               = useState("");
+  const [quantity, setQuantity]       = useState("1");
+  const [price, setPrice]             = useState("");
+  const [selectedDate, setSelectedDate] = useState(() => slDateStr(new Date()));
+  const [calYear, setCalYear]         = useState(new Date().getFullYear());
+  const [calMonth, setCalMonth]       = useState(new Date().getMonth() + 1);
+  const [showCal, setShowCal]         = useState(false);
+  const [saving, setSaving]           = useState(false);
+  const [error, setError]             = useState("");
+  const [success, setSuccess]         = useState(false);
+
+  useEffect(() => { api.knownThankYouNames().then(d => setKnownNames(d.names || [])).catch(() => {}); }, []);
+
+  const qtyNum   = Number(quantity) || 0;
+  const priceNum = Number(price) || 0;
+  const totalPrice = qtyNum * priceNum;
+  const isToday = selectedDate === slDateStr(new Date());
+  const canSubmit = customer.trim() && machine && size && qtyNum > 0 && price && !saving;
+
+  async function submit(e) {
+    e.preventDefault();
+    setError("");
+    if (!canSubmit) return;
+    setSaving(true);
+    try {
+      await api.createThankYouCard({
+        customer: customer.trim(),
+        couple_name: coupleName.trim() || undefined,
+        machine,
+        size: size.trim(),
+        quantity: qtyNum,
+        price: priceNum,
+        date: selectedDate,
+      });
+      setSuccess(true);
+      setTimeout(onClose, 1100);
+    } catch (err) { setError(err.message); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div>
+        <label>Photographer / Studio *</label>
+        {knownNames.length > 0 && !showNewName ? (
+          <select value={knownNames.includes(customer) ? customer : ""} onChange={e => {
+            if (e.target.value === "__new__") { setShowNewName(true); setCustomer(""); }
+            else setCustomer(e.target.value);
+          }}>
+            <option value="">-- Select name --</option>
+            {knownNames.map(n => <option key={n} value={n}>{n}</option>)}
+            <option value="__new__">+ Type a new name</option>
+          </select>
+        ) : (
+          <div style={{ display: "flex", gap: 6 }}>
+            <input value={customer} onChange={e => setCustomer(e.target.value)} placeholder="Studio name" autoFocus style={{ flex: 1 }} />
+            {knownNames.length > 0 && (
+              <button type="button" onClick={() => { setShowNewName(false); setCustomer(""); }} style={{ padding: "0 10px", background: "var(--bg3)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 12 }}>← Back</button>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <label>Couple Name <span style={{ color: "var(--text-dim)", fontWeight: 400 }}>(optional)</span></label>
+        <input value={coupleName} onChange={e => setCoupleName(e.target.value)} placeholder="Optional" />
+      </div>
+
+      <div>
+        <label>Machine *</label>
+        <select value={machine} onChange={e => setMachine(e.target.value)}>
+          <option value="">-- Select machine --</option>
+          {TYC_MACHINES_UI.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+        </select>
+      </div>
+
+      <div className="r-grid-3">
+        <div><label>Size *</label>
+          <select value={size} onChange={e => setSize(e.target.value)}>
+            <option value="">-- Select --</option>
+            {THANK_U_CARDS_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+        <div><label>Quantity *</label><input type="number" min="1" value={quantity} onChange={e => setQuantity(e.target.value)} placeholder="1" /></div>
+        <div><label>Unit Price (Rs.) *</label><input type="number" min="0" value={price} onChange={e => setPrice(e.target.value)} placeholder="e.g. 250" /></div>
+      </div>
+
+      {qtyNum > 0 && priceNum > 0 && (
+        <div style={{ background: "#807a7a", border: "1px solid var(--border)", borderRadius: 6, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span style={{ fontSize: 12, color: "var(--text-pri)", textTransform: "uppercase", letterSpacing: ".06em", fontWeight: 700 }}>Total Price</span>
+          <span style={{ fontFamily: "var(--fm)", fontSize: 18, fontWeight: 900, color: "var(--text-pri)" }}>Rs. {totalPrice}</span>
+        </div>
+      )}
+
+      <div>
+        <label>Date</label>
+        <button type="button" onClick={() => setShowCal(p => !p)} style={{
+          width: "100%", textAlign: "left", padding: "9px 12px", background: "var(--bg3)", color: "var(--text-pri)",
+          border: "1px solid var(--border)", borderRadius: 6, fontWeight: 700, display: "flex", alignItems: "center", gap: 8, fontSize: 14,
+        }}>
+          <Calendar size={14} />
+          {new Date(selectedDate + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
+          {isToday && <span style={{ fontSize: 10, color: "var(--green)", marginLeft: "auto" }}>TODAY</span>}
+        </button>
+        {showCal && (
+          <div style={{ marginTop: 8 }}>
+            <EntryCalendar year={calYear} month={calMonth}
+              onYearMonth={(y, m) => { setCalYear(y); setCalMonth(m); }}
+              dotDays={{}} selectedDate={selectedDate} onSelect={setSelectedDate}
+              onAfterSelect={() => setShowCal(false)} accent="var(--amber)" />
+          </div>
+        )}
+      </div>
+
+      {error && <div style={{ fontSize: 12, color: "var(--red)" }}>⚠ {error}</div>}
+      {success && <div style={{ fontSize: 13, color: "var(--green)", fontWeight: 700, textAlign: "center" }}>✓ Saved!</div>}
+
+      <button type="submit" disabled={!canSubmit} style={{
+        padding: "13px 0", background: canSubmit ? "var(--amber)" : "var(--bg3)", color: canSubmit ? "#000" : "var(--text-dim)",
+        borderRadius: 8, fontWeight: 800, fontSize: 15,
+      }}>{saving ? "Saving…" : "✓ Save Card"}</button>
+    </form>
+  );
+}
+
+function ThankYouCardHistory() {
+  const [machine, setMachine]         = useState("");
+  const [selectedDate, setSelectedDate] = useState(() => slDateStr(new Date()));
+  const [calYear, setCalYear]         = useState(new Date().getFullYear());
+  const [calMonth, setCalMonth]       = useState(new Date().getMonth() + 1);
+  const [dotDays, setDotDays]         = useState({});
+  const [data, setData]               = useState(null);
+  const [page, setPage]               = useState(1);
+  const [loading, setLoading]         = useState(false);
+
+  useEffect(() => {
+    api.thankYouCardDates(calYear, calMonth, machine).then(setDotDays).catch(() => setDotDays({}));
+  }, [calYear, calMonth, machine]);
+
+  useEffect(() => { setPage(1); }, [selectedDate, machine]);
+
+  useEffect(() => {
+    setLoading(true);
+    api.thankYouCards(machine, selectedDate, page)
+      .then(d => { setData(d); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, [machine, selectedDate, page]);
+
+  const machineLabel = { GREEN_2: "Green II", GREEN_3: "Green III", GREEN_3_NEW: "Green IV" };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div>
+        <label>Machine</label>
+        <select value={machine} onChange={e => setMachine(e.target.value)}>
+          <option value="">All Machines</option>
+          {TYC_MACHINES_UI.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+        </select>
+      </div>
+
+      <EntryCalendar year={calYear} month={calMonth}
+        onYearMonth={(y, m) => { setCalYear(y); setCalMonth(m); }}
+        dotDays={dotDays} selectedDate={selectedDate} onSelect={setSelectedDate} accent="var(--amber)" />
+
+      {data && (
+        <div style={{ background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: 6, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span style={{ fontSize: 11, color: "var(--text-dim)" }}>
+            {new Date(selectedDate + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short" })} total
+          </span>
+          <span style={{ fontFamily: "var(--fm)", fontSize: 20, fontWeight: 900, color: "var(--amber)" }}>{data.total}</span>
+        </div>
+      )}
+
+      {loading && <div style={{ textAlign: "center", padding: "16px 0", color: "var(--text-dim)", fontSize: 12 }}>Loading…</div>}
+      {!loading && data?.cards?.length === 0 && (
+        <div style={{ textAlign: "center", padding: "16px 0", color: "var(--text-dim)", fontSize: 12 }}>No thank you cards on this day.</div>
+      )}
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {data?.cards?.map(c => (
+          <div key={c.id} style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 6, padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-pri)" }}>{c.customer}</div>
+              {c.couple_name && <div style={{ fontSize: 11, color: "var(--text-sec)" }}>{c.couple_name}</div>}
+              <div style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 2 }}>
+                {machineLabel[c.machine] || c.machine} · {c.size} · × {c.quantity}
+              </div>
+            </div>
+            <div style={{ fontFamily: "var(--fm)", fontWeight: 800, color: "var(--amber)", flexShrink: 0 }}>Rs. {c.total_price}</div>
+          </div>
+        ))}
+      </div>
+      {data && data.pages > 1 && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+          <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} style={{ padding: "5px 10px", background: "var(--bg2)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 4, fontSize: 12, fontWeight: 700 }}>◀</button>
+          <span style={{ fontSize: 12, color: "var(--text-dim)", fontFamily: "var(--fm)" }}>{page} / {data.pages}</span>
+          <button onClick={() => setPage(p => Math.min(data.pages, p + 1))} disabled={page === data.pages} style={{ padding: "5px 10px", background: "var(--bg2)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 4, fontSize: 12, fontWeight: 700 }}>▶</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ThankYouCardButton({ isMobile }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button onClick={() => setOpen(true)} title="Thank You Card" style={{
+        padding: isMobile ? "6px 10px" : "8px 14px",
+        background: "var(--bg3)", color: "var(--amber)",
+        border: "1px solid var(--amber)", borderRadius: 6, fontWeight: 700,
+        fontSize: isMobile ? 11 : 13, display: "flex", alignItems: "center", gap: 6,
+      }}>
+        {isMobile ? <Gift size={14} /> : "ThankUcard"}
+      </button>
+      {open && <ThankYouCardModal onClose={() => setOpen(false)} />}
     </>
   );
 }
@@ -513,7 +783,7 @@ const NAV_ITEMS = [
   { label: "Binding",       path: "/station/binding",      accent: "#22c55e"       },
   { label: "Damages",       path: "/damages",              accent: "var(--red)"    },
   { label: "Papers",        path: "/papers",               accent: "#3b82f6"       },
-    { label: "Fix Dates",     path: "/admin/date-fix",       accent: "var(--red)"    },
+  { label: "Fix Dates",     path: "/admin/date-fix",       accent: "var(--red)"    },
 ];
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
@@ -1608,13 +1878,14 @@ function Shell({ title, accent = "var(--amber)", topRight, children }) {
 
         <GlobalSearchBar />
         <button onClick={downloadQR} title="Download Album Tracking QR" style={{
-          padding: isMobile ? "6px 10px" : "8px 14px",
-          background: "var(--bg3)", color: "var(--cyan)",
-          border: "1px solid var(--cyan)", borderRadius: 6, fontWeight: 700, cursor: "pointer",
-          fontSize: isMobile ? 11 : 13, display: "flex", alignItems: "center", gap: 6,
-        }}>
-          <Download size={14} /> {isMobile ? "" : "Track QR"}
-        </button>
+        padding: isMobile ? "6px 10px" : "8px 14px",
+        background: "var(--bg3)", color: "var(--cyan)",
+        border: "1px solid var(--cyan)", borderRadius: 6, fontWeight: 700, cursor: "pointer",
+        fontSize: isMobile ? 11 : 13, display: "flex", alignItems: "center", gap: 6,
+      }}>
+        <Download size={14} />
+      </button>
+        {!IS_ADMIN && <ThankYouCardButton isMobile={isMobile} />}
         <AppearanceButton isMobile={isMobile} />
         {topRight}        
             </div>
@@ -6399,10 +6670,10 @@ function MachineStatsPanel() {
 }
 
 const PRINTING_MACHINES = [
-  { key: "GREEN_2",     label: "Green II",     albumTypes: ["NORMAL", "STORY", "REBIND"] },
-  { key: "GREEN_3",     label: "Green III",    albumTypes: ["NORMAL", "STORY", "REBIND"] },
-  { key: "GREEN_3_NEW", label: "Green IV",albumTypes: ["NORMAL", "STORY", "REBIND"] },
-  { key: "EPSON",       label: "Epson",        albumTypes: ["STORY", "REBIND"] },
+  { key: "GREEN_2",     label: "Green II",  albumTypes: ["NORMAL", "STORY", "REBIND"], hasThankYou: true },
+  { key: "GREEN_3",     label: "Green III", albumTypes: ["NORMAL", "STORY", "REBIND"], hasThankYou: true },
+  { key: "GREEN_3_NEW", label: "Green IV",  albumTypes: ["NORMAL", "STORY", "REBIND"], hasThankYou: true },
+  { key: "EPSON",       label: "Epson",     albumTypes: ["STORY", "REBIND"],           hasThankYou: false },
 ];
 
 const ALBUM_TYPE_LABELS = { NORMAL: "Magazine Album", STORY: "Story Albums", REBIND: "Rebind Albums" };
@@ -6419,6 +6690,13 @@ function PrintingMachineBreakdownPanel() {
   const [calYear, setCalYear]            = useState(new Date().getFullYear());
   const [calMonth, setCalMonth]          = useState(new Date().getMonth() + 1);
   const isMobile = useIsMobile();
+  const [tycData, setTycData] = useState(null);
+  useEffect(() => {
+    const load = () => api.thankYouCardsByMachine().then(setIfChanged(setTycData)).catch(() => {});
+    load();
+    const t = setInterval(load, POLL_INTERVAL_MS);
+     return () => clearInterval(t);
+}, []);
 
   useEffect(() => {
     const load = () => api.printingBreakdown().then(setIfChanged(setData)).catch(() => {});
@@ -6441,12 +6719,14 @@ function PrintingMachineBreakdownPanel() {
     const key = cacheKeyFor(machine, at, date, page);
     setJobsCache(c => ({ ...c, [key]: "loading" }));
     try {
-      const res = await api.printingJobsList(machine, at, date, page);
+      const res = at === "THANKYOU"
+        ? await api.thankYouCards(machine, date, page)
+        : await api.printingJobsList(machine, at, date, page);
       setJobsCache(c => ({ ...c, [key]: res }));
-    } catch {
+   } catch {
       setJobsCache(c => ({ ...c, [key]: "error" }));
-    }
   }
+}
 
   function openAlbum(albumKey, machine, at) {
     if (expandedAlbum === albumKey) { setExpAlbum(null); setCalOpenAlbum(null); return; }
@@ -6478,21 +6758,26 @@ function PrintingMachineBreakdownPanel() {
   }
 
   function openCalendar(albumKey, machine, at) {
-    const isOpen = calOpenAlbum === albumKey;
-    setCalOpenAlbum(isOpen ? null : albumKey);
-    if (!isOpen) {
-      const now = new Date();
-      setCalYear(now.getFullYear());
-      setCalMonth(now.getMonth() + 1);
-      api.printingJobsDates(machine, at, now.getFullYear(), now.getMonth() + 1)
-        .then(setDotDays).catch(() => setDotDays({}));
-    }
+  const isOpen = calOpenAlbum === albumKey;
+  setCalOpenAlbum(isOpen ? null : albumKey);
+  if (!isOpen) {
+    const now = new Date();
+    setCalYear(now.getFullYear());
+    setCalMonth(now.getMonth() + 1);
+    const fetcher = at === "THANKYOU"
+      ? api.thankYouCardDates(now.getFullYear(), now.getMonth() + 1, machine)
+      : api.printingJobsDates(machine, at, now.getFullYear(), now.getMonth() + 1);
+    fetcher.then(setDotDays).catch(() => setDotDays({}));
   }
+}
 
-  function calNav(machine, at, y, m) {
-    setCalYear(y); setCalMonth(m);
-    api.printingJobsDates(machine, at, y, m).then(setDotDays).catch(() => setDotDays({}));
-  }
+function calNav(machine, at, y, m) {
+  setCalYear(y); setCalMonth(m);
+  const fetcher = at === "THANKYOU"
+    ? api.thankYouCardDates(y, m, machine)
+    : api.printingJobsDates(machine, at, y, m);
+  fetcher.then(setDotDays).catch(() => setDotDays({}));
+}
 
   return (
     <div style={{
@@ -6647,16 +6932,93 @@ function PrintingMachineBreakdownPanel() {
                         </div>
                       );
                     })}
+                    {m.hasThankYou && (() => {
+  const at = "THANKYOU";
+  const albumKey = `${m.key}-${at}`;
+  const isAOpen  = expandedAlbum === albumKey;
+  const d        = tycData?.daily?.[m.key]?.quantity   || 0;
+  const mo       = tycData?.monthly?.[m.key]?.quantity || 0;
+  const selDate  = dateByAlbum[albumKey] ?? null;
+  const page     = pageByAlbum[albumKey] ?? 1;
+  const result   = jobsCache[cacheKeyFor(m.key, at, selDate, page)];
+  const isCalOpen = calOpenAlbum === albumKey;
+  const jobList = result && result !== "loading" && result !== "error" ? (result.jobs || result.cards || []) : [];
+
+  return (
+    <div key="THANKYOU" style={{ background: "#fff7e6", border: "1px solid #e0c080", borderRadius: 6, overflow: "hidden" }}>
+      <button onClick={() => openAlbum(albumKey, m.key, at)} style={{
+        width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "10px 14px", background: "transparent", textAlign: "left", flexWrap: "wrap", gap: 8,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <ChevronDown size={13} style={{ color: "#7a4e00", transition: "transform .2s ease", transform: isAOpen ? "rotate(180deg)" : "rotate(0deg)" }} />
+          <span style={{ fontSize: 13, fontWeight: 700, color: "#7a4e00" }}>Thank You Cards</span>
+        </div>
+        <div style={{ display: "flex", gap: 16 }}>
+          <div style={{ textAlign: "right" }}><div style={{ fontSize: 9, color: "#7a4e00", letterSpacing: ".1em" }}>TODAY</div><div style={{ fontSize: 15, fontWeight: 800, color: "#3c24a5" }}>{d}</div></div>
+          <div style={{ textAlign: "right" }}><div style={{ fontSize: 9, color: "#7a4e00", letterSpacing: ".1em" }}>MONTHLY</div><div style={{ fontSize: 15, fontWeight: 800, color: "#2ECC71" }}>{mo}</div></div>
+        </div>
+      </button>
+
+      {isAOpen && (
+        <div className="si" style={{ padding: "0 14px 12px", display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+            <button onClick={() => selectThisMonth(albumKey, m.key, at)} style={{ padding: "5px 12px", fontSize: 11, fontWeight: 700, borderRadius: 4, background: !selDate ? "#2ECC71" : "#ddd", color: !selDate ? "#fff" : "#333" }}>This Month</button>
+            <button onClick={() => openCalendar(albumKey, m.key, at)} style={{ padding: "5px 12px", fontSize: 11, fontWeight: 700, borderRadius: 4, background: selDate ? "#3c24a5" : "#ddd", color: selDate ? "#fff" : "#333", display: "flex", alignItems: "center", gap: 5 }}>
+              <Calendar size={12} /> {selDate ? new Date(selDate + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short" }) : "Pick a day"}
+            </button>
+          </div>
+
+          {isCalOpen && (
+            <div style={{ width: "100%", maxWidth: 260 }}>
+              <EntryCalendar year={calYear} month={calMonth} onYearMonth={(y, mo2) => calNav(m.key, at, y, mo2)}
+                dotDays={dotDays} selectedDate={selDate || ""} onSelect={dt => selectDate(albumKey, m.key, at, dt)} accent="#3c24a5" />
+            </div>
+          )}
+
+          {result === "loading" && <div style={{ fontSize: 12, color: "#555", padding: "6px 0" }}>Loading…</div>}
+          {result === "error"   && <div style={{ fontSize: 12, color: "#b91c1c", padding: "6px 0" }}>Failed to load.</div>}
+          {result && result !== "loading" && result !== "error" && (
+            <>
+              <div style={{ fontSize: 11, color: "#7a4e00" }}>{result.total} card{result.total !== 1 ? "s" : ""} {selDate ? `on ${selDate}` : "this month"}</div>
+              {jobList.length === 0 ? (
+                <div style={{ fontSize: 12, color: "#555", padding: "6px 0" }}>No thank you cards found.</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 260, overflowY: "auto" }}>
+                  {jobList.map((c, i) => (
+                    <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#fff", border: "1px solid #ddd", borderRadius: 4, padding: "6px 10px" }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: "#111" }}>{c.customer}</span>
+                      <span style={{ fontSize: 12, color: "#333" }}>×{c.quantity} · Rs.{c.total_price}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {result.pages > 1 && (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 4 }}>
+                  <button onClick={() => changePage(albumKey, m.key, at, Math.max(1, page - 1))} disabled={page === 1} style={{ padding: "4px 10px", background: "#ddd", color: "#333", borderRadius: 4, fontSize: 11, fontWeight: 700 }}>◀ Prev</button>
+                  <span style={{ fontSize: 11, color: "#333" }}>{page} / {result.pages}</span>
+                  <button onClick={() => changePage(albumKey, m.key, at, Math.min(result.pages, page + 1))} disabled={page === result.pages} style={{ padding: "4px 10px", background: "#ddd", color: "#333", borderRadius: 4, fontSize: 11, fontWeight: 700 }}>Next ▶</button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+})()}
+
                   </div>
                 )}
               </div>
             );
           })}
+
+            </div>
+          )}
         </div>
-      )}
-    </div>
-  );
-}
+      );
+    }
 
 function PrintingSectionPanel() {
   const [data, setData] = useState(null);

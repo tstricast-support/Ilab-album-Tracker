@@ -33,6 +33,7 @@ from .models import (
     PaperUsageEntry,        
     PAPER_SIZES,              
     LOW_STOCK_THRESHOLD,
+    ThankYouCard
 )
 from .routers import history as history_router
 # from .routers import analytics as analytics_router
@@ -48,6 +49,7 @@ from .schemas import (
     PaperStockOut,          
     PaperPacketLogOut,         
     PaperUsageEntryOut, 
+    ThankYouCardOut
 )
 
 app = FastAPI(
@@ -2017,6 +2019,180 @@ def delete_paper_usage(entry_id: int, db: Session = Depends(get_db)):
 @app.get("/api/paper-usage/known-operators")
 def known_paper_operators(db: Session = Depends(get_db)):
     rows = db.query(PaperUsageEntry.operator_name).distinct().all()
+    names = sorted({r[0].strip().title() for r in rows if r[0]})
+    return {"names": names}
+
+class ThankYouCardCreate(BaseModel):
+    customer: str
+    couple_name: Optional[str] = None
+    machine: str                      
+    size: str
+    quantity: int = 1
+    price: int
+    date: Optional[str] = None
+
+
+TYC_MACHINES = ("GREEN_2", "GREEN_3", "GREEN_3_NEW")   # Epson excluded on purpose
+
+
+@app.post("/api/thankyou-cards", response_model=ThankYouCardOut, status_code=201)
+def create_thankyou_card(payload: ThankYouCardCreate, db: Session = Depends(get_db)):
+    if not payload.customer.strip():
+        raise HTTPException(400, "Photographer / Studio name is required")
+    machine = payload.machine.strip().upper()
+    if machine not in TYC_MACHINES:
+        raise HTTPException(400, f"machine must be one of {TYC_MACHINES}")
+    if not payload.size.strip():
+        raise HTTPException(400, "Size is required")
+    if payload.quantity <= 0:
+        raise HTTPException(400, "Quantity must be greater than 0")
+    if payload.price < 0:
+        raise HTTPException(400, "Price cannot be negative")
+
+    if payload.date:
+        try:
+            y, m, d = map(int, payload.date.split("-"))
+        except ValueError:
+            raise HTTPException(400, "date must be in YYYY-MM-DD format")
+        sl_now   = datetime.utcnow() + SL_TZ_OFFSET
+        sl_dt    = datetime(y, m, d, sl_now.hour, sl_now.minute, sl_now.second)
+        created_at = sl_dt - SL_TZ_OFFSET
+    else:
+        created_at = datetime.utcnow()
+
+    entry = ThankYouCard(
+        customer=payload.customer.strip().title(),
+        couple_name=(payload.couple_name or "").strip() or None,
+        machine=machine,                          # ← ADD
+        size=payload.size.strip(),
+        quantity=payload.quantity,
+        price=payload.price,
+        total_price=payload.quantity * payload.price,
+        created_at=created_at,
+    )
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+    return entry
+
+@app.get("/api/thankyou-cards", response_model=dict)
+def list_thankyou_cards(
+    db: Session = Depends(get_db),
+    machine: Optional[str] = Query(None),
+    date: Optional[str] = Query(None, description="YYYY-MM-DD, Sri Lanka calendar day"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+):
+    q = db.query(ThankYouCard)
+    if machine:
+        q = q.filter(ThankYouCard.machine == machine.strip().upper())
+    if date:
+        day_start = datetime.strptime(date, "%Y-%m-%d") - SL_TZ_OFFSET
+        day_end   = day_start + timedelta(days=1)
+        q = q.filter(ThankYouCard.created_at >= day_start, ThankYouCard.created_at < day_end)
+
+    total = q.count()
+    rows = (
+        q.order_by(desc(ThankYouCard.created_at))
+         .offset((page - 1) * page_size)
+         .limit(page_size)
+         .all()
+    )
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "pages": max(1, -(-total // page_size)),
+        "cards": [ThankYouCardOut.model_validate(r).model_dump() for r in rows],
+    }
+
+
+@app.get("/api/thankyou-cards/dates-with-entries")
+def thankyou_dates_with_entries(
+    db: Session = Depends(get_db),
+    year: int = Query(...),
+    month: int = Query(...),
+    machine: Optional[str] = Query(None),
+):
+    start = datetime(year, month, 1) - SL_TZ_OFFSET
+    end   = (datetime(year + 1, 1, 1) if month == 12 else datetime(year, month + 1, 1)) - SL_TZ_OFFSET
+
+    q = db.query(ThankYouCard.created_at, func.count(ThankYouCard.id).label("cnt"))
+    if machine:
+        q = q.filter(ThankYouCard.machine == machine.strip().upper())
+    rows = (
+        q.filter(ThankYouCard.created_at >= start, ThankYouCard.created_at < end)
+         .group_by(ThankYouCard.created_at)
+         .all()
+    )
+    day_counts: dict[str, int] = {}
+    for created_at, cnt in rows:
+        lk_date = created_at + SL_TZ_OFFSET
+        day_key = str(lk_date.day)
+        day_counts[day_key] = day_counts.get(day_key, 0) + cnt
+    return day_counts
+
+
+@app.get("/api/stats/thankyou-cards-by-machine")
+def thankyou_cards_by_machine(db: Session = Depends(get_db)):
+    utc_now = datetime.utcnow()
+    sl_now  = utc_now + SL_TZ_OFFSET
+    day_start = datetime(sl_now.year, sl_now.month, sl_now.day) - SL_TZ_OFFSET
+    day_end   = day_start + timedelta(days=1)
+    month_start = datetime(sl_now.year, sl_now.month, 1) - SL_TZ_OFFSET
+    month_end   = (
+        datetime(sl_now.year + 1, 1, 1) if sl_now.month == 12
+        else datetime(sl_now.year, sl_now.month + 1, 1)
+    ) - SL_TZ_OFFSET
+
+    def counts_for(start, end):
+        rows = (
+            db.query(ThankYouCard.machine, func.count(ThankYouCard.id), func.coalesce(func.sum(ThankYouCard.quantity), 0))
+            .filter(
+                ThankYouCard.machine.in_(TYC_MACHINES),
+                ThankYouCard.created_at >= start,
+                ThankYouCard.created_at < end,
+            )
+            .group_by(ThankYouCard.machine)
+            .all()
+        )
+        result = {m: {"entries": 0, "quantity": 0} for m in TYC_MACHINES}
+        for machine, cnt, qty in rows:
+            result[machine] = {"entries": cnt, "quantity": int(qty)}
+        return result
+
+    return {"daily": counts_for(day_start, day_end), "monthly": counts_for(month_start, month_end)}
+
+@app.get("/api/stats/thankyou-cards")
+def thankyou_card_stats(db: Session = Depends(get_db)):
+    utc_now = datetime.utcnow()
+    sl_now  = utc_now + SL_TZ_OFFSET
+    day_start = datetime(sl_now.year, sl_now.month, sl_now.day) - SL_TZ_OFFSET
+    day_end   = day_start + timedelta(days=1)
+    month_start = datetime(sl_now.year, sl_now.month, 1) - SL_TZ_OFFSET
+    month_end   = (
+        datetime(sl_now.year + 1, 1, 1) if sl_now.month == 12
+        else datetime(sl_now.year, sl_now.month + 1, 1)
+    ) - SL_TZ_OFFSET
+
+    def summary_for(start, end):
+        q = db.query(ThankYouCard).filter(
+            ThankYouCard.created_at >= start, ThankYouCard.created_at < end,
+        )
+        count = q.count()
+        total_qty   = q.with_entities(func.coalesce(func.sum(ThankYouCard.quantity), 0)).scalar() or 0
+        total_price = q.with_entities(func.coalesce(func.sum(ThankYouCard.total_price), 0)).scalar() or 0
+        return {"count": count, "total_quantity": int(total_qty), "total_price": int(total_price)}
+
+    return {
+        "daily":   summary_for(day_start, day_end),
+        "monthly": summary_for(month_start, month_end),
+    }
+
+
+@app.get("/api/thankyou-cards/known-names")
+def known_thankyou_names(db: Session = Depends(get_db)):
+    rows = db.query(ThankYouCard.customer).distinct().all()
     names = sorted({r[0].strip().title() for r in rows if r[0]})
     return {"names": names}
 

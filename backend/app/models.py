@@ -319,6 +319,25 @@ class PaperUsageEntry(Base):
     def __repr__(self) -> str:
         return f"<PaperUsageEntry job={self.job_no} used={self.total_used}>"
 
+class ThankYouCard(Base):
+    __tablename__ = "thankyou_cards"
+
+    id            = Column(Integer, primary_key=True, autoincrement=True)
+    customer      = Column(String(256), nullable=False)
+    couple_name   = Column(String(256), nullable=True)
+    machine       = Column(String(32),  nullable=False)   # GREEN_2 / GREEN_3 / GREEN_3_NEW
+    size          = Column(String(64),  nullable=False)
+    quantity      = Column(Integer, nullable=False, default=1)
+    price         = Column(Integer, nullable=False, default=0)
+    total_price   = Column(Integer, nullable=False, default=0)
+
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow,
+                         onupdate=datetime.utcnow)
+
+    def __repr__(self) -> str:
+        return f"<ThankYouCard id={self.id} customer={self.customer!r} machine={self.machine} qty={self.quantity}>"
+
 
 def seed_paper_stock():
     db = SessionLocal()
@@ -359,6 +378,13 @@ def run_migration():
             if "customer" not in damage_cols:
                 conn.execute(text("ALTER TABLE damage_entries ADD COLUMN customer VARCHAR(256)"))
                 conn.commit()
+
+        tyc_cols = {c["name"] for c in inspector.get_columns("thankyou_cards")} if "thankyou_cards" in inspector.get_table_names() else set()
+        if tyc_cols and "machine" not in tyc_cols:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE thankyou_cards ADD COLUMN machine VARCHAR(32)"))
+                conn.commit()
+
         return
 
     with engine.connect() as conn:
@@ -431,6 +457,10 @@ def run_migration():
         conn.execute(text("""
             ALTER TABLE damage_entries
             ADD COLUMN IF NOT EXISTS customer VARCHAR(256);
+        """))
+        conn.execute(text("""
+            ALTER TABLE thankyou_cards
+            ADD COLUMN IF NOT EXISTS machine VARCHAR(32);
         """))
 
         conn.commit()
