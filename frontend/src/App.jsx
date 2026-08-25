@@ -2344,8 +2344,8 @@ function OperatorTag({ log, dept }) {
         </span>
       )}
       {isLaminating && log.laminated_by && (
-        <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 7px", borderRadius: 4, background: "var(--info-bg)", border: "1px solid #22c55e", color: "var(--text-pri)", letterSpacing: ".08em" }}>
-          <span style={{ color: "#22c55e" }}>LAMINATED BY </span> {log.laminated_by}
+        <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 7px", borderRadius: 4, background: "var(--info-bg)", border: "1px solid #0d3b5c", color: "var(--text-pri)", letterSpacing: ".08em" }}>
+          <span style={{ color: "#0d3b5c" }}>LAMINATED BY </span> {log.laminated_by}
         </span>
       )}
     </div>
@@ -5200,12 +5200,14 @@ function DamageEntryForm({ dept, onCreated, addToast }) {
   const [prices, setPrices] = useState([]);
   const [knownNames, setKnownNames] = useState([]);
   const [priceId, setPriceId] = useState("");
-  const [jobNo, setJobNo] = useState("");          
+  const [jobNo, setJobNo] = useState("");
   const [customer, setCustomer] = useState("");
   const [operatorName, setOperatorName] = useState("");
   const [showNewName, setShowNewName] = useState(false);
   const [reason, setReason] = useState("");
   const [quantity, setQuantity] = useState("");
+  const [otherItem, setOtherItem] = useState("");
+  const [actualValue, setActualValue] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => { api.paperPrices().then(setPrices).catch(() => {}); }, []);
@@ -5215,25 +5217,54 @@ function DamageEntryForm({ dept, onCreated, addToast }) {
   }, [dept]);
 
   const selectedPrice = prices.find(p => p.id === Number(priceId));
-  const qtyNum = Number(quantity) || 0;
-  const previewTotal = selectedPrice ? selectedPrice.unit_price * qtyNum : 0;
+  const isOthers = selectedPrice?.size === "OTHER";
+
+  const qtyNum         = Number(quantity) || 0;
+  const actualValueNum = Number(actualValue) || 0;
+
+  // ── THE FIX: never fall back to selectedPrice.unit_price when isOthers ──
+  const previewTotal = isOthers
+    ? actualValueNum
+    : (selectedPrice ? selectedPrice.unit_price * qtyNum : 0);
+
+  // Reset the "other side" fields whenever the size selection changes,
+  // so stale values from a previous selection can't leak into the total.
+  useEffect(() => {
+    if (isOthers) {
+      setQuantity("");
+    } else {
+      setOtherItem("");
+      setActualValue("");
+    }
+  }, [priceId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function submit(e) {
     e.preventDefault();
-    if (!priceId || !operatorName.trim() || !reason.trim() || qtyNum <= 0) return;
+    if (!priceId || !operatorName.trim() || !reason.trim()) return;
+    if (isOthers) {
+      if (!otherItem.trim() || actualValueNum <= 0) {
+        addToast("Enter item description and a value greater than 0.", "error");
+        return;
+      }
+    } else {
+      if (qtyNum <= 0) return;
+    }
     setSaving(true);
     try {
       await api.createDamage({
         department: dept,
         paper_price_id: Number(priceId),
-        job_no: jobNo.trim(),      
-        customer: customer.trim(), 
+        job_no: jobNo.trim(),
+        customer: customer.trim(),
         operator_name: operatorName.trim(),
         reason: reason.trim(),
-        quantity: qtyNum,
+        quantity: isOthers ? 1 : qtyNum,
+        other_item: isOthers ? otherItem.trim() : undefined,
+        actual_value: isOthers ? actualValueNum : undefined,
       });
       addToast(`✓ Damage entry recorded.`, "success");
-      setPriceId(""); setJobNo(""); setCustomer(""); setReason(""); setQuantity("");  
+      setPriceId(""); setJobNo(""); setCustomer(""); setReason(""); setQuantity("");
+      setOtherItem(""); setActualValue("");
       onCreated();
     } catch (err) { addToast(err.message, "error"); }
     finally { setSaving(false); }
@@ -5241,7 +5272,6 @@ function DamageEntryForm({ dept, onCreated, addToast }) {
 
   return (
     <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      {/* ── ADD: Job No / Photographer row ── */}
       <div className="r-grid-2">
         <div>
           <label>Job No <span style={{ color: "var(--text-dim)", fontWeight: 400 }}>(optional)</span></label>
@@ -5255,17 +5285,44 @@ function DamageEntryForm({ dept, onCreated, addToast }) {
 
       <div className="r-grid-2">
         <div>
-          <label>Paper Size *</label>
+          <label>Item Type *</label>
           <select value={priceId} onChange={e => setPriceId(e.target.value)}>
-            <option value="">-- Select paper size --</option>
-            {prices.map(p => <option key={p.id} value={p.id}>{p.label} (Rs. {p.unit_price})</option>)}
+            <option value="">-- Select item --</option>
+            {prices.filter(p => p.size !== "OTHER").map(p => (
+              <option key={p.id} value={p.id}>{p.label} (Rs. {p.unit_price})</option>
+            ))}
+            {prices.filter(p => p.size === "OTHER").map(p => (
+              <option key={p.id} value={p.id}>⚠ Others (Non-paper item)</option>
+            ))}
           </select>
         </div>
-        <div>
-          <label>Quantity *</label>
-          <input type="number" min="1" value={quantity} onChange={e => setQuantity(e.target.value)} placeholder="e.g. 2" />
-        </div>
+        {!isOthers && (
+          <div>
+            <label>Quantity *</label>
+            <input type="number" min="1" value={quantity} onChange={e => setQuantity(e.target.value)} placeholder="e.g. 2" />
+          </div>
+        )}
       </div>
+
+      {isOthers && (
+        <div className="r-grid-2">
+          <div>
+            <label>Item / Description *</label>
+            <input value={otherItem} onChange={e => setOtherItem(e.target.value)} placeholder="e.g. Rexine sheet, Glue bottle…" />
+          </div>
+          <div>
+            <label>Actual Value (Rs.) *</label>
+            <input
+              type="number"
+              min="0"
+              value={actualValue}
+              onChange={e => setActualValue(e.target.value)}
+              placeholder="e.g. 500"
+              autoFocus
+            />
+          </div>
+        </div>
+      )}
 
       <div>
         <label>Damaged By *</label>
@@ -5296,9 +5353,11 @@ function DamageEntryForm({ dept, onCreated, addToast }) {
         <textarea value={reason} onChange={e => setReason(e.target.value)} placeholder="e.g. Paper jam, color mismatch…" rows={2} />
       </div>
 
-      {selectedPrice && qtyNum > 0 && (
+      {previewTotal > 0 && (
         <div style={{ background: "#807a7a", border: "1px solid var(--border)", borderRadius: 6, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ fontSize: 12, color: "var(--text-pri)", textTransform: "uppercase", letterSpacing: ".06em",fontweight:900 }}>Estimated Value</span>
+          <span style={{ fontSize: 12, color: "var(--text-pri)", textTransform: "uppercase", letterSpacing: ".06em", fontWeight: 700 }}>
+            {isOthers ? "Damage Value" : "Estimated Value"}
+          </span>
           <span style={{ fontFamily: "var(--fm)", fontSize: 18, fontWeight: 900, color: "var(--text-pri)" }}>Rs. {previewTotal}</span>
         </div>
       )}
@@ -7665,7 +7724,9 @@ function DamageSummaryPanel() {
                       </span>
                     </div>
                     <span style={{ fontSize: 13, fontWeight: 800, color: "var(--text-pri)" }}>
-                      Rs. {monthly.value} <span style={{ fontSize: 12, color: "var(--text-pri)", fontWeight: 600, letterSpacing: "0.1em" }}>({monthly.quantity} sheets)</span>
+                      Rs. {monthly.value} <span style={{ fontSize: 12, color: "var(--text-pri)", fontWeight: 600, letterSpacing: "0.1em" }}>
+                        ({monthly.quantity} {monthly.quantity !== 1 ? "items/sheets" : "item/sheet"})
+                      </span>
                     </span>
                   </button>
 
@@ -7674,28 +7735,43 @@ function DamageSummaryPanel() {
                       {sizeKeys.length === 0 ? (
                         <div style={{ fontSize: 12, color: "var(--text-dim)", padding: "4px 0" }}>No damage recorded for this department.</div>
                       ) : sizeKeys.map(size => {
-                        const mSize = monthly.by_size[size] || { quantity: 0, value: 0 };
-                        const dSize = daily.by_size[size]   || { quantity: 0, value: 0 };
-                        return (
-                          <div key={size} style={{
-                            display: "flex", justifyContent: "space-between", alignItems: "center",
-                            background: "var(--bg2)", border: "1px solid var(--border)",
-                            borderRadius: 6, padding: "7px 12px", marginLeft: isMobile ? 0 : 20,
-                          }}>
-                            <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text-sec)" }}>{size}</span>
-                            <div style={{ display: "flex", gap: 16 }}>
-                              <div style={{ textAlign: "right" }}>
-                                <div style={{ fontSize: 9, color: "var(--text-dim)", letterSpacing: ".12em" }}>TODAY</div>
-                                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-pri)" }}>{dSize.quantity} sh · Rs.{dSize.value}</div>
+                            const mSize = monthly.by_size[size] || { quantity: 0, value: 0 };
+                            const dSize = daily.by_size[size]   || { quantity: 0, value: 0 };
+                            const isOther = size === "OTHER";               
+                            const unit = isOther ? "item" : "sh";            
+                            const displayLabel = isOther ? "Other Items" : size; 
+
+                            return (
+                              <div key={size} style={{
+                                display: "flex", justifyContent: "space-between", alignItems: "center",
+                                background: isOther ? "var(--warn-bg)" : "var(--bg2)",        // distinguish visually
+                                border: `1px solid ${isOther ? "var(--warn-border)" : "var(--border)"}`,
+                                borderRadius: 6, padding: "7px 12px", marginLeft: isMobile ? 0 : 20,
+                              }}>
+                                <span style={{
+                                  fontSize: 12, fontWeight: 700,
+                                  color: isOther ? "var(--warn-text)" : "var(--text-sec)",
+                                  display: "flex", alignItems: "center", gap: 5,
+                                }}>
+                                  {isOther && "⚠ "}{displayLabel}
+                                </span>
+                                <div style={{ display: "flex", gap: 16 }}>
+                                  <div style={{ textAlign: "right" }}>
+                                    <div style={{ fontSize: 9, color: "var(--text-dim)", letterSpacing: ".12em" }}>TODAY</div>
+                                    <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-pri)" }}>
+                                      {dSize.quantity} {unit}{dSize.quantity !== 1 ? "s" : ""} · Rs.{dSize.value}
+                                    </div>
+                                  </div>
+                                  <div style={{ textAlign: "right" }}>
+                                    <div style={{ fontSize: 9, color: "var(--text-dim)", letterSpacing: ".12em" }}>MONTHLY</div>
+                                    <div style={{ fontSize: 13, fontWeight: 700, color: "var(--amber)" }}>
+                                      {mSize.quantity} {unit}{mSize.quantity !== 1 ? "s" : ""} · Rs.{mSize.value}
+                                    </div>
+                                  </div>
+                                </div>
                               </div>
-                              <div style={{ textAlign: "right" }}>
-                                <div style={{ fontSize: 9, color: "var(--text-dim)", letterSpacing: ".12em" }}>MONTHLY</div>
-                                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--amber)" }}>{mSize.quantity} sh · Rs.{mSize.value}</div>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
+                            );
+                          })}
                     </div>
                   )}
                 </div>

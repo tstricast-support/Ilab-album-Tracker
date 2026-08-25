@@ -97,6 +97,7 @@ class DamageEntryOut(BaseModel):
     operator_name: str
     reason: str
     quantity: int
+    other_item: Optional[str] = None
     unit_price_snapshot: int
     total_value: int
     created_at: datetime

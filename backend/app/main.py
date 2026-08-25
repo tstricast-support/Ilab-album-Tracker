@@ -354,6 +354,7 @@ def _damage_out(entry: DamageEntry) -> DamageEntryOut:
         operator_name=entry.operator_name, #type:ignore 
         reason=entry.reason, #type:ignore 
         quantity=entry.quantity, #type:ignore  
+        other_item=entry.other_item, #type:ignore
         unit_price_snapshot=entry.unit_price_snapshot, #type:ignore 
         total_value=entry.total_value, #type:ignore 
         created_at=entry.created_at, #type:ignore 
@@ -369,6 +370,8 @@ class DamageCreate(BaseModel):
     operator_name: str
     reason: str
     quantity: int
+    other_item: Optional[str] = None     
+    actual_value: Optional[int] = None
 
 
 
@@ -388,6 +391,23 @@ def create_damage(payload: DamageCreate, db: Session = Depends(get_db)):
     if not price:
         raise HTTPException(404, "Paper price not found")
 
+    is_other = price.size == "OTHER"
+    other_item = None
+
+    if is_other:
+        other_item = (payload.other_item or "").strip()
+        if not other_item:
+            raise HTTPException(400, "Please describe the damaged item")
+        if payload.actual_value is None or payload.actual_value < 0:
+            raise HTTPException(400, "Actual value is required and cannot be negative")
+        unit_price_snapshot = payload.actual_value
+        total_value = payload.actual_value
+        quantity = 1
+    else:
+        unit_price_snapshot = price.unit_price
+        total_value = price.unit_price * payload.quantity
+        quantity = payload.quantity
+
     entry = DamageEntry(
         department=DamageDeptEnum[dept],
         paper_price_id=price.id,
@@ -395,9 +415,10 @@ def create_damage(payload: DamageCreate, db: Session = Depends(get_db)):
         customer=(payload.customer or "").strip() or None,
         operator_name=payload.operator_name.strip().title(),
         reason=payload.reason.strip(),
-        quantity=payload.quantity,
-        unit_price_snapshot=price.unit_price,
-        total_value=price.unit_price * payload.quantity,
+        quantity=quantity,
+        other_item=other_item,
+        unit_price_snapshot=unit_price_snapshot,
+        total_value=total_value,
     )
 
     db.add(entry)
@@ -548,9 +569,9 @@ def admin_fix_date(job_id: int, payload: DateCorrectionRequest, db: Session = De
         raise HTTPException(400, "new_date must be in YYYY-MM-DD format")
 
     if dept == "ENTRY":
-        old_date = _sl_date(job.created_at)
+        old_date = _sl_date(job.created_at)  #type:ignore
         job.created_at = _shift_to_new_date(job.created_at, payload.new_date)  #type:ignore
-        if _sl_date(job.updated_at) == old_date:
+        if _sl_date(job.updated_at) == old_date:  #type:ignore
             job.updated_at = _shift_to_new_date(job.updated_at, payload.new_date)  #type:ignore
 
     elif dept in _DEPT_LOG_ENUM:
@@ -562,7 +583,7 @@ def admin_fix_date(job_id: int, payload: DateCorrectionRequest, db: Session = De
         )
         if not log:
             raise HTTPException(404, f"No {dept} log found for this job.")
-        if not log.exited_at:
+        if not log.exited_at:  #type:ignore
             raise HTTPException(400, f"{dept} is not yet completed for this job — nothing to correct.")
 
         old_exit_date = _sl_date(log.exited_at)  #type:ignore
@@ -570,7 +591,7 @@ def admin_fix_date(job_id: int, payload: DateCorrectionRequest, db: Session = De
         log.entered_at = _shift_to_new_date(log.entered_at, payload.new_date)  #type:ignore
         log.exited_at  = _shift_to_new_date(log.exited_at, payload.new_date)   #type:ignore
 
-        if _sl_date(job.updated_at) == old_exit_date:
+        if _sl_date(job.updated_at) == old_exit_date:  #type:ignore
             job.updated_at = log.exited_at  #type:ignore
 
         if job.completed_at and _sl_date(job.completed_at) == old_exit_date:  #type:ignore
@@ -589,6 +610,8 @@ class DamageUpdate(BaseModel):
     operator_name: Optional[str] = None
     reason: Optional[str] = None
     quantity: Optional[int] = None
+    other_item: Optional[str] = None      
+    actual_value: Optional[int] = None
 
 
 def _damage_or_404(damage_id: int, db: Session) -> DamageEntry:
@@ -613,34 +636,50 @@ def update_damage(damage_id: int, payload: DamageUpdate, db: Session = Depends(g
         if not price:
             raise HTTPException(404, "Paper price not found")
         entry.paper_price_id = price.id
-        entry.unit_price_snapshot = price.unit_price
+        if price.size != "OTHER":
+            entry.unit_price_snapshot = price.unit_price
+
+    current_price = db.query(PaperPrice).filter(PaperPrice.id == entry.paper_price_id).first()
+    is_other = bool(current_price and current_price.size == "OTHER")
 
     if payload.job_no is not None:
-        entry.job_no = payload.job_no.strip() or None #type:ignore
+        entry.job_no = payload.job_no.strip() or None
 
     if payload.customer is not None:
-        entry.customer = payload.customer.strip() or None #type:ignore 
+        entry.customer = payload.customer.strip() or None
 
     if payload.operator_name is not None:
         if not payload.operator_name.strip():
             raise HTTPException(400, "Operator name cannot be empty")
-        entry.operator_name = payload.operator_name.strip().title() #type:ignore
+        entry.operator_name = payload.operator_name.strip().title()
 
     if payload.reason is not None:
         if not payload.reason.strip():
             raise HTTPException(400, "Reason cannot be empty")
-        entry.reason = payload.reason.strip() #type:ignore 
+        entry.reason = payload.reason.strip()
 
-    if payload.quantity is not None:
-        if payload.quantity <= 0:
-            raise HTTPException(400, "Quantity must be greater than 0")
-        entry.quantity = payload.quantity #type:ignore
+    if is_other:
+        if payload.other_item is not None:
+            if not payload.other_item.strip():
+                raise HTTPException(400, "Please describe the damaged item")
+            entry.other_item = payload.other_item.strip()
+        if payload.actual_value is not None:
+            if payload.actual_value < 0:
+                raise HTTPException(400, "Actual value cannot be negative")
+            entry.unit_price_snapshot = payload.actual_value
+        entry.quantity = 1
+    else:
+        entry.other_item = None
+        if payload.quantity is not None:
+            if payload.quantity <= 0:
+                raise HTTPException(400, "Quantity must be greater than 0")
+            entry.quantity = payload.quantity
 
-    entry.total_value = entry.unit_price_snapshot * entry.quantity #type:ignore
-    entry.updated_at = datetime.utcnow()  #type:ignore
+    entry.total_value = entry.unit_price_snapshot * entry.quantity
+    entry.updated_at = datetime.utcnow()
+    db.commit()                # ← the actual bug fix
     db.refresh(entry)
     return _damage_out(entry)
-
 
 @app.delete("/api/damages/{damage_id}", status_code=204)
 def delete_damage(damage_id: int, db: Session = Depends(get_db)):

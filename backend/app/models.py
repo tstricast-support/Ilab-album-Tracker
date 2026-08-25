@@ -232,6 +232,7 @@ class DamageEntry(Base):
     quantity            = Column(Integer, nullable=False)
     unit_price_snapshot = Column(Integer, nullable=False)
     total_value         = Column(Integer, nullable=False)
+    other_item          = Column(String(256), nullable=True)
 
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow,
@@ -269,6 +270,9 @@ def seed_paper_prices():
                 continue
             label = f"{size} {SIDE_LABEL[side]}"
             db.add(PaperPrice(label=label, size=size, side_type=side, unit_price=price))
+    
+        if "OTHEROT" not in existing:
+            db.add(PaperPrice(label="Others", size="OTHER", side_type="OT", unit_price=0))
         db.commit()
     finally:
         db.close()
@@ -380,6 +384,9 @@ def run_migration():
             if "customer" not in damage_cols:
                 conn.execute(text("ALTER TABLE damage_entries ADD COLUMN customer VARCHAR(256)"))
                 conn.commit()
+            if "other_item" not in damage_cols:                       
+                conn.execute(text("ALTER TABLE damage_entries ADD COLUMN other_item VARCHAR(256)"))
+                conn.commit()
 
         tyc_cols = {c["name"] for c in inspector.get_columns("thankyou_cards")} if "thankyou_cards" in inspector.get_table_names() else set()
         if tyc_cols and "machine" not in tyc_cols:
@@ -481,6 +488,10 @@ def run_migration():
         conn.execute(text("""
             ALTER TABLE department_logs
             ADD COLUMN IF NOT EXISTS laminated_by VARCHAR(128);
+        """))
+        conn.execute(text("""
+            ALTER TABLE damage_entries
+            ADD COLUMN IF NOT EXISTS other_item VARCHAR(256);
         """))
 
         conn.commit()
