@@ -52,3 +52,5 @@ export const CORRECTABLE_DEPTS = [
   { value: "LAMINATING",    label: "Laminating" },
   { value: "BINDING",       label: "Binding" },
 ];
+
+export const SHEETS_PER_PACKET = 100;

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef,createContext, useContext } from "react";
-import { API_BASE, POLL_INTERVAL_MS, APP_NAME,MACHINES,ALBUM_TYPES,DAMAGE_DEPTS, PAPER_SIZES, LOW_STOCK_THRESHOLD,CORRECTABLE_DEPTS,THANK_U_CARDS_SIZES} from "./config.js";
+import { API_BASE, POLL_INTERVAL_MS, APP_NAME,MACHINES,ALBUM_TYPES,DAMAGE_DEPTS, PAPER_SIZES, LOW_STOCK_THRESHOLD,CORRECTABLE_DEPTS,THANK_U_CARDS_SIZES,SHEETS_PER_PACKET} from "./config.js";
 import {ArrowRight, Calendar,Pen,SquareX, Trash,Printer,TriangleAlert,Flame,Activity, Speech, Scissors,BookOpen,Plus, Timer,ChevronDown ,Search,Palette,Check,ArrowUp,Download,Gift,FileUp}from "lucide-react";
 import logo from "./assets/logo.jpg";
 import trackQR from "./assets/track-qr.png";
@@ -130,6 +130,16 @@ const api = {
     method: "PATCH", body: JSON.stringify({ department, new_date }),
   }),
 };
+
+function fmtPackets(sheets) {
+  const total = Number(sheets) || 0;
+  const packets = Math.floor(total / SHEETS_PER_PACKET);
+  const remainder = total % SHEETS_PER_PACKET;
+  if (total === 0) return "0 pkt";
+  if (packets === 0) return `${remainder} sh`;
+  if (remainder === 0) return `${packets} pkt`;
+  return `${packets} pkt + ${remainder} sh`;
+}
 
 function parseUTC(s) {
   if (!s) return null;
@@ -5984,13 +5994,14 @@ function PaperStockCards({ stock }) {
             borderTop: `3px solid ${low ? "var(--red)" : "var(--blue)"}`,
             borderRadius: 8, padding: "14px 12px", textAlign: "center",
           }}>
-            <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 6 }}>{s.size}</div>
+            <div style={{ fontSize: 13, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 6,fontWeight: 700 }}>{s.size}</div>
             <div style={{
               fontFamily: "var(--fd)", fontSize: isMobile ? 28 : 34, fontWeight: 900,
               color: low ? "var(--red)" : "var(--text-pri)",
               minWidth: "1.6em", display: "inline-block",
             }}>{s.balance}</div>
-            <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 2 }}>sheets left</div>
+            <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 2,fontWeight: 600 }}>sheets left</div>
+            <div style={{ fontSize: 12, color: "var(--text-dim)",fontWeight: 700 }}>{fmtPackets(s.balance)} packets</div>
           </div>
         );
       })}
@@ -8052,7 +8063,8 @@ function PaperStockSummaryPanel() {
               }}>
                 <div style={{ fontSize: 12, color: "var(--text-pri)", textTransform: "uppercase", letterSpacing: ".06em" }}>{size}</div>
                 <div style={{ fontFamily: "var(--fd)", fontSize: 24, fontWeight: 900, color: low ? "var(--red)" : "var(--text-pri)", marginTop: 4 }}>{balance}</div>
-                <div style={{ fontSize: 12, color: "var(--text-pri)" }}>left · {used} used this month</div>
+                <div style={{ fontSize: 11, color: "var(--text-dim)" }}>{fmtPackets(balance)} left</div>
+                <div style={{ fontSize: 12, color: "var(--text-pri)", marginTop: 3 }}>{used} used · {fmtPackets(used)} this month</div>
               </div>
             );
           })}
@@ -8130,12 +8142,14 @@ function PaperUsageBreakdownPanel() {
                   </div>
                   <div style={{ display: "flex", gap: 20 }}>
                     <div style={{ textAlign: "right" }}>
-                      <div style={{ fontSize: 10, color: "var(--text-pri)", letterSpacing: ".15em" }}>TODAY</div>
+                      <div style={{ fontSize: 10, color: "var(--text-pri)", letterSpacing: ".15em",fontWeight: 700 }}>TODAY</div>
                       <div style={{ fontSize: 16, fontWeight: 700, color: "#3c24a5" }}>{d.total}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 1,fontWeight: 700 }}>{fmtPackets(d.total)}</div>
                     </div>
                     <div style={{ textAlign: "right" }}>
-                      <div style={{ fontSize: 10, color: "var(--text-pri)", letterSpacing: ".15em" }}>MONTHLY</div>
+                      <div style={{ fontSize: 10, color: "var(--text-pri)", letterSpacing: ".15em",fontWeight: 700 }}>MONTHLY</div>
                       <div style={{ fontSize: 16, fontWeight: 700, color: "#2ECC71" }}>{m.total}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 1,fontWeight: 700 }}>{fmtPackets(m.total)}</div>
                     </div>
                   </div>
                 </button>
@@ -8156,7 +8170,7 @@ function PaperUsageBreakdownPanel() {
                           </div>
                           <div style={{ textAlign: "right" }}>
                             <div style={{ fontSize: 9, color: "var(--text-dim)", letterSpacing: ".12em" }}>MONTHLY</div>
-                            <div style={{ fontSize: 13, fontWeight: 700, color: "var(--amber)" }}>{m[tk]}</div>
+                            <div style={{ fontSize: 13, fontWeight: 800, color: "var(--amber)" }}>{m[tk]}</div>
                           </div>
                         </div>
                       </div>
