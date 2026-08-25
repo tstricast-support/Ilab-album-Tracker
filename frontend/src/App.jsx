@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef,createContext, useContext } from "react";
 import { API_BASE, POLL_INTERVAL_MS, APP_NAME,MACHINES,ALBUM_TYPES,DAMAGE_DEPTS, PAPER_SIZES, LOW_STOCK_THRESHOLD,CORRECTABLE_DEPTS,THANK_U_CARDS_SIZES} from "./config.js";
-import {ArrowRight, Calendar,Pen,SquareX, Trash,Printer,TriangleAlert,Flame,Activity, Speech, Scissors,BookOpen,Plus, Timer,ChevronDown ,Search,Palette,Check,ArrowUp,Download,Gift}from "lucide-react";
+import {ArrowRight, Calendar,Pen,SquareX, Trash,Printer,TriangleAlert,Flame,Activity, Speech, Scissors,BookOpen,Plus, Timer,ChevronDown ,Search,Palette,Check,ArrowUp,Download,Gift,FileUp}from "lucide-react";
 import logo from "./assets/logo.jpg";
 import trackQR from "./assets/track-qr.png";
 import "./index.css";
@@ -60,6 +60,8 @@ const api = {
     apiFetch(`/api/station/${dept}/history?search=${encodeURIComponent(search)}&${date ? `date=${date}&` : ""}page=${page}&page_size=15`),
   stationHistoryDates: (dept, year, month) =>
     apiFetch(`/api/station/${dept}/history/dates-with-entries?year=${year}&month=${month}`),
+  operatorJobs: (dept, field, name, year, month, page = 1) =>
+    apiFetch(`/api/stats/operator-jobs?dept=${dept}&field=${field}&name=${encodeURIComponent(name)}&year=${year}&month=${month}&page=${page}&page_size=15`),
   
   updateBoxPouch: (id, status) => apiFetch(`/api/jobs/${id}/box-pouch`, {
     method: "PATCH", body: JSON.stringify({ box_pouch_status: status }),
@@ -2319,19 +2321,21 @@ function SpecialNote({ note }) {
 
 // ── Operator tag ──────────────────────────────────────────────────────────────
 function OperatorTag({ log, dept }) {
-  if (!log?.operator_name) return null;
+  if (!log?.operator_name && !log?.laminated_by) return null;
   const showUnder    = dept === "PRINTING" && log.under_whom;
-  const showMachine   = dept === "PRINTING" && log.machine;
-  const isLaminating  = dept === "LAMINATING";
+  const showMachine  = dept === "PRINTING" && log.machine;
+  const isLaminating = dept === "LAMINATING";
   const machineLabel = { GREEN_2: "Green 2", GREEN_3: "Green 3", EPSON: "Epson", GREEN_3_NEW: "Green IV" }[log.machine] || log.machine;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", marginTop: 3 }}>
-      <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 700, padding: "2px 7px", borderRadius: 4, background: isLaminating ? "var(--info-bg)" : "var(--info-bg)", border: `1px solid ${isLaminating ? "#06b6d4" : "var(--border-strong)"}`, color: "var(--text-pri)", letterSpacing: ".08em" }}>
-        {isLaminating ? <span style={{color: "var(--red)"}}>ACCU. BY </span> : "👤"}{log.operator_name}
-      </span>
+      {log.operator_name && (
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 700, padding: "2px 7px", borderRadius: 4, background: "var(--info-bg)", border: `1px solid ${isLaminating ? "#06b6d4" : "var(--border-strong)"}`, color: "var(--text-pri)", letterSpacing: ".08em" }}>
+          {isLaminating ? <span style={{color: "var(--red)"}}>ACCU. BY </span> : "👤"}{log.operator_name}
+        </span>
+      )}
       {showUnder && (
         <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 7px", borderRadius: 4, background: "var(--info-bg)", border: "1px solid var(--border-strong)", color: "var(--text-pri)", letterSpacing: ".08em" }}>
-          <span style={{ color: "var(--red)" }}>SUPERVISED </span> {log.under_whom}
+          <span style={{ color: "var(--red)" }}>LOADED BY </span> {log.under_whom}
         </span>
       )}
       {showMachine && (
@@ -2339,10 +2343,14 @@ function OperatorTag({ log, dept }) {
           🖨 {machineLabel}
         </span>
       )}
+      {isLaminating && log.laminated_by && (
+        <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 7px", borderRadius: 4, background: "var(--info-bg)", border: "1px solid #22c55e", color: "var(--text-pri)", letterSpacing: ".08em" }}>
+          <span style={{ color: "#22c55e" }}>LAMINATED BY </span> {log.laminated_by}
+        </span>
+      )}
     </div>
   );
 }
-
 
 
 
@@ -2611,7 +2619,7 @@ function DelayReasonsList({ logs }) {
                       color: "var(--text-sec)",
                     }}
                   >
-                    <span style={{color:"var(--red)"}}>SUPERVISED</span> {l.under_whom}
+                    <span style={{color:"var(--red)"}}>LOADED BY</span> {l.under_whom}
                   </span>
                 )}
               </div>
@@ -4110,150 +4118,194 @@ function AlbumCountPanel() {
   );
 }
 
+function OperatorStatRow({ row, accent, dept, field, year, month, isMobile, isTop }) {
+  const [open, setOpen] = useState(false);
+  const [page, setPage] = useState(1);
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  function load(pg) {
+    setLoading(true);
+    api.operatorJobs(dept, field, row.operator_name, year, month, pg)
+      .then(d => { setData(d); setLoading(false); })
+      .catch(() => setLoading(false));
+  }
+
+  function toggle() {
+    if (open) { setOpen(false); return; }
+    setOpen(true);
+    setPage(1);
+    load(1);
+  }
+
+  function changePage(pg) {
+    setPage(pg);
+    load(pg);
+  }
+
+  return (
+    <div style={{
+      background: isTop ? accent + "11" : "var(--bg2)",
+      border: `1px solid ${isTop ? accent + "44" : "var(--border)"}`,
+      borderLeft: `3px solid ${isTop ? accent : "var(--border)"}`,
+      borderRadius: 6, overflow: "hidden",
+    }}>
+      <button onClick={toggle} style={{
+        width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "8px 10px", background: "transparent", textAlign: "left", gap: 8,
+      }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: isMobile ? 13 : 14, fontWeight: 700, color: "var(--text-pri)", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+            {row.operator_name}
+            {isTop && (
+              <span style={{ fontSize: 9, fontWeight: 800, padding: "1px 6px", borderRadius: 3, background: accent, color: "#000", textTransform: "uppercase", letterSpacing: ".06em" }}>TOP</span>
+            )}
+          </div>
+          {row.under_whom && (
+            <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}>
+              <span style={{ color: "var(--text-dim)" }}>LOADED BY </span>
+              <span style={{ color: "var(--text-sec)", fontWeight: 600 }}>{row.under_whom}</span>
+            </div>
+          )}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontFamily: "var(--fd)", fontSize: isMobile ? 24 : 28, fontWeight: 900, lineHeight: 1, color: accent, textShadow: "var(--title-shadow)" }}>{row.count}</div>
+            <div style={{ fontSize: 12, color: "var(--text-pri)", textTransform: "uppercase", letterSpacing: ".06em" }}>job{row.count !== 1 ? "s" : ""}</div>
+          </div>
+          <ChevronDown size={14} style={{ color: "var(--text-dim)", transition: "transform .2s ease", transform: open ? "rotate(180deg)" : "rotate(0deg)", flexShrink: 0 }} />
+        </div>
+      </button>
+
+      {open && (
+        <div className="si" style={{ padding: "0 10px 10px", display: "flex", flexDirection: "column", gap: 6 }}>
+          {loading && <div style={{ fontSize: 11, color: "var(--text-dim)", padding: "4px 0" }}>Loading…</div>}
+          {data && !loading && (
+            <>
+              <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
+                {data.total} job{data.total !== 1 ? "s" : ""}
+              </div>
+              {data.jobs.length === 0 ? (
+                <div style={{ fontSize: 11, color: "var(--text-dim)", padding: "4px 0" }}>No jobs found.</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 220, overflowY: "auto" }}>
+                  {data.jobs.map((j, idx) => (
+                    <div key={idx} style={{
+                      display: "flex", justifyContent: "space-between", alignItems: "center",
+                      background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 4,
+                      padding: "6px 10px", gap: 8,
+                    }}>
+                      <span style={{ fontFamily: "var(--fm)", fontSize: 12, fontWeight: 800, color: accent, flexShrink: 0 }}>{j.job_no}</span>
+                      <span style={{ fontSize: 12, color: "var(--text-sec)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {j.customer}{j.couple_name ? ` / ${j.couple_name}` : ""}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {data.pages > 1 && (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 2 }}>
+                  <button onClick={() => changePage(Math.max(1, page - 1))} disabled={page === 1} style={{ padding: "3px 9px", background: "var(--bg2)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 4, fontSize: 10, fontWeight: 700 }}>◀</button>
+                  <span style={{ fontSize: 11, color: "var(--text-dim)" }}>{page}/{data.pages}</span>
+                  <button onClick={() => changePage(Math.min(data.pages, page + 1))} disabled={page === data.pages} style={{ padding: "3px 9px", background: "var(--bg2)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 4, fontSize: 10, fontWeight: 700 }}>▶</button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OperatorStatSection({ icon, label, accent, rows, dept, field, monthLabel, year, month, isMobile }) {
+  return (
+    <div style={{
+      background: "var(--bg2)",
+      border: `1px solid ${accent}50`,
+      borderTop: `3px solid ${accent}`,
+      borderRadius: 8,
+      padding: "12px 14px",
+      display: "flex",
+      flexDirection: "column",
+      gap: 0,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 10 }}>
+        <div style={{ width: 28, height: 28, borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          {icon}
+        </div>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 800, color: accent, textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>{label}</div>
+          <div style={{ fontSize: 12, color: "var(--text-pri)", marginTop: 2, letterSpacing: ".04em" }}>{monthLabel}</div>
+        </div>
+        <div style={{ marginLeft: "auto" }}>
+          <span style={{
+            fontFamily: "var(--fd)", fontSize: 11, fontWeight: 700,
+            color: rows.length > 0 ? accent : "var(--text-dim)",
+            background: accent + "11",
+            border: `1px solid ${accent}33`,
+            borderRadius: 4, padding: "2px 8px",
+          }}>
+            {rows.length} name{rows.length !== 1 ? "s" : ""}
+          </span>
+        </div>
+      </div>
+
+      {rows.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "16px 0", color: "var(--text-dim)", fontSize: 12, fontFamily: "var(--fd)", letterSpacing: ".06em" }}>
+          NO DATA
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {[...rows].sort((a, b) => b.count - a.count).map((r, i) => (
+            <OperatorStatRow
+              key={r.operator_name + "-" + i}
+              row={r}
+              accent={accent}
+              dept={dept}
+              field={field}
+              year={year}
+              month={month}
+              isMobile={isMobile}
+              isTop={i === 0 && rows.length > 1}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 function OperatorStatsPanel() {
   const now = new Date();
   const [year,  setYear]  = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [data,  setData]  = useState(null);
+  const [activeDept, setActiveDept] = useState("PRINTING");
   const isMobile = useIsMobile();
 
   useEffect(() => {
-  const load = () =>
-    apiFetch(`/api/stats/operators?year=${year}&month=${month}`)
-      .then(setIfChanged(setData)).catch(() => {});
-  load();
-  const t = setInterval(load, 10_000);
-  return () => clearInterval(t);
-}, [year, month]);
+    const load = () =>
+      apiFetch(`/api/stats/operators?year=${year}&month=${month}`)
+        .then(setIfChanged(setData)).catch(() => {});
+    load();
+    const t = setInterval(load, 10_000);
+    return () => clearInterval(t);
+  }, [year, month]);
 
   const monthLabel = new Date(year, month - 1, 1)
     .toLocaleDateString("en-GB", { month: "long", year: "numeric" });
 
-  function Section({ icon, label, accent, rows }) {
-    return (
-      <div style={{
-        background:"var(--bg2)",
-        border: `1px solid ${accent}50`,
-        borderTop: `3px solid ${accent}`,
-        borderRadius: 8,
-        padding: "12px 14px",
-        display: "flex",
-        flexDirection: "column",
-        gap: 0,
-      }}>
-        {/* Section header */}
-        <div style={{
-          display: "flex", alignItems: "center", gap: 7,
-          marginBottom: 10,
-        }}>
-          <div style={{
-            width: 28, height: 28, borderRadius: 6,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            flexShrink: 0,
-          }}>
-            {icon}
-          </div>
-          <div>
-            <div style={{
-              fontSize: 11, fontWeight: 800, color: accent,
-              textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1,
-            }}>{label}</div>
-            <div style={{
-              fontSize: 12, color: "var(--text-pri)",
-              marginTop: 2, letterSpacing: ".04em",
-            }}>{monthLabel}</div>
-          </div>
-          <div style={{ marginLeft: "auto" }}>
-            <span style={{
-              fontFamily: "var(--fd)", fontSize: 11, fontWeight: 700,
-              color: rows.length > 0 ? accent : "var(--text-dim)",
-              background: accent + "11",
-              border: `1px solid ${accent}33`,
-              borderRadius: 4, padding: "2px 8px",
-            }}>
-              {rows.length} operator{rows.length !== 1 ? "s" : ""}
-            </span>
-          </div>
-        </div>
+  const DEPT_TABS = [
+    { key: "PRINTING",      label: "Printing",      accent: "#0c64f1", icon: <Printer size={14} /> },
+    { key: "LAMINATING",    label: "Laminating",    accent: "#06b6d4", icon: <BookOpen size={14} /> },
+    { key: "LASER_CUTTING", label: "Laser Cutting", accent: "#8616f0", icon: <Scissors size={14} /> },
+  ];
 
-        {/* Rows */}
-        {rows.length === 0 ? (
-          <div style={{
-            textAlign: "center", padding: "16px 0",
-            color: "var(--text-dim)", fontSize: 12,
-            fontFamily: "var(--fd)", letterSpacing: ".06em",
-          }}>
-            NO DATA
-          </div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {rows.sort((a, b) => b.count - a.count).map((r, i) => {
-              const isTop = i === 0 && rows.length > 1;
-              return (
-                <div key={i} style={{
-                  display: "flex", alignItems: "center",
-                  justifyContent: "space-between",
-                  background: isTop ? accent + "11" : "var(--bg2)",
-                  border: `1px solid ${isTop ? accent + "44" : "var(--border)"}`,
-                  borderLeft: `3px solid ${isTop ? accent : "var(--border)"}`,
-                  borderRadius: 6,
-                  padding: "8px 10px",
-                  gap: 8,
-                }}>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{
-                      fontSize: isMobile ? 13 : 14,
-                      fontWeight: 700,
-                      color: "var(--text-pri)",
-                      display: "flex", alignItems: "center", gap: 6,
-                      flexWrap: "wrap",
-                    }}>
-                      {r.operator_name}
-                      {isTop && (
-                        <span style={{
-                          fontSize: 9, fontWeight: 800,
-                          padding: "1px 6px", borderRadius: 3,
-                          background: accent, color: "#000",
-                          textTransform: "uppercase", letterSpacing: ".06em",
-                        }}>TOP</span>
-                      )}
-                    </div>
-                    {r.under_whom && (
-                      <div style={{
-                        fontSize: 11, color: "var(--text-dim)",
-                        marginTop: 2, display: "flex", alignItems: "center", gap: 4,
-                      }}>
-                        <span style={{ color: "var(--text-dim)" }}>under</span>
-                        <span style={{ color: "var(--text-sec)", fontWeight: 600 }}>
-                          {r.under_whom}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                  <div style={{
-                    flexShrink: 0, textAlign: "right",
-                    display: "flex", flexDirection: "column", alignItems: "flex-end",
-                  }}>
-                    <span style={{
-                      fontFamily: "var(--fd)",
-                      fontSize: isMobile ? 24 : 28,
-                      fontWeight: 900, lineHeight: 1,
-                      color: accent,
-                      textShadow: "var(--title-shadow)",
-                    }}>{r.count}</span>
-                    <span style={{
-                      fontSize: 12, color: "var(--text-pri)",
-                      textTransform: "uppercase", letterSpacing: ".06em",
-                    }}>job{r.count !== 1 ? "s" : ""}</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    );
-  }
+  
+
+  const deptData = data?.[activeDept];
 
   return (
     <div style={{
@@ -4263,70 +4315,79 @@ function OperatorStatsPanel() {
       padding: "14px 16px",
       gridColumn: isMobile ? "1" : "1 / -1",
     }}>
-      {/* Panel header */}
-      <div style={{
-        display: "flex", alignItems: "center",
-        justifyContent: "space-between",
-        marginBottom: 14, flexWrap: "wrap", gap: 8,
-      }}>
-        <span style={{
-          fontFamily: "var(--fd)", fontSize: 14, fontWeight: 1000,
-          letterSpacing: ".1em", textTransform: "uppercase",
-          color: "var(--text-pri)", textShadow: "var(--title-shadow)",
-        }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+        <span style={{ fontFamily: "var(--fd)", fontSize: 14, fontWeight: 1000, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--text-pri)", textShadow: "var(--title-shadow)" }}>
           Operator Activity
         </span>
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-          <select
-            value={month}
-            onChange={e => setMonth(+e.target.value)}
-            style={{ width: "auto", margin: 0, fontSize: 12, padding: "5px 8px" }}>
+          <select value={month} onChange={e => setMonth(+e.target.value)} style={{ width: "auto", margin: 0, fontSize: 12, padding: "5px 8px" }}>
             {Array.from({ length: 12 }, (_, i) =>
-              <option key={i + 1} value={i + 1}>
-                {new Date(2000, i).toLocaleDateString("en-GB", { month: "short" })}
-              </option>
+              <option key={i + 1} value={i + 1}>{new Date(2000, i).toLocaleDateString("en-GB", { month: "short" })}</option>
             )}
           </select>
-          <select
-            value={year}
-            onChange={e => setYear(+e.target.value)}
-            style={{ width: "auto", margin: 0, fontSize: 12, padding: "5px 8px" }}>
-            {[now.getFullYear(), now.getFullYear() - 1].map(y =>
-              <option key={y} value={y}>{y}</option>
-            )}
+          <select value={year} onChange={e => setYear(+e.target.value)} style={{ width: "auto", margin: 0, fontSize: 12, padding: "5px 8px" }}>
+            {[now.getFullYear(), now.getFullYear() - 1].map(y => <option key={y} value={y}>{y}</option>)}
           </select>
         </div>
       </div>
 
-      {/* Two columns — stacks to 1 col on mobile */}
-      {data && (
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
-          gap: 12,
-        }}>
-          <Section
-            icon={<Printer size={16} color="#0c64f1" />}
-            label="Printing"
-            accent="#0c64f1"
-            rows={data.PRINTING}
-          />
-          <Section
-            icon={<Scissors size={16} color="#8616f0" />}
-            label="Laser Cutting"
-            accent="#8616f0"
-            rows={data.LASER_CUTTING}
-          />
-        </div>
-      )}
+      {/* Department tabs */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+        {DEPT_TABS.map(t => (
+          <button key={t.key} onClick={() => setActiveDept(t.key)} style={{
+            display: "flex", alignItems: "center", gap: 6,
+            padding: "7px 14px", borderRadius: 6, fontSize: 12, fontWeight: 800,
+            letterSpacing: ".04em", textTransform: "uppercase",
+            background: activeDept === t.key ? t.accent : "var(--bg3)",
+            color: activeDept === t.key ? "#000" : "var(--text-sec)",
+            border: `1px solid ${activeDept === t.key ? t.accent : "var(--border)"}`,
+          }}>{t.icon} {t.label}</button>
+        ))}
+      </div>
 
-      {!data && (
-        <div style={{
-          textAlign: "center", padding: "24px 0",
-          color: "var(--text-dim)", fontFamily: "var(--fd)",
-          fontSize: 13, letterSpacing: ".08em",
-        }}>
+      {!data ? (
+        <div style={{ textAlign: "center", padding: "24px 0", color: "var(--text-dim)", fontFamily: "var(--fd)", fontSize: 13, letterSpacing: ".08em" }}>
           LOADING…
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 12 }}>
+          {activeDept === "PRINTING" && (
+            <>
+              <OperatorStatSection
+                icon={<Printer size={16} color="#0c64f1" />} label="Printers" accent="#0c64f1"
+                rows={deptData?.operators || []} dept="PRINTING" field="operator_name"
+                monthLabel={monthLabel} year={year} month={month} isMobile={isMobile}
+              />
+              <OperatorStatSection
+                icon={<FileUp size={16} color="#0c64f1" />} label="Loaded By" accent="#0c64f1"
+                rows={deptData?.loaders || []} dept="PRINTING" field="under_whom"
+                monthLabel={monthLabel} year={year} month={month} isMobile={isMobile}
+              />
+            </>
+          )}
+          {activeDept === "LAMINATING" && (
+            <>
+              <OperatorStatSection
+                icon={<BookOpen size={16} color="#06b6d4" />} label="Accubind By" accent="#06b6d4"
+                rows={deptData?.operators || []} dept="LAMINATING" field="operator_name"
+                monthLabel={monthLabel} year={year} month={month} isMobile={isMobile}
+              />
+              <OperatorStatSection
+                icon={<Check size={16} color="#22c55e" />} label="Laminated By" accent="#22c55e"
+                rows={deptData?.finishers || []} dept="LAMINATING" field="laminated_by"
+                monthLabel={monthLabel} year={year} month={month} isMobile={isMobile}
+              />
+            </>
+          )}
+          {activeDept === "LASER_CUTTING" && (
+            <div style={{ gridColumn: isMobile ? "1" : "1 / -1" }}>
+              <OperatorStatSection
+                icon={<Scissors size={16} color="#8616f0" />} label="Laser Operators" accent="#8616f0"
+                rows={deptData?.operators || []} dept="LASER_CUTTING" field="operator_name"
+                monthLabel={monthLabel} year={year} month={month} isMobile={isMobile}
+              />
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -4410,9 +4471,9 @@ function OperatorIdentityModal({ dept, onConfirm, onCancel }) {
 
         {isPrinting && (
           <div>
-            <label>Under whom are you printing? *</label>
+            <label>Who is the Loader? *</label>
             <select value={underWhom} onChange={e => setUnder(e.target.value)} style={{ margin: 0 }}>
-              <option value="">-- Select supervisor --</option>
+              <option value="">-- Select Loader --</option>
               <option value="Jeewan">Jeewan</option>
               <option value="Hirusha">Hirusha</option>
               <option value="Suresh">Suresh</option>
@@ -4441,6 +4502,84 @@ function OperatorIdentityModal({ dept, onConfirm, onCancel }) {
             style={{ flex: 1, padding: "12px 0", background: "var(--amber)", color: "#000",
               borderRadius: 8, fontWeight: 800, fontSize: 15 }}>
             Confirm &amp; Start
+          </button>
+          <button onClick={onCancel} style={{ padding: "12px 18px", background: "var(--bg3)",
+            color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 8, fontWeight: 700 }}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LaminatingFinisherModal({ onConfirm, onCancel }) {
+  const [name, setName] = useState("");
+  const [knownNames, setKnown] = useState([]);
+  const [showNew, setShowNew] = useState(false);
+  const isMobile = useIsMobile();
+
+  useEffect(() => {
+    apiFetch(`/api/operators/known?dept=LAMINATING&field=laminated_by`)
+      .then(d => setKnown(d.names || []))
+      .catch(() => {});
+  }, []);
+
+  function handleName(e) {
+    setName(e.target.value.replace(/\b\w/g, c => c.toUpperCase()));
+  }
+
+  function submit() {
+    const finalName = name.trim().replace(/\b\w/g, c => c.toUpperCase());
+    if (!finalName) return;
+    onConfirm({ laminated_by: finalName });
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "var(--overlay)",
+      display: "flex", alignItems: isMobile ? "flex-end" : "center", justifyContent: "center", zIndex: 9100 }}>
+      <div style={{ background: "var(--bg1)", border: "1px solid var(--border)",
+        borderRadius: isMobile ? "16px 16px 0 0" : 12, padding: 28, width: "100%", maxWidth: 400,
+        maxHeight: isMobile ? "92dvh" : "90vh", overflowY: "auto",
+        display: "flex", flexDirection: "column", gap: 16 }}>
+
+        <div style={{ fontSize: 13, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".1em" }}>
+          Before completing
+        </div>
+        <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-pri)" }}>Who is laminating this?</div>
+
+        <div>
+          <label>Laminated by *</label>
+          {knownNames.length > 0 && !showNew ? (
+            <select
+              value={name}
+              onChange={e => {
+                if (e.target.value === "__new__") { setShowNew(true); setName(""); }
+                else setName(e.target.value);
+              }}
+              style={{ margin: 0 }}
+            >
+              <option value="">-- Select name --</option>
+              {knownNames.map(n => <option key={n} value={n}>{n}</option>)}
+              <option value="__new__">+ Type a new name</option>
+            </select>
+          ) : (
+            <div style={{ display: "flex", gap: 6 }}>
+              <input value={name} onChange={handleName} placeholder="Enter name" autoFocus style={{ flex: 1 }} />
+              {knownNames.length > 0 && (
+                <button onClick={() => { setShowNew(false); setName(""); }} style={{ padding: "0 10px", background: "var(--bg3)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 12 }}>← Back</button>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            onClick={submit}
+            disabled={!name.trim()}
+            style={{ flex: 1, padding: "12px 0", background: "var(--amber)", color: "#000",
+              borderRadius: 8, fontWeight: 800, fontSize: 15 }}>
+            Confirm &amp; Complete
           </button>
           <button onClick={onCancel} style={{ padding: "12px 18px", background: "var(--bg3)",
             color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 8, fontWeight: 700 }}>
@@ -4719,6 +4858,7 @@ function StationPage({ deptKey }) {
   const [identityPending, setIdentityPending] = useState(null);
   const [boxPouchPending, setBoxPouchPending] = useState(null);
   const [deptDailyCount, setDeptDailyCount] = useState(null);
+  const [laminatingFinisherPending, setLaminatingFinisherPending] = useState(null);
   const isMobile = useIsMobile();
 
   const reload = useCallback(async () => {
@@ -4770,6 +4910,10 @@ function StationPage({ deptKey }) {
           return;
         }
       }
+       if (a.action === "complete" && cfg.dept === "LAMINATING") {
+        setLaminatingFinisherPending(job);
+        return;
+      }
 
       // ── Intercept COMPLETE for BINDING — ask box/pouch status ──
       if (a.action === "complete" && cfg.dept === "BINDING") {
@@ -4816,6 +4960,21 @@ function StationPage({ deptKey }) {
       setActingId(job.id);
       try {
         await api.advance(job.id, cfg.dept, "complete", { box_pouch_status: status });
+        add(`Job #${job.job_no} ✓ completed!`, "success");
+        await reload();
+      } catch (err) {
+        add(err.message, "error");
+      } finally {
+        setActingId(null);
+      }
+    }
+
+      async function handleLaminatingFinisherConfirm({ laminated_by }) {
+      const job = laminatingFinisherPending;
+      setLaminatingFinisherPending(null);
+      setActingId(job.id);
+      try {
+        await api.advance(job.id, cfg.dept, "complete", { laminated_by });
         add(`Job #${job.job_no} ✓ completed!`, "success");
         await reload();
       } catch (err) {
@@ -4988,6 +5147,13 @@ function StationPage({ deptKey }) {
           // Use onReasonSaved instead of plain reload so auto-complete fires
           onSaved={onReasonSaved}
           addToast={add}
+        />
+      )}
+
+      {laminatingFinisherPending && (
+        <LaminatingFinisherModal
+          onConfirm={handleLaminatingFinisherConfirm}
+          onCancel={() => setLaminatingFinisherPending(null)}
         />
       )}
       <DamageTimeAlertModal />
@@ -7761,14 +7927,14 @@ const reload = useCallback(async () => {
  
         {/* Intelligence row — side-by-side on desktop, stacked on mobile */}
         <div className="r-grid-intelligence" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
-          <BottleneckRadar active={active} />
-          <DailyGoalRing   active={active} done={done} />
           <PrintingMachineBreakdownPanel /> 
+          <OperatorStatsPanel />
           <AlbumCountPanel />
           <DamageSummaryPanel />
           <PaperStockSummaryPanel />
           <PaperUsageBreakdownPanel />
-          <OperatorStatsPanel />
+          <BottleneckRadar active={active} />
+          <DailyGoalRing   active={active} done={done} />
         </div>
  
         {/* Throughput ticker */}

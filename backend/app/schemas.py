@@ -30,7 +30,8 @@ class DepartmentLogOut(BaseModel):
     delay_reason_at: Optional[datetime]
     operator_name: Optional[str] = None   
     under_whom: Optional[str] = None
-    machine: Optional[str] = None 
+    machine: Optional[str] = None
+    laminated_by: Optional[str] = None 
 
     model_config = {"from_attributes": True}
 

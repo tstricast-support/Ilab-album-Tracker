@@ -109,7 +109,8 @@ class StageAdvanceRequest(BaseModel):
     machine:       Optional[str] = None   
     box_pouch_status:  Optional[str] = None
     is_story:      Optional[bool] = None 
-    is_rebind:     Optional[bool] = None 
+    is_rebind:     Optional[bool] = None
+    laminated_by:  Optional[str] = None 
 
 class DelayReasonRequest(BaseModel):
     reason: str
@@ -828,7 +829,24 @@ def advance(
             bp = (body.box_pouch_status or "").strip().upper()
             if bp not in ("COMPLETE", "PROCESSING", "NOT_NEEDED"):
                 raise HTTPException(400, "Please specify whether Box/Pouch is complete, still processing, or not needed.")
-            job.box_pouch_status = bp #type:ignore 
+            job.box_pouch_status = bp #type:ignore
+
+        if dept == "LAMINATING":
+            finisher = (body.laminated_by or "").strip()
+            if not finisher:
+                raise HTTPException(400, "Please specify who is laminating this before completing.")
+            log = (
+                db.query(DepartmentLog)
+                .filter(
+                    DepartmentLog.job_id     == job.id,
+                    DepartmentLog.department == dept_enum,
+                    DepartmentLog.exited_at  == None,  # noqa
+                )
+                .order_by(desc(DepartmentLog.entered_at))
+                .first()
+            )
+            if log:
+                log.laminated_by = finisher.title() #type:ignore 
 
         setattr(job, field, StageStatusEnum.COMPLETED)
         _close_log(job, dept_enum, db)
@@ -1601,61 +1619,150 @@ def operator_stats(
     year:  int = Query(...),
     month: int = Query(...),
 ):
-    # Sri Lanka is UTC+5:30 — shift the window back by 5h30m
-    # so "June 2026" in LK time maps correctly to UTC stored timestamps
-    from datetime import timezone
     TZ_OFFSET = timedelta(hours=5, minutes=30)
-
     start = datetime(year, month, 1) - TZ_OFFSET
     end   = (datetime(year + 1, 1, 1) if month == 12 else datetime(year, month + 1, 1)) - TZ_OFFSET
 
-    rows = (
+    def named_counts(dept_enum, column, ts_column):
+        rows = (
+            db.query(column, func.count(DepartmentLog.id).label("count"))
+            .filter(
+                DepartmentLog.department == dept_enum,
+                column.isnot(None),
+                column != "",
+                ts_column >= start,
+                ts_column < end,
+            )
+            .group_by(column)
+            .all()
+        )
+        return [{"operator_name": r[0], "under_whom": None, "count": r[1]} for r in rows]
+
+    # ── PRINTING: operators (with loader detail) + loader totals ──
+    printing_rows = (
         db.query(
-            DepartmentLog.department,
             DepartmentLog.operator_name,
             DepartmentLog.under_whom,
             func.count(DepartmentLog.id).label("count"),
         )
         .filter(
-            DepartmentLog.department.in_([
-                DepartmentEnum.PRINTING,
-                DepartmentEnum.LASER_CUTTING,
-            ]),
+            DepartmentLog.department == DepartmentEnum.PRINTING,
             DepartmentLog.operator_name.isnot(None),
             DepartmentLog.operator_name != "",
             DepartmentLog.entered_at >= start,
-            DepartmentLog.entered_at <  end,
+            DepartmentLog.entered_at < end,
         )
-        .group_by(
-            DepartmentLog.department,
-            DepartmentLog.operator_name,
-            DepartmentLog.under_whom,
-        )
+        .group_by(DepartmentLog.operator_name, DepartmentLog.under_whom)
         .all()
     )
+    printing_operators = [
+        {"operator_name": r.operator_name, "under_whom": r.under_whom, "count": r.count}
+        for r in printing_rows
+    ]
+    printing_loaders = named_counts(DepartmentEnum.PRINTING, DepartmentLog.under_whom, DepartmentLog.entered_at)
 
-    result = {"PRINTING": [], "LASER_CUTTING": []}
-    for r in rows:
-        dept_key = str(r.department).split(".")[-1]
-        result[dept_key].append({
-            "operator_name": r.operator_name,
-            "under_whom":    r.under_whom,
-            "count":         r.count,
-        })
-    return result
+    # ── LASER CUTTING: operators only ──
+    laser_rows = (
+        db.query(
+            DepartmentLog.operator_name,
+            DepartmentLog.under_whom,
+            func.count(DepartmentLog.id).label("count"),
+        )
+        .filter(
+            DepartmentLog.department == DepartmentEnum.LASER_CUTTING,
+            DepartmentLog.operator_name.isnot(None),
+            DepartmentLog.operator_name != "",
+            DepartmentLog.entered_at >= start,
+            DepartmentLog.entered_at < end,
+        )
+        .group_by(DepartmentLog.operator_name, DepartmentLog.under_whom)
+        .all()
+    )
+    laser_operators = [
+        {"operator_name": r.operator_name, "under_whom": r.under_whom, "count": r.count}
+        for r in laser_rows
+    ]
 
+    # ── LAMINATING: Accubind-by (start) + Laminated-by (complete) ──
+    laminating_operators = named_counts(DepartmentEnum.LAMINATING, DepartmentLog.operator_name, DepartmentLog.entered_at)
+    laminating_finishers = named_counts(DepartmentEnum.LAMINATING, DepartmentLog.laminated_by, DepartmentLog.exited_at)
+
+    return {
+        "PRINTING":      {"operators": printing_operators,   "loaders": printing_loaders},
+        "LAMINATING":    {"operators": laminating_operators, "finishers": laminating_finishers},
+        "LASER_CUTTING": {"operators": laser_operators},
+    }
+
+
+@app.get("/api/stats/operator-jobs")
+def operator_jobs_list(
+    dept: str = Query(...),
+    field: str = Query(...),   # operator_name / under_whom / laminated_by
+    name: str = Query(...),
+    year: int = Query(...),
+    month: int = Query(...),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(15, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    try:
+        dept_enum = DepartmentEnum[dept.upper()]
+    except KeyError:
+        raise HTTPException(400, f"Unknown department: {dept}")
+
+    column = getattr(DepartmentLog, field, None)
+    if column is None:
+        raise HTTPException(400, f"Unknown field: {field}")
+
+    TZ_OFFSET = timedelta(hours=5, minutes=30)
+    start = datetime(year, month, 1) - TZ_OFFSET
+    end   = (datetime(year + 1, 1, 1) if month == 12 else datetime(year, month + 1, 1)) - TZ_OFFSET
+
+    # laminated_by is captured at completion → filter/sort by exited_at.
+    # operator_name / under_whom are captured at start → filter/sort by entered_at.
+    ts_col = DepartmentLog.exited_at if field == "laminated_by" else DepartmentLog.entered_at
+
+    q = (
+        db.query(JobCard.job_no, JobCard.customer, JobCard.couple_name, ts_col.label("ts"))
+        .join(DepartmentLog, DepartmentLog.job_id == JobCard.id)
+        .filter(
+            DepartmentLog.department == dept_enum,
+            column == name,
+            ts_col >= start,
+            ts_col < end,
+        )
+        .order_by(desc(ts_col))
+    )
+
+    total = q.count()
+    rows = q.offset((page - 1) * page_size).limit(page_size).all()
+
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "pages": max(1, -(-total // page_size)),
+        "jobs": [
+            {"job_no": r[0], "customer": r[1], "couple_name": r[2]}
+            for r in rows
+        ],
+    }
 
 @app.get("/api/operators/known")
 def get_known_operators(
-    dept: str = Query(...),
-    db:   Session = Depends(get_db),
+    dept:  str = Query(...),
+    field: str = Query("operator_name"),  
+    db:    Session = Depends(get_db),
 ):
+    column = getattr(DepartmentLog, field, None)
+    if column is None:
+        raise HTTPException(400, f"Unknown field: {field}")
     rows = (
-        db.query(DepartmentLog.operator_name)
+        db.query(column)
         .filter(
-            DepartmentLog.department    == dept.upper(),
-            DepartmentLog.operator_name.isnot(None),   # ← fix
-            DepartmentLog.operator_name != "",          # ← fix
+            DepartmentLog.department == dept.upper(),
+            column.isnot(None),
+            column != "",
         )
         .distinct()
         .all()

@@ -193,7 +193,8 @@ class DepartmentLog(Base):
     under_whom    = Column(String(128), nullable=True)   # for PRINTING only
     machine       = Column(String(32),  nullable=True)
     is_story      = Column(Boolean, nullable=False, default=False)
-    is_rebind     = Column(Boolean, nullable=False, default=False)    
+    is_rebind     = Column(Boolean, nullable=False, default=False)
+    laminated_by  = Column(String(128), nullable=True)   
 
     job = relationship("JobCard", back_populates="logs")
 
@@ -390,6 +391,12 @@ def run_migration():
                 conn.execute(text("ALTER TABLE thankyou_cards ADD COLUMN job_no VARCHAR(64)"))
                 conn.commit()
 
+        dept_log_cols = {c["name"] for c in inspector.get_columns("department_logs")}
+        with engine.connect() as conn:
+            if "laminated_by" not in dept_log_cols:
+                conn.execute(text("ALTER TABLE department_logs ADD COLUMN laminated_by VARCHAR(128)"))
+                conn.commit()
+
         return
 
     with engine.connect() as conn:
@@ -470,6 +477,10 @@ def run_migration():
         conn.execute(text("""
             ALTER TABLE thankyou_cards
             ADD COLUMN IF NOT EXISTS job_no VARCHAR(64);
+        """))
+        conn.execute(text("""
+            ALTER TABLE department_logs
+            ADD COLUMN IF NOT EXISTS laminated_by VARCHAR(128);
         """))
 
         conn.commit()
