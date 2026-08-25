@@ -4282,7 +4282,7 @@ function OperatorStatsPanel() {
   const [year,  setYear]  = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [data,  setData]  = useState(null);
-  const [activeDept, setActiveDept] = useState("PRINTING");
+  const [expandedDept, setExpandedDept] = useState(null); // "PRINTING" | "LAMINATING" | "LASER_CUTTING" | null
   const isMobile = useIsMobile();
 
   useEffect(() => {
@@ -4297,15 +4297,23 @@ function OperatorStatsPanel() {
   const monthLabel = new Date(year, month - 1, 1)
     .toLocaleDateString("en-GB", { month: "long", year: "numeric" });
 
-  const DEPT_TABS = [
-    { key: "PRINTING",      label: "Printing",      accent: "#0c64f1", icon: <Printer size={14} /> },
-    { key: "LAMINATING",    label: "Laminating",    accent: "#06b6d4", icon: <BookOpen size={14} /> },
-    { key: "LASER_CUTTING", label: "Laser Cutting", accent: "#8616f0", icon: <Scissors size={14} /> },
+  const DEPTS = [
+    { key: "PRINTING",      label: "Printing",      accent: "#0c64f1", icon: <Printer size={16} color="#0c64f1" /> },
+    { key: "LAMINATING",    label: "Laminating",    accent: "#06b6d4", icon: <BookOpen size={16} color="#06b6d4" /> },
+    { key: "LASER_CUTTING", label: "Laser Cutting", accent: "#8616f0", icon: <Scissors size={16} color="#8616f0" /> },
   ];
 
-  
+  function countFor(deptKey) {
+    const d = data?.[deptKey];
+    if (!d) return 0;
+    if (deptKey === "PRINTING")   return (d.operators || []).reduce((s, r) => s + r.count, 0);
+    if (deptKey === "LAMINATING") return (d.operators || []).reduce((s, r) => s + r.count, 0);
+    return (d.operators || []).reduce((s, r) => s + r.count, 0);
+  }
 
-  const deptData = data?.[activeDept];
+  function toggleDept(key) {
+    setExpandedDept(prev => prev === key ? null : key);
+  }
 
   return (
     <div style={{
@@ -4331,63 +4339,85 @@ function OperatorStatsPanel() {
         </div>
       </div>
 
-      {/* Department tabs */}
-      <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
-        {DEPT_TABS.map(t => (
-          <button key={t.key} onClick={() => setActiveDept(t.key)} style={{
-            display: "flex", alignItems: "center", gap: 6,
-            padding: "7px 14px", borderRadius: 6, fontSize: 12, fontWeight: 800,
-            letterSpacing: ".04em", textTransform: "uppercase",
-            background: activeDept === t.key ? t.accent : "var(--bg3)",
-            color: activeDept === t.key ? "#000" : "var(--text-sec)",
-            border: `1px solid ${activeDept === t.key ? t.accent : "var(--border)"}`,
-          }}>{t.icon} {t.label}</button>
-        ))}
-      </div>
-
       {!data ? (
         <div style={{ textAlign: "center", padding: "24px 0", color: "var(--text-dim)", fontFamily: "var(--fd)", fontSize: 13, letterSpacing: ".08em" }}>
           LOADING…
         </div>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 12 }}>
-          {activeDept === "PRINTING" && (
-            <>
-              <OperatorStatSection
-                icon={<Printer size={16} color="#0c64f1" />} label="Printers" accent="#0c64f1"
-                rows={deptData?.operators || []} dept="PRINTING" field="operator_name"
-                monthLabel={monthLabel} year={year} month={month} isMobile={isMobile}
-              />
-              <OperatorStatSection
-                icon={<FileUp size={16} color="#0c64f1" />} label="Loaded By" accent="#0c64f1"
-                rows={deptData?.loaders || []} dept="PRINTING" field="under_whom"
-                monthLabel={monthLabel} year={year} month={month} isMobile={isMobile}
-              />
-            </>
-          )}
-          {activeDept === "LAMINATING" && (
-            <>
-              <OperatorStatSection
-                icon={<BookOpen size={16} color="#06b6d4" />} label="Accubind By" accent="#06b6d4"
-                rows={deptData?.operators || []} dept="LAMINATING" field="operator_name"
-                monthLabel={monthLabel} year={year} month={month} isMobile={isMobile}
-              />
-              <OperatorStatSection
-                icon={<Check size={16} color="#22c55e" />} label="Laminated By" accent="#22c55e"
-                rows={deptData?.finishers || []} dept="LAMINATING" field="laminated_by"
-                monthLabel={monthLabel} year={year} month={month} isMobile={isMobile}
-              />
-            </>
-          )}
-          {activeDept === "LASER_CUTTING" && (
-            <div style={{ gridColumn: isMobile ? "1" : "1 / -1" }}>
-              <OperatorStatSection
-                icon={<Scissors size={16} color="#8616f0" />} label="Laser Operators" accent="#8616f0"
-                rows={deptData?.operators || []} dept="LASER_CUTTING" field="operator_name"
-                monthLabel={monthLabel} year={year} month={month} isMobile={isMobile}
-              />
-            </div>
-          )}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {DEPTS.map(dept => {
+            const isOpen = expandedDept === dept.key;
+            const deptData = data[dept.key];
+            const total = countFor(dept.key);
+
+            return (
+              <div key={dept.key} style={{
+                background: "var(--bg2)",
+                border: `1px solid ${dept.accent}50`,
+                borderLeft: `4px solid ${dept.accent}`,
+                borderRadius: 8, overflow: "hidden",
+              }}>
+                <button onClick={() => toggleDept(dept.key)} style={{
+                  width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+                  padding: "12px 14px", background: "transparent", textAlign: "left", gap: 10,
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <ChevronDown size={16} style={{ color: "var(--text-dim)", transition: "transform .2s ease", transform: isOpen ? "rotate(180deg)" : "rotate(0deg)", flexShrink: 0 }} />
+                    {dept.icon}
+                    <span style={{ fontSize: 14, fontWeight: 800, color: dept.accent, textTransform: "uppercase", letterSpacing: ".06em" }}>
+                      {dept.label}
+                    </span>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontFamily: "var(--fd)", fontSize: 20, fontWeight: 900, color: dept.accent, lineHeight: 1 }}>{total}</div>
+                    <div style={{ fontSize: 10, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".08em" }}>jobs</div>
+                  </div>
+                </button>
+
+                {isOpen && (
+                  <div className="si" style={{ padding: "0 14px 14px", display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 12 }}>
+                    {dept.key === "PRINTING" && (
+                      <>
+                        <OperatorStatSection
+                          icon={<Printer size={16} color="#0c64f1" />} label="Printers" accent="#0c64f1"
+                          rows={deptData?.operators || []} dept="PRINTING" field="operator_name"
+                          monthLabel={monthLabel} year={year} month={month} isMobile={isMobile}
+                        />
+                        <OperatorStatSection
+                          icon={<FileUp size={16} color="#0c64f1" />} label="Loaded By" accent="#0c64f1"
+                          rows={deptData?.loaders || []} dept="PRINTING" field="under_whom"
+                          monthLabel={monthLabel} year={year} month={month} isMobile={isMobile}
+                        />
+                      </>
+                    )}
+                    {dept.key === "LAMINATING" && (
+                      <>
+                        <OperatorStatSection
+                          icon={<BookOpen size={16} color="#06b6d4" />} label="Accubind By" accent="#06b6d4"
+                          rows={deptData?.operators || []} dept="LAMINATING" field="operator_name"
+                          monthLabel={monthLabel} year={year} month={month} isMobile={isMobile}
+                        />
+                        <OperatorStatSection
+                          icon={<Check size={16} color="#22c55e" />} label="Laminated By" accent="#22c55e"
+                          rows={deptData?.finishers || []} dept="LAMINATING" field="laminated_by"
+                          monthLabel={monthLabel} year={year} month={month} isMobile={isMobile}
+                        />
+                      </>
+                    )}
+                    {dept.key === "LASER_CUTTING" && (
+                      <div style={{ gridColumn: isMobile ? "1" : "1 / -1" }}>
+                        <OperatorStatSection
+                          icon={<Scissors size={16} color="#8616f0" />} label="Laser Operators" accent="#8616f0"
+                          rows={deptData?.operators || []} dept="LASER_CUTTING" field="operator_name"
+                          monthLabel={monthLabel} year={year} month={month} isMobile={isMobile}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
