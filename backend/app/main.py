@@ -372,6 +372,7 @@ class DamageCreate(BaseModel):
     quantity: int
     other_item: Optional[str] = None     
     actual_value: Optional[int] = None
+    date: Optional[str] = None
 
 
 
@@ -394,7 +395,7 @@ def create_damage(payload: DamageCreate, db: Session = Depends(get_db)):
     is_other = price.size == "OTHER"
     other_item = None
 
-    if is_other:
+    if is_other:  #type:ignore 
         other_item = (payload.other_item or "").strip()
         if not other_item:
             raise HTTPException(400, "Please describe the damaged item")
@@ -408,6 +409,17 @@ def create_damage(payload: DamageCreate, db: Session = Depends(get_db)):
         total_value = price.unit_price * payload.quantity
         quantity = payload.quantity
 
+    if payload.date:
+        try:
+            y, m, d = map(int, payload.date.split("-"))
+        except ValueError:
+            raise HTTPException(400, "date must be in YYYY-MM-DD format")
+        sl_now    = datetime.utcnow() + SL_TZ_OFFSET
+        sl_dt     = datetime(y, m, d, sl_now.hour, sl_now.minute, sl_now.second)
+        created_at = sl_dt - SL_TZ_OFFSET
+    else:
+        created_at = datetime.utcnow()
+
     entry = DamageEntry(
         department=DamageDeptEnum[dept],
         paper_price_id=price.id,
@@ -419,6 +431,7 @@ def create_damage(payload: DamageCreate, db: Session = Depends(get_db)):
         other_item=other_item,
         unit_price_snapshot=unit_price_snapshot,
         total_value=total_value,
+        created_at=created_at,   
     )
 
     db.add(entry)
@@ -612,6 +625,7 @@ class DamageUpdate(BaseModel):
     quantity: Optional[int] = None
     other_item: Optional[str] = None      
     actual_value: Optional[int] = None
+    admin_override: Optional[bool] = False
 
 
 def _damage_or_404(damage_id: int, db: Session) -> DamageEntry:
@@ -621,7 +635,9 @@ def _damage_or_404(damage_id: int, db: Session) -> DamageEntry:
     return entry
 
 
-def _check_damage_editable(entry: DamageEntry):
+def _check_damage_editable(entry: DamageEntry, admin_override: bool = False):
+    if admin_override:
+        return
     if (datetime.utcnow() - entry.created_at) > timedelta(hours=DAMAGE_EDIT_WINDOW_HOURS): #type:ignore 
         raise HTTPException(403, "Edit window has expired. This entry can no longer be changed.")
 
@@ -629,7 +645,7 @@ def _check_damage_editable(entry: DamageEntry):
 @app.patch("/api/damages/{damage_id}", response_model=DamageEntryOut)
 def update_damage(damage_id: int, payload: DamageUpdate, db: Session = Depends(get_db)):
     entry = _damage_or_404(damage_id, db)
-    _check_damage_editable(entry)
+    _check_damage_editable(entry, admin_override=bool(payload.admin_override))
 
     if payload.paper_price_id is not None:
         price = db.query(PaperPrice).filter(PaperPrice.id == payload.paper_price_id).first()
@@ -682,9 +698,9 @@ def update_damage(damage_id: int, payload: DamageUpdate, db: Session = Depends(g
     return _damage_out(entry)
 
 @app.delete("/api/damages/{damage_id}", status_code=204)
-def delete_damage(damage_id: int, db: Session = Depends(get_db)):
+def delete_damage(damage_id: int, db: Session = Depends(get_db), admin_override: bool = Query(False)):
     entry = _damage_or_404(damage_id, db)
-    _check_damage_editable(entry)
+    _check_damage_editable(entry, admin_override=admin_override)
     db.delete(entry)
     db.commit()
 

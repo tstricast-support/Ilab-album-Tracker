@@ -76,8 +76,11 @@ const api = {
   }),
   createDamage: (body) => apiFetch(`/api/damages`, { method: "POST", body: JSON.stringify(body) }),
   // damages: (department, page = 1) => apiFetch(`/api/damages?${department ? `department=${department}&` : ""}page=${page}&page_size=20`),
-  updateDamage: (id, body) => apiFetch(`/api/damages/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
-  deleteDamage: (id) => apiFetch(`/api/damages/${id}`, { method: "DELETE" }),
+  updateDamage: (id, body) => apiFetch(`/api/damages/${id}`, {
+  method: "PATCH",
+  body: JSON.stringify({ ...body, admin_override: IS_ADMIN }),
+  }),
+  deleteDamage: (id) => apiFetch(`/api/damages/${id}${IS_ADMIN ? "?admin_override=true" : ""}`, { method: "DELETE" }),
   knownDamageOperators: (department) => apiFetch(`/api/damages/known-operators?department=${department}`),
   damageStats: () => apiFetch(`/api/stats/damages`),
 
@@ -458,7 +461,7 @@ function AppearanceModal({ onClose }) {
           <button onClick={onClose} style={{ flex: 1, padding: "11px 0", background: "var(--amber)", color: "var(--on-accent)", borderRadius: 8, fontWeight: 800 }}>✓ Done</button>
         </div>
         <div style={{ fontSize: 11, color: "var(--text-dim)", lineHeight: 1.5 }}>
-          Saved for this station/device only — won't affect other departments.
+          Saved for this station/device only - won't affect other departments.
         </div>
       </div>
     </div>
@@ -1205,7 +1208,7 @@ function PaymentEditModal({ job, onClose, onSaved, addToast }) {
   );
 }
 
-// ── Payment field (display + edit — ENTRY role only) ────────────────────────
+// ── Payment field (display + edit - ENTRY role only) ────────────────────────
 function PaymentField({ job, addToast }) {
   const [editing, setEditing] = useState(false);
   const [local,   setLocal]   = useState(job.payment_by || "");
@@ -2156,7 +2159,7 @@ function Shell({ title, accent = "var(--amber)", topRight, children }) {
             <span style={{ color: "var(--amber)", fontWeight: 700 }}>
               Yasith Wijesuriya
             </span>
-            {" "}— All rights reserved
+            {" "}- All rights reserved
         </footer>
         <ScrollToTopButton />
     </div>
@@ -2723,7 +2726,7 @@ function JobCardFull({ job, actionLabel, onAction, acting, actionBlocked = false
     }}>
       <div style={{ background: job.priority === "URGENT" ? "var(--red)" : delayed ? "var(--red)" : "var(--border)" }} />
       <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
-        {/* Job header: title + delivery box — stacks on mobile */}
+        {/* Job header: title + delivery box - stacks on mobile */}
         <div className="r-job-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
@@ -3050,7 +3053,7 @@ function EntryPage() {
   const isMobile = useIsMobile();
   const LOCK_MS = 240_000;
  
-  // ── UTC-safe helper — SQLite omits "Z", JS then parses as LOCAL time ────────
+  // ── UTC-safe helper - SQLite omits "Z", JS then parses as LOCAL time ────────
   function parseCreated(job) {
     const s = job.created_at;
     return new Date(s.endsWith("Z") ? s : s + "Z").getTime();
@@ -3087,7 +3090,7 @@ function EntryPage() {
   }, []);
  
   // Auto-close edit modal if window expires while it is open
-  // FIX: was `job.created_at` (undefined variable) — now correctly uses `editJob`
+  // FIX: was `job.created_at` (undefined variable) - now correctly uses `editJob`
   useEffect(() => {
     if (!editJob) return;
     const elapsed = now - parseCreated(editJob);
@@ -3213,7 +3216,7 @@ async function handleSubmit(e) {
     } catch (err) { add(err.message, "error"); }
   }
  
-  // ── Editable jobs (filtered list — re-evaluated every second via `now`) ──────
+  // ── Editable jobs (filtered list - re-evaluated every second via `now`) ──────
   const editableJobs = jobs.filter(isEditable);
  
   return (
@@ -3231,7 +3234,7 @@ async function handleSubmit(e) {
               fontWeight: 900, lineHeight: 1,
               color: todayCount > 0 ? "var(--green)" : "var(--text-dim)",
               minWidth: "1.6em", display: "inline-block", textAlign: "right", 
-            }}>{todayCount ?? "—"}</span>
+            }}>{todayCount ?? "-"}</span>
             <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
               <span style={{ fontSize: isMobile ? 9 : 11, fontWeight: 800, color: "var(--green)", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>ISSUED</span>
               <span style={{ fontSize: isMobile ? 7 : 9, fontWeight: 600, color: "var(--success-text)", textTransform: "uppercase", letterSpacing: ".1em", lineHeight: 1 }}>TODAY</span>
@@ -3365,7 +3368,7 @@ async function handleSubmit(e) {
                       }}>
                         <Calendar size={11} />
                         {new Date(job.dele_date).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
-                        {days < 0 ? ` — ${Math.abs(days)}d overdue` : days === 0 ? " — Today!" : days === 1 ? " — Tomorrow" : ` — ${days}d`}
+                        {days < 0 ? ` - ${Math.abs(days)}d overdue` : days === 0 ? " - Today!" : days === 1 ? " - Tomorrow" : ` - ${days}d`}
                       </div>
                     </div>
  
@@ -4079,7 +4082,7 @@ function AlbumCountPanel() {
             </div>
           </div>
 
-          {/* Right side — big number */}
+          {/* Right side - big number */}
           <div style={{
             display: "flex", flexDirection: "column",
             alignItems: "flex-end",
@@ -4934,7 +4937,7 @@ function StationPage({ deptKey }) {
           l => l.department === cfg.dept && !l.exited_at && l.is_delayed
         );
         if (activeLog && !activeLog.delay_reason) {
-          add("⏱ This job is delayed — please fill in the delay reason before completing.", "error");
+          add("⏱ This job is delayed - please fill in the delay reason before completing.", "error");
           setPendingCompleteJob(job);
           setReasonJob(job);
           return;
@@ -4945,7 +4948,7 @@ function StationPage({ deptKey }) {
         return;
       }
 
-      // ── Intercept COMPLETE for BINDING — ask box/pouch status ──
+      // ── Intercept COMPLETE for BINDING - ask box/pouch status ──
       if (a.action === "complete" && cfg.dept === "BINDING") {
         setBoxPouchPending(job);
         return;
@@ -5014,7 +5017,7 @@ function StationPage({ deptKey }) {
       }
     }
 
-  // Called after delay reason is saved — if we were blocking a completion,
+  // Called after delay reason is saved - if we were blocking a completion,
   // automatically proceed with it now.
   async function onReasonSaved() {
     await reload();
@@ -5085,7 +5088,7 @@ function StationPage({ deptKey }) {
             fontSize: isMobile ? 18 : 50,
             fontWeight: 900, lineHeight: 1,
             color: deptDailyCount > 0 ? "#4749c2" : "var(--text-dim)",
-          }}>{deptDailyCount ?? "—"}</span>
+          }}>{deptDailyCount ?? "-"}</span>
           <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
             <span style={{ fontSize: isMobile ? 8 : 12, fontWeight: 800, color: "#ffff", textTransform: "uppercase", letterSpacing: ".08em", lineHeight: 1, whiteSpace: "nowrap" }}>Daily</span>
             <span style={{ fontSize: isMobile ? 7 : 10, fontWeight: 600, color: "#4749c2", textTransform: "uppercase", letterSpacing: ".08em", lineHeight: 1, whiteSpace: "nowrap" }}>Done</span>
@@ -5104,7 +5107,7 @@ function StationPage({ deptKey }) {
               fontSize: isMobile ? 18 : 50,
               fontWeight: 900, lineHeight: 1,
               color: deptCompletedCount > 0 ? "var(--green)" : "var(--text-dim)",
-            }}>{deptCompletedCount ?? "—"}</span>
+            }}>{deptCompletedCount ?? "-"}</span>
             <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
               <span style={{ fontSize: isMobile ? 8 : 12, fontWeight: 800, color: "#ffff", textTransform: "uppercase", letterSpacing: ".08em", lineHeight: 1, whiteSpace: "nowrap" }}>Monthly</span>
               <span style={{ fontSize: isMobile ? 7 : 10, fontWeight: 600, color: "var(--success-text)", textTransform: "uppercase", letterSpacing: ".08em", lineHeight: 1, whiteSpace: "nowrap" }}>Done</span>
@@ -5189,6 +5192,209 @@ function StationPage({ deptKey }) {
       <DamageTimeAlertModal />
       <ToastStack toasts={toasts} />
     </>
+  );
+}
+
+const DAMAGE_ADMIN_DEPTS = [
+  { value: "PRINTING",   label: "Printing" },
+  { value: "LAMINATING", label: "Laminating" },
+  { value: "BINDING",    label: "Binding" },
+];
+
+function AdminDamageEntryForm({ onCreated, addToast }) {
+  const [dept, setDept]               = useState("PRINTING");
+  const [prices, setPrices]           = useState([]);
+  const [knownNames, setKnownNames]   = useState([]);
+  const [priceId, setPriceId]         = useState("");
+  const [jobNo, setJobNo]             = useState("");
+  const [customer, setCustomer]       = useState("");
+  const [operatorName, setOperatorName] = useState("");
+  const [showNewName, setShowNewName] = useState(false);
+  const [reason, setReason]           = useState("");
+  const [quantity, setQuantity]       = useState("");
+  const [otherItem, setOtherItem]     = useState("");
+  const [actualValue, setActualValue] = useState("");
+  const [saving, setSaving]           = useState(false);
+  const [selectedDate, setSelectedDate] = useState(() => slDateStr(new Date()));
+  const [calYear, setCalYear]   = useState(new Date().getFullYear());
+  const [calMonth, setCalMonth] = useState(new Date().getMonth() + 1);
+  const [dotDays, setDotDays]   = useState({});
+  const [showCal, setShowCal]   = useState(false);
+
+  useEffect(() => { api.paperPrices().then(setPrices).catch(() => {}); }, []);
+  useEffect(() => {
+    api.knownDamageOperators(dept).then(d => setKnownNames(d.names || [])).catch(() => {});
+  }, [dept]);
+  useEffect(() => {
+    api.damageDates(calYear, calMonth, dept).then(setDotDays).catch(() => setDotDays({}));
+  }, [calYear, calMonth, dept]);
+
+  const selectedPrice = prices.find(p => p.id === Number(priceId));
+  const isOthers = selectedPrice?.size === "OTHER";
+  const qtyNum         = Number(quantity) || 0;
+  const actualValueNum = Number(actualValue) || 0;
+  const previewTotal = isOthers ? actualValueNum : (selectedPrice ? selectedPrice.unit_price * qtyNum : 0);
+  const isToday = selectedDate === slDateStr(new Date());
+
+  useEffect(() => {
+    if (isOthers) { setQuantity(""); } else { setOtherItem(""); setActualValue(""); }
+  }, [priceId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function submit(e) {
+    e.preventDefault();
+    if (!priceId || !operatorName.trim() || !reason.trim()) return;
+    if (isOthers) {
+      if (!otherItem.trim() || actualValueNum <= 0) {
+        addToast("Enter item description and a value greater than 0.", "error");
+        return;
+      }
+    } else if (qtyNum <= 0) return;
+
+    setSaving(true);
+    try {
+      await api.createDamage({
+        department: dept,
+        paper_price_id: Number(priceId),
+        job_no: jobNo.trim(),
+        customer: customer.trim(),
+        operator_name: operatorName.trim(),
+        reason: reason.trim(),
+        quantity: isOthers ? 1 : qtyNum,
+        other_item: isOthers ? otherItem.trim() : undefined,
+        actual_value: isOthers ? actualValueNum : undefined,
+        date: selectedDate,
+      });
+      addToast(`✓ Backfilled damage entry for ${new Date(selectedDate + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}.`, "success");
+      setPriceId(""); setJobNo(""); setCustomer(""); setReason(""); setQuantity("");
+      setOtherItem(""); setActualValue("");
+      onCreated?.({ date: selectedDate, department: dept });
+    } catch (err) { addToast(err.message, "error"); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div style={{ background: "var(--warn-bg)", border: "1px solid var(--warn-border)", borderRadius: 6, padding: "8px 12px", fontSize: 12, color: "var(--warn-text)" }}>
+        ⚠ Admin-only use this to record a damage that was missed on the day it happened.
+      </div>
+
+      <div className="r-grid-2">
+        <div>
+          <label>Department *</label>
+          <select value={dept} onChange={e => { setDept(e.target.value); setPriceId(""); setOperatorName(""); }}>
+            {DAMAGE_ADMIN_DEPTS.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}
+          </select>
+        </div>
+        <div>
+          <label>Date *</label>
+          <button type="button" onClick={() => setShowCal(p => !p)} style={{
+            width: "100%", textAlign: "left", padding: "9px 12px", background: "var(--bg3)", color: "var(--text-pri)",
+            border: "1px solid var(--border)", borderRadius: 6, fontWeight: 700, display: "flex", alignItems: "center", gap: 8, fontSize: 14,
+          }}>
+            <Calendar size={14} />
+            {new Date(selectedDate + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
+            {isToday && <span style={{ fontSize: 10, color: "var(--green)", marginLeft: "auto" }}>TODAY</span>}
+          </button>
+        </div>
+      </div>
+
+      {showCal && (
+        <EntryCalendar year={calYear} month={calMonth}
+          onYearMonth={(y, m) => { setCalYear(y); setCalMonth(m); }}
+          dotDays={dotDays} selectedDate={selectedDate} onSelect={setSelectedDate}
+          onAfterSelect={() => setShowCal(false)} accent="var(--red)" />
+      )}
+
+      <div className="r-grid-2">
+        <div>
+          <label>Job No <span style={{ color: "var(--text-dim)", fontWeight: 400 }}>(optional)</span></label>
+          <input value={jobNo} onChange={e => setJobNo(e.target.value)} placeholder="JOB-0001" />
+        </div>
+        <div>
+          <label>Photographer / Studio <span style={{ color: "var(--text-dim)", fontWeight: 400 }}>(optional)</span></label>
+          <input value={customer} onChange={e => setCustomer(e.target.value)} placeholder="Studio name" />
+        </div>
+      </div>
+
+      <div className="r-grid-2">
+        <div>
+          <label>Item Type *</label>
+          <select value={priceId} onChange={e => setPriceId(e.target.value)}>
+            <option value="">-- Select item --</option>
+            {prices.filter(p => p.size !== "OTHER").map(p => (
+              <option key={p.id} value={p.id}>{p.label} (Rs. {p.unit_price})</option>
+            ))}
+            {prices.filter(p => p.size === "OTHER").map(p => (
+              <option key={p.id} value={p.id}>⚠ Others (Non-paper item)</option>
+            ))}
+          </select>
+        </div>
+        {!isOthers && (
+          <div>
+            <label>Quantity *</label>
+            <input type="number" min="1" value={quantity} onChange={e => setQuantity(e.target.value)} placeholder="e.g. 2" />
+          </div>
+        )}
+      </div>
+
+      {isOthers && (
+        <div className="r-grid-2">
+          <div>
+            <label>Item / Description *</label>
+            <input value={otherItem} onChange={e => setOtherItem(e.target.value)} placeholder="e.g. Rexine sheet, Glue bottle…" />
+          </div>
+          <div>
+            <label>Actual Value (Rs.) *</label>
+            <input type="number" min="0" value={actualValue} onChange={e => setActualValue(e.target.value)} placeholder="e.g. 500" />
+          </div>
+        </div>
+      )}
+
+      <div>
+        <label>Damaged By *</label>
+        {knownNames.length > 0 && !showNewName ? (
+          <select
+            value={knownNames.includes(operatorName) ? operatorName : ""}
+            onChange={e => {
+              if (e.target.value === "__new__") { setShowNewName(true); setOperatorName(""); }
+              else setOperatorName(e.target.value);
+            }}
+          >
+            <option value="">-- Select name --</option>
+            {knownNames.map(n => <option key={n} value={n}>{n}</option>)}
+            <option value="__new__">+ Type a new name</option>
+          </select>
+        ) : (
+          <div style={{ display: "flex", gap: 6 }}>
+            <input value={operatorName} onChange={e => setOperatorName(e.target.value.replace(/\b\w/g, c => c.toUpperCase()))} placeholder="Enter name" style={{ flex: 1 }} />
+            {knownNames.length > 0 && (
+              <button type="button" onClick={() => { setShowNewName(false); setOperatorName(""); }} style={{ padding: "0 10px", background: "var(--bg3)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 12 }}>← Back</button>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <label>Reason *</label>
+        <textarea value={reason} onChange={e => setReason(e.target.value)} placeholder="e.g. Paper jam, color mismatch…" rows={2} />
+      </div>
+
+      {previewTotal > 0 && (
+        <div style={{ background: "#807a7a", border: "1px solid var(--border)", borderRadius: 6, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span style={{ fontSize: 12, color: "var(--text-pri)", textTransform: "uppercase", letterSpacing: ".06em", fontWeight: 700 }}>
+            {isOthers ? "Damage Value" : "Estimated Value"}
+          </span>
+          <span style={{ fontFamily: "var(--fm)", fontSize: 18, fontWeight: 900, color: "var(--text-pri)" }}>Rs. {previewTotal}</span>
+        </div>
+      )}
+
+      <button type="submit" disabled={saving} style={{
+        padding: "13px 0", background: saving ? "var(--bg3)" : "var(--red)",
+        color: saving ? "var(--text-dim)" : "#fff", borderRadius: 8, fontWeight: 800, fontSize: 15,
+      }}>
+        {saving ? "Saving…" : `⚠ Backfill for ${new Date(selectedDate + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}`}
+      </button>
+    </form>
   );
 }
 
@@ -5457,6 +5663,7 @@ function DamageEntryCard({ entry, onChanged, addToast }) {
   const WINDOW_MS = 24 * 3600 * 1000;
   const remaining = WINDOW_MS - (now - createdMs());
   const withinWindow = remaining > 0;
+  const canEdit = withinWindow || IS_ADMIN;   
 
   async function del() {
     if (!window.confirm(`Delete this damage entry (${entry.paper_label} × ${entry.quantity})?`)) return;
@@ -5515,9 +5722,11 @@ function DamageEntryCard({ entry, onChanged, addToast }) {
         </div>
       </div>
 
-      {withinWindow && (
+      {canEdit && (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 4, paddingTop: 8, borderTop: "1px dashed var(--border)" }}>
-          <span style={{ fontSize: 12, color: "var(--text-pri)" }}>{fmtRemaining()}</span>
+          <span style={{ fontSize: 12, color: IS_ADMIN && !withinWindow ? "var(--red)" : "var(--text-pri)", fontWeight: IS_ADMIN && !withinWindow ? 700 : 400 }}>
+            {withinWindow ? fmtRemaining() : "Admin - editable anytime"}
+          </span>
           <div style={{ display: "flex", gap: 6 }}>
             <button onClick={() => setEditing(true)} style={{ padding: "5px 12px", fontSize: 11, fontWeight: 700, borderRadius: 5, background: "var(--bg3)", color: "var(--amber)", border: "1px solid var(--amber)" }}><Pen size={12} /></button>
             <button onClick={del} style={{ padding: "5px 12px", fontSize: 11, fontWeight: 700, borderRadius: 5, background: "var(--danger-bg)", color: "var(--red)", border: "1px solid var(--red)" }}><Trash size={12} /></button>
@@ -5668,6 +5877,19 @@ function DamagesPage({ deptKey }) {
             </Sec>
           )}
 
+          {isAdminView && IS_ADMIN && (
+            <Sec title="Backfill Damage (Admin)" accent="var(--red)">
+              <AdminDamageEntryForm
+                onCreated={({ date, department }) => {
+                  setSelectedDate(date);
+                  setFilterDept(department);
+                  setPage(1);
+                }}
+                addToast={add}
+              />
+            </Sec>
+          )}
+
           {isAdminView && (
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {["", "PRINTING", "LAMINATING", "BINDING"].map(d => (
@@ -5680,6 +5902,7 @@ function DamagesPage({ deptKey }) {
               ))}
             </div>
           )}
+
 
           <div className="r-history-layout" style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "220px 1fr", gap: 16, alignItems: "start" }}>
   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -5717,7 +5940,7 @@ function DamagesPage({ deptKey }) {
 
   <div>
     <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--text-pri)", marginBottom: 10 }}>
-      Entries — {selectedDate}
+      Entries - {selectedDate}
     </div>
     {loading && <div style={{ textAlign: "center", padding: "30px 0", color: "var(--text-pri)" }}>LOADING…</div>}
     {!loading && data?.entries?.length === 0 && (
@@ -6146,7 +6369,7 @@ function PapersPage() {
 
             <div>
               <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--text-pri)", marginBottom: 10 }}>
-                Usage — {selectedDate}
+                Usage - {selectedDate}
               </div>
               {loading && <div style={{ textAlign: "center", padding: "30px 0", color: "var(--text-dim)" }}>LOADING…</div>}
               {!loading && data?.entries?.length === 0 && (
@@ -6192,7 +6415,7 @@ function DateFixRow({ label, accent, currentDateSl, disabled, disabledReason, on
       <div>
         <div style={{ fontSize: 12, fontWeight: 800, color: accent, textTransform: "uppercase", letterSpacing: ".06em" }}>{label}</div>
         <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-pri)", marginTop: 3, fontFamily: "var(--fm)" }}>
-          {currentDateSl || "—"}
+          {currentDateSl || "-"}
         </div>
         {disabled && <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 2 }}>{disabledReason}</div>}
       </div>
@@ -6226,7 +6449,7 @@ function FixDateModal({ title, currentDateSl, onSave, onClose }) {
           <input type="date" value={date} onChange={e => setDate(e.target.value)} />
         </div>
         <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
-          Time-of-day stays the same — only the date moves. Duration &amp; delay status won't change.
+          Time-of-day stays the same - only the date moves. Duration &amp; delay status won't change.
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <button onClick={save} disabled={saving || !date} style={{ flex: 1, padding: "12px 0", background: "var(--amber)", color: "#000", borderRadius: 8, fontWeight: 800, fontSize: 14 }}>{saving ? "Saving…" : "✓ Save"}</button>
@@ -6286,7 +6509,7 @@ function AdminDateFixPage() {
 
   return (
     <>
-      <Shell title="ADMIN — FIX DATES" accent="var(--red)">
+      <Shell title="ADMIN - FIX DATES" accent="var(--red)">
         <div style={{ maxWidth: 640, display: "flex", flexDirection: "column", gap: 16 }}>
           <Sec title="Find Job" accent="var(--red)">
             <div style={{ display: "flex", gap: 8 }}>
@@ -6313,7 +6536,7 @@ function AdminDateFixPage() {
           {loading && <div style={{ textAlign: "center", padding: 20, color: "var(--text-dim)" }}>LOADING…</div>}
 
           {timeline && (
-            <Sec title={`Timeline — ${timeline.job_no}`} accent="var(--amber)">
+            <Sec title={`Timeline - ${timeline.job_no}`} accent="var(--amber)">
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 <DateFixRow
                   label="Entry" accent="var(--amber)" currentDateSl={timeline.created_date_sl}
@@ -6335,7 +6558,7 @@ function AdminDateFixPage() {
                 })}
                 {timeline.is_fully_completed && (
                   <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 4 }}>
-                    Job fully completed on <b style={{ color: "var(--green)" }}>{timeline.completed_date_sl}</b> — this follows the Binding date automatically.
+                    Job fully completed on <b style={{ color: "var(--green)" }}>{timeline.completed_date_sl}</b> - this follows the Binding date automatically.
                   </div>
                 )}
               </div>
@@ -6359,7 +6582,7 @@ function AdminDateFixPage() {
 
 // ── 3. OVERDUE DELIVERY ALERT ─────────────────────────────────────────────────
 // Jobs that are past their delivery date but still in the pipeline.
-// Computed from `active` jobs — no backend needed.
+// Computed from `active` jobs - no backend needed.
 
 function OverdueAlert({ active }) {
   const isMobile = useIsMobile();
@@ -6408,7 +6631,7 @@ function OverdueAlert({ active }) {
 
 
 // ── 4. THROUGHPUT TICKER ──────────────────────────────────────────────────────
-// Shows how many jobs were completed in the last N hours — live velocity.
+// Shows how many jobs were completed in the last N hours - live velocity.
 // Computed from `done` (last-24h completed jobs array).
 
 function ThroughputTicker({ done }) {
@@ -6488,7 +6711,7 @@ function ThroughputTicker({ done }) {
         </div>
       </div>
 
-      {/* Timeline grid — 6 cols desktop, 3 cols mobile */}
+      {/* Timeline grid - 6 cols desktop, 3 cols mobile */}
       <div style={{
         display: "grid",
         gridTemplateColumns: isMobile ? "repeat(3, 1fr)" : "repeat(6, 1fr)",
@@ -6561,7 +6784,7 @@ function ThroughputTicker({ done }) {
                 fontWeight: 900, lineHeight: 1,
                 color: numColor,
               }}>
-                {isFuture ? "—" : count}
+                {isFuture ? "-" : count}
               </div>
 
               {/* Time label */}
@@ -6772,7 +6995,7 @@ function DeptTotalsPanel({ addToast }) {
 
                     {isPending && (
                       <div style={{ fontSize: 11, color: "#555" }}>
-                        Live backlog — jobs entered but printing hasn't started yet (any date).
+                        Live backlog - jobs entered but printing hasn't started yet (any date).
                       </div>
                     )}
 
@@ -6930,7 +7153,7 @@ function AlbumTypeBreakdownPanel({ dept, accent = "var(--amber)" }) {
             <button onClick={() => { setSelDate(null); setExpandedType(null); setShowCal(false); }} style={{
               marginTop: 6, width: "100%", padding: "6px 0", fontSize: 11, fontWeight: 700,
               color: "var(--red)", background: "var(--bg2)", borderRadius: 4, border: "1px solid var(--border)",
-            }}>✕ Clear — back to Today</button>
+            }}>✕ Clear - back to Today</button>
           )}
         </div>
       )}
@@ -7992,7 +8215,7 @@ const reload = useCallback(async () => {
   function Stat({ label, val, clr = "var(--text-pri)", sub }) {
     return (
       <div style={{ background: "var(--card-bg)", border: "1px solid var(--border)", borderRadius: 10, padding: isMobile ? "12px 14px" : "14px 18px", textAlign: "center" }}>
-        <div className="r-stat-num" style={{ fontFamily: "var(--fd)", fontSize: isMobile ? 30 : 40, fontWeight: 900, color: clr, lineHeight: 1,textShadow: 'var(--title-shadow)',minHeight: "1.2em", }}>{val ?? "—"}</div>
+        <div className="r-stat-num" style={{ fontFamily: "var(--fd)", fontSize: isMobile ? 30 : 40, fontWeight: 900, color: clr, lineHeight: 1,textShadow: 'var(--title-shadow)',minHeight: "1.2em", }}>{val ?? "-"}</div>
         <div style={{ fontSize: isMobile ? 13 : 11, color: "var(--text-pri)", textTransform: "uppercase", letterSpacing: ".08em", marginTop: 4, fontWeight: 800 }}>{label}</div>
         {sub && !isMobile && <div style={{ fontSize: 11, color: "#dbd9d9", marginTop: 2,letterSpacing: ".08em" }}>{sub}</div>}
       </div>
@@ -8031,7 +8254,7 @@ const reload = useCallback(async () => {
         <DeptTotalsPanel addToast={add} />
                       
  
-        {/* Intelligence row — side-by-side on desktop, stacked on mobile */}
+        {/* Intelligence row - side-by-side on desktop, stacked on mobile */}
         <div className="r-grid-intelligence" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
           <PrintingMachineBreakdownPanel /> 
           <OperatorStatsPanel />
@@ -8472,7 +8695,7 @@ function buildPrintHTML(job) {
     ["Binding",      job.status_binding],
   ];
 
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Job Card — ${job.job_no}</title>
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Job Card - ${job.job_no}</title>
   <style>
     body{font-family:Arial,sans-serif;margin:0;padding:24px;color:#111;background:#fff}
     .header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #000;padding-bottom:12px;margin-bottom:16px}
@@ -8510,7 +8733,7 @@ function buildPrintHTML(job) {
   ${job.special_note ? `<div class="note"><div class="note-title">${<Speech size={14}/>}Special Instructions</div>${job.special_note}</div>` : ""}
   <table>
     <thead><tr><th>Stage</th><th>Status</th></tr></thead>
-    <tbody>${stageRows.map(([label, status]) => `<tr><td>${label}</td><td>${status || "—"}</td></tr>`).join("")}</tbody>
+    <tbody>${stageRows.map(([label, status]) => `<tr><td>${label}</td><td>${status || "-"}</td></tr>`).join("")}</tbody>
   </table>
   <div style="margin-top:24px;font-size:11px;color:#aaa;text-align:right">Printed ${new Date().toLocaleString("en-GB")}</div>
   </body></html>`;
