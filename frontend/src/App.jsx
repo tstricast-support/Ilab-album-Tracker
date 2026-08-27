@@ -6583,12 +6583,50 @@ function AdminFixJobCardPage() {
     );
   }
 
-  const [query, setQuery]           = useState("");
-  const [results, setResults]       = useState([]);
-  const [job, setJob]               = useState(null);
-  const [loading, setLoading]       = useState(false);
-  const [saving, setSaving]         = useState(false);
+  const [query, setQuery]     = useState("");
+  const [results, setResults] = useState([]);
+  const [job, setJob]         = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving]   = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [laserEnabled, setLaserEnabled] = useState(false);
+
+  const emptyForm = {
+    job_no: "", customer: "", couple_name: "", order_no: "",
+    dele_date: "", priority: "NORMAL", delivery_type: "PRONTO",
+    special_note: "", print_size: "", print_pages: "",
+    laser_cover_type: "", laminate_type: "", bind_rexing_no: "",
+    box_type: "", payment_by: "", album_type: "NORMAL",
+  };
+  const [form, setForm] = useState(emptyForm);
+
+  function setField(name, value) {
+    setForm(f => ({ ...f, [name]: value }));
+  }
+
+  // ── The key fix: whenever `job` changes, re-sync the form from it ──
+  useEffect(() => {
+    if (!job) { setForm(emptyForm); setLaserEnabled(false); return; }
+    setForm({
+      job_no:           job.job_no || "",
+      customer:         job.customer || "",
+      couple_name:      job.couple_name || "",
+      order_no:         job.order_no || "",
+      dele_date:        job.dele_date ? job.dele_date.slice(0, 10) : "",
+      priority:         job.priority || "NORMAL",
+      delivery_type:    job.delivery_type || "PRONTO",
+      special_note:     job.special_note || "",
+      print_size:       job.print_size || "",
+      print_pages:      job.print_pages || "",
+      laser_cover_type: job.laser_cover_type || "",
+      laminate_type:    job.laminate_type || "",
+      bind_rexing_no:   job.bind_rexing_no || "",
+      box_type:         job.box_type || "",
+      payment_by:       job.payment_by || "",
+      album_type:       job.album_type || "NORMAL",
+    });
+    setLaserEnabled(!!job.laser_cover_type);
+  }, [job?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function search() {
     if (!query.trim()) return;
@@ -6599,36 +6637,45 @@ function AdminFixJobCardPage() {
   async function pick(j) {
     setResults([]); setQuery("");
     setLoading(true);
-    try { setJob(await api.getJob(j.id)); }
-    catch (err) { add(err.message, "error"); }
-    finally { setLoading(false); }
+    try {
+      const full = await api.getJob(j.id);
+      setJob(full);
+    } catch (err) {
+      add(err.message, "error");
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function save(e) {
     e.preventDefault();
-    const fd = new FormData(e.currentTarget);
+    if (!job) return;
+    if (!form.job_no.trim() || !form.customer.trim() || !form.dele_date) {
+      add("Job No, Customer, and Delivery Date are required.", "error");
+      return;
+    }
     setSaving(true);
     try {
       const updated = await api.adminFullEditJob(job.id, {
-        job_no:           fd.get("job_no")           || "",
-        customer:         fd.get("customer")         || "",
-        couple_name:      fd.get("couple_name")      || "",
-        order_no:         fd.get("order_no")         || "",
-        dele_date:        new Date(fd.get("dele_date")).toISOString(),
-        priority:         fd.get("priority"),
-        delivery_type:    fd.get("delivery_type"),
-        special_note:     fd.get("special_note")     || "",
-        print_size:       fd.get("print_size")       || "",
-        print_pages:      fd.get("print_pages")      || "",
-        laser_cover_type: fd.get("laser_cover_type") || "",
-        laminate_type:    fd.get("laminate_type")    || "",
-        bind_rexing_no:   fd.get("bind_rexing_no")   || "",
-        box_type:         fd.get("box_type")         || "",
-        payment_by:       fd.get("payment_by")       || "",
-        album_type:       fd.get("album_type")       || "",
+        job_no:           form.job_no.trim(),
+        customer:         form.customer.trim(),
+        couple_name:      form.couple_name,
+        order_no:         form.order_no,
+        dele_date:        new Date(form.dele_date).toISOString(),
+        priority:         form.priority,
+        delivery_type:    form.delivery_type,
+        special_note:     form.special_note,
+        print_size:       form.print_size,
+        print_pages:      form.print_pages,
+        laser_cover_type: laserEnabled ? form.laser_cover_type : "",
+        laminate_type:    form.laminate_type,
+        bind_rexing_no:   form.bind_rexing_no,
+        box_type:         form.box_type,
+        payment_by:       form.payment_by,
+        album_type:       form.album_type,
       });
       add(`✓ Job #${updated.job_no} updated.`, "success");
-      setJob(updated);
+      setJob(updated); // form re-syncs via useEffect since job object changed
     } catch (err) { add(err.message, "error"); }
     finally { setSaving(false); }
   }
@@ -6670,24 +6717,24 @@ function AdminFixJobCardPage() {
 
           {loading && <div style={{ textAlign: "center", padding: 20, color: "var(--text-dim)" }}>LOADING…</div>}
 
-          {job && (
+          {job && !loading && (
             <>
               <div style={{ background: "var(--warn-bg)", border: "1px solid var(--warn-border)", borderRadius: 6, padding: "10px 14px", fontSize: 12, color: "var(--warn-text)" }}>
-                ⚠ Admin override - this bypasses the normal edit window and production lock. Changes here don't touch stage status/logs - use the station pages for that.
+                ⚠ Admin override - Job ID <b>{job.id}</b> - this bypasses the normal edit window and production lock. Changes here don't touch stage status/logs - use the station pages for that.
               </div>
 
               <form onSubmit={save} autoComplete="off" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                 <Sec title="Job Header" accent="var(--amber)">
                   <div className="r-grid-3" style={{ marginBottom: 14 }}>
-                    <div><label>Job No *</label><input name="job_no" defaultValue={job.job_no} /></div>
-                    <div><label>Photographer / Studio *</label><input name="customer" defaultValue={job.customer} /></div>
-                    <div><label>Couple Name</label><input name="couple_name" defaultValue={job.couple_name || ""} /></div>
+                    <div><label>Job No *</label><input value={form.job_no} onChange={e => setField("job_no", e.target.value)} /></div>
+                    <div><label>Photographer / Studio *</label><input value={form.customer} onChange={e => setField("customer", e.target.value)} /></div>
+                    <div><label>Couple Name</label><input value={form.couple_name} onChange={e => setField("couple_name", e.target.value)} /></div>
                   </div>
                   <div className="r-grid-3">
-                    <div><label>Order No</label><input name="order_no" defaultValue={job.order_no || ""} /></div>
-                    <div><label>Delivery Date *</label><input name="dele_date" type="date" defaultValue={job.dele_date?.slice(0, 10)} required /></div>
+                    <div><label>Order No</label><input value={form.order_no} onChange={e => setField("order_no", e.target.value)} /></div>
+                    <div><label>Delivery Date *</label><input type="date" value={form.dele_date} onChange={e => setField("dele_date", e.target.value)} required /></div>
                     <div><label>Priority</label>
-                      <select name="priority" defaultValue={job.priority || "NORMAL"}>
+                      <select value={form.priority} onChange={e => setField("priority", e.target.value)}>
                         <option value="NORMAL">NORMAL</option>
                         <option value="URGENT">URGENT</option>
                       </select>
@@ -6695,19 +6742,78 @@ function AdminFixJobCardPage() {
                   </div>
                 </Sec>
 
-                <JobFields job={job} />
+                <div className="r-grid-entry">
+                  <Sec title="1 – Printing" accent="var(--blue)">
+                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                      <div><label>Print Size</label><input value={form.print_size} onChange={e => setField("print_size", e.target.value)} placeholder="12×30" /></div>
+                      <div><label>Number of Pages</label><input value={form.print_pages} onChange={e => setField("print_pages", e.target.value)} placeholder="40" /></div>
+                    </div>
+                  </Sec>
+
+                  <Sec title="2 – Laser Cutting" accent="var(--purple)">
+                    <div style={{ marginBottom: 12 }}>
+                      <label>Laser Cutting Required?</label>
+                      <select
+                        value={laserEnabled ? "YES" : "NO"}
+                        onChange={e => {
+                          const enabled = e.target.value === "YES";
+                          setLaserEnabled(enabled);
+                          if (!enabled) setField("laser_cover_type", "");
+                        }}
+                      >
+                        <option value="NO">No</option>
+                        <option value="YES">Yes</option>
+                      </select>
+                    </div>
+                    <div style={{ display: laserEnabled ? "block" : "none" }}>
+                      <label>Cover Type / Description</label>
+                      <input value={form.laser_cover_type} onChange={e => setField("laser_cover_type", e.target.value)} placeholder="Wood / Acrylic" />
+                    </div>
+                  </Sec>
+
+                  <Sec title="3 – Laminating" accent="var(--cyan)">
+                    <div><label>Laminate Type</label><input value={form.laminate_type} onChange={e => setField("laminate_type", e.target.value)} placeholder="Silky / Gloss / Matt" /></div>
+                  </Sec>
+
+                  <Sec title="4 – Binding" accent="var(--green)">
+                    <div><label>Rexing No / Type</label><input value={form.bind_rexing_no} onChange={e => setField("bind_rexing_no", e.target.value)} placeholder="SF10" /></div>
+                  </Sec>
+
+                  <Sec title="5 – Box" accent="#f59e0b">
+                    <div><label>Box Type</label><input value={form.box_type} onChange={e => setField("box_type", e.target.value)} placeholder="SF10 - 12x24" /></div>
+                  </Sec>
+
+                  <Sec title="Delivery Type" accent="#ff009d">
+                    <div>
+                      <label>Delivery Type</label>
+                      <select value={form.delivery_type} onChange={e => setField("delivery_type", e.target.value)}>
+                        <option value="PRONTO">PRONTO</option>
+                        <option value="CUSTOMER">CUSTOMER</option>
+                        <option value="PICKME">PICKME</option>
+                        <option value="BUS">BUS</option>
+                      </select>
+                    </div>
+                  </Sec>
+                </div>
+
+                <Sec title="Special Instructions">
+                  <div>
+                    <label>Notes for all departments</label>
+                    <textarea value={form.special_note} onChange={e => setField("special_note", e.target.value)} placeholder="Any special instructions…" />
+                  </div>
+                </Sec>
 
                 <Sec title="Additional" accent="#16a34a">
                   <div className="r-grid-3">
                     <div>
                       <label>Album Type</label>
-                      <select name="album_type" defaultValue={job.album_type || "NORMAL"}>
+                      <select value={form.album_type} onChange={e => setField("album_type", e.target.value)}>
                         {ALBUM_TYPES.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
                       </select>
                     </div>
                     <div>
                       <label>Payment Taken By</label>
-                      <input name="payment_by" defaultValue={job.payment_by || ""} placeholder="Optional" />
+                      <input value={form.payment_by} onChange={e => setField("payment_by", e.target.value)} placeholder="Optional" />
                     </div>
                   </div>
                 </Sec>
