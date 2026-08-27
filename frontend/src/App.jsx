@@ -26,6 +26,7 @@ const api = {
   createJob:     (body)         => apiFetch("/api/jobs", { method: "POST", body: JSON.stringify(body) }),
   updateJob: (id, body) => apiFetch(`/api/jobs/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteJob:     (id)           => apiFetch(`/api/jobs/${id}`, { method: "DELETE" }),
+  getJob: (id) => apiFetch(`/api/jobs/${id}`),
   queue:         (dept)         => apiFetch(`/api/station/${dept}/queue`),
   // FIXED
   advance: (id, dept, action, extra = {}) => apiFetch(`/api/jobs/${id}/advance/${dept}`, {
@@ -3655,7 +3656,7 @@ const DEPTS = [
 const STEPS     = DEPTS.map(d => ({ label: d.label, field: d.field, color: d.accentVar, dept: d.key }));
 const DEPT_META = DEPTS.map(d => ({ key: d.key, label: d.dashLabel, accent: d.accentVar, field: d.field }));
 
-function BottleneckRadar({ active }) {
+function BottleneckRadar({ active, hideHeader = false }) {
   const isMobile = useIsMobile();
 
   const deptStats = DEPT_META.map(dept => {
@@ -3671,21 +3672,21 @@ function BottleneckRadar({ active }) {
   const hasBottleneck = worstDept.delayed > 0 || worstDept.total > 2;
 
   return (
-    <div style={{
+    <div style={hideHeader ? {} : {
       background: "var(--card-bg)",
       border: `1px solid ${hasBottleneck && worstDept.delayed > 0 ? "var(--red)" : "var(--border)"}`,
       borderRadius: 10, padding: "14px 16px", boxShadow: "0 8px 30px rgba(0,0,0,0.20)"
     }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, flexWrap: "wrap", gap: 6 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={{ fontFamily: "var(--fd)", fontSize: 14, fontWeight: 1000, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--text-pri)", textShadow: 'var(--title-shadow)' }}>Bottleneck Radar</span>
-        </div>
-        {hasBottleneck && worstDept.delayed > 0 ? (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: hideHeader ? "flex-end" : "space-between", marginBottom: 12, flexWrap: "wrap", gap: 6 }}>
+        {!hideHeader && (
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ fontFamily: "var(--fd)", fontSize: 14, fontWeight: 1000, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--text-pri)", textShadow: 'var(--title-shadow)' }}>Bottleneck Radar</span>
+          </div>
+        )}
+        {hasBottleneck && worstDept.delayed > 0 && (
           <span className="blink" style={{ fontSize: 9,display:"flex", fontWeight: 600, gap:"2px",padding: "2px 7px", borderRadius: 4, background: "#ff0000", color: "var(--text-pri)", border: "1px solid #ffffff",letterSpacing:"0.08em" }}>
              <TriangleAlert size={12}/>{worstDept.label.toUpperCase()}
           </span>
-        ) : (
-          <span></span>
         )}
       </div>
 
@@ -3693,49 +3694,46 @@ function BottleneckRadar({ active }) {
         {sorted.map((dept) => {
           const barPct = maxTotal > 0 ? (dept.total / maxTotal) * 100 : 0;
           return (
-<div key={dept.key} style={{
-            background: "var(--surface-sunken)",
-            border: `1px solid ${dept.delayed > 0 ? "var(--red)" : "#787777"}`,
-            boxShadow: '3px 4px 5px #181717',
-            borderLeft: `3px solid ${dept.delayed > 0 ? "var(--red)" : dept.accent}`,
-            borderRadius: 5, padding: "8px 10px",
-            opacity: dept.total === 0 && dept.delayed === 0 ? 0.4 : 1,
-          }}>
-            {/* TOP ROW: label + counts, never wrap */}
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, marginBottom: 6, flexWrap: isMobile ? "wrap" : "nowrap", minWidth: 0 }}>
-              <span style={{ fontSize: 12, fontWeight: 700, color: dept.accent, textTransform: "uppercase", letterSpacing: ".07em", whiteSpace: "nowrap", flexShrink: 0 }}>
-                {dept.label}
-              </span>
-              <div style={{ display: "flex", gap: 4, flexShrink: 0, flexWrap: "nowrap", alignItems: "center" }}>
-                {dept.inProgress > 0 && (
-                  <span style={{ fontSize: isMobile ? 10 : 11, fontWeight: 700, padding: "1px 6px", borderRadius: 4, background: "#d7a40b", color: "var(--surface-sunken)", border: "1px solid #ffffff", whiteSpace: "nowrap" }}>RUNNING : {dept.inProgress}</span>
-                )}
-                {dept.pending > 0 && (
-                  <span style={{ fontSize: isMobile ? 10 : 11, fontWeight: 700, padding: "1px 6px", borderRadius: 4, background: "var(--bg3)", color: "var(--text-pri)",border: "1px solid #ffffff", whiteSpace: "nowrap" }}>PENDING : {dept.pending}</span>
-                )}
-                {dept.delayed > 0 && (
-                  <span style={{ fontSize: isMobile ? 10 : 11, fontWeight: 700, padding: "1px 6px", borderRadius: 4, background: "#a12d2d", color: "var(--surface-sunken)", border: "1px solid #ffffff", whiteSpace: "nowrap" }}>DELAYED : {dept.delayed}</span>
-                )}
-                {dept.total === 0 && dept.delayed === 0 && (
-                  <span style={{ fontSize: 12, color: "var(--text-pri)" }}>idle</span>
-                )}
+            <div key={dept.key} style={{
+              background: "var(--surface-sunken)",
+              border: `1px solid ${dept.delayed > 0 ? "var(--red)" : "#787777"}`,
+              boxShadow: '3px 4px 5px #181717',
+              borderLeft: `3px solid ${dept.delayed > 0 ? "var(--red)" : dept.accent}`,
+              borderRadius: 5, padding: "8px 10px",
+              opacity: dept.total === 0 && dept.delayed === 0 ? 0.4 : 1,
+            }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, marginBottom: 6, flexWrap: isMobile ? "wrap" : "nowrap", minWidth: 0 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: dept.accent, textTransform: "uppercase", letterSpacing: ".07em", whiteSpace: "nowrap", flexShrink: 0 }}>
+                  {dept.label}
+                </span>
+                <div style={{ display: "flex", gap: 4, flexShrink: 0, flexWrap: "nowrap", alignItems: "center" }}>
+                  {dept.inProgress > 0 && (
+                    <span style={{ fontSize: isMobile ? 10 : 11, fontWeight: 700, padding: "1px 6px", borderRadius: 4, background: "#d7a40b", color: "var(--surface-sunken)", border: "1px solid #ffffff", whiteSpace: "nowrap" }}>RUNNING : {dept.inProgress}</span>
+                  )}
+                  {dept.pending > 0 && (
+                    <span style={{ fontSize: isMobile ? 10 : 11, fontWeight: 700, padding: "1px 6px", borderRadius: 4, background: "var(--bg3)", color: "var(--text-pri)",border: "1px solid #ffffff", whiteSpace: "nowrap" }}>PENDING : {dept.pending}</span>
+                  )}
+                  {dept.delayed > 0 && (
+                    <span style={{ fontSize: isMobile ? 10 : 11, fontWeight: 700, padding: "1px 6px", borderRadius: 4, background: "#a12d2d", color: "var(--surface-sunken)", border: "1px solid #ffffff", whiteSpace: "nowrap" }}>DELAYED : {dept.delayed}</span>
+                  )}
+                  {dept.total === 0 && dept.delayed === 0 && (
+                    <span style={{ fontSize: 12, color: "var(--text-pri)" }}>idle</span>
+                  )}
+                </div>
               </div>
+              {(dept.total > 0 || dept.delayed > 0) && (
+                <div style={{ width: "100%", height: 5, background: "var(--bg3)", borderRadius: 3, overflow: "hidden" }}>
+                  <div style={{
+                    height: "100%",
+                    width: `${Math.max(0, Math.min(barPct, 100))}%`,
+                    minWidth: dept.total > 0 ? 2 : 0,
+                    background: dept.delayed > 0 ? `linear-gradient(90deg, var(--red), ${dept.accent})` : dept.accent,
+                    borderRadius: 3,
+                    transition: "width 0.4s ease",
+                  }} />
+                </div>
+              )}
             </div>
-
-            {/* BOTTOM ROW: bar always full width */}
-            {(dept.total > 0 || dept.delayed > 0) && (
-              <div style={{ width: "100%", height: 5, background: "var(--bg3)", borderRadius: 3, overflow: "hidden" }}>
-                <div style={{
-                  height: "100%",
-                  width: `${Math.max(0, Math.min(barPct, 100))}%`,
-                  minWidth: dept.total > 0 ? 2 : 0,
-                  background: dept.delayed > 0 ? `linear-gradient(90deg, var(--red), ${dept.accent})` : dept.accent,
-                  borderRadius: 3,
-                  transition: "width 0.4s ease",
-                }} />
-              </div>
-            )}
-          </div>
           );
         })}
       </div>
@@ -3747,65 +3745,31 @@ function BottleneckRadar({ active }) {
 // Completion rate for today: completed ÷ (completed + active) × 100
 // Rendered as an SVG arc ring + fraction card, zero backend changes needed.
 
-function DailyGoalRing({ active, done }) {
+function DailyGoalRing({ active, done, hideHeader = false }) {
   const isMobile = useIsMobile();
-
   const completed = done.length;
   const total = completed + active.length;
   const rate = total > 0 ? Math.round((completed / total) * 100) : 0;
-
   const R = isMobile ? 38 : 44;
   const size = isMobile ? 88 : 100;
   const CX = size / 2;
   const CY = size / 2;
-
   const circ = 2 * Math.PI * R;
   const fill = (rate / 100) * circ;
-
-  const ringColor =
-    rate < 40
-      ? "var(--amber)"
-      : rate < 70
-      ? "var(--amber)"
-      : "var(--green)";
+  const ringColor = rate < 40 ? "var(--amber)" : rate < 70 ? "var(--amber)" : "var(--green)";
 
   return (
-    <div
-      style={{
-        background: "var(--card-bg)",
-        // border: `1px solid ${ringColor}55`,
-        borderRadius: 10,
-        padding: "14px 16px",
-        border: "1px solid var(--border)", 
-        boxShadow: "0 8px 30px rgba(0,0,0,0.20)"
-
-
-        
-      }}
-    >
-      {/* HEADER */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",         
-          marginBottom: 12,
-        }}
-      >
-        <span
-          style={{
-            fontFamily: "var(--fd)",
-            fontSize: 14,
-            fontWeight: 1000,
-            letterSpacing: ".1em",
-            textTransform: "uppercase",
-            color: "var(--text-pri)",
-            textShadow: "var(--title-shadow)",
-          }}
-        >
-          Daily Progress
-        </span>
-      </div>
+    <div style={hideHeader ? {} : {
+      background: "var(--card-bg)", borderRadius: 10, padding: "14px 16px",
+      border: "1px solid var(--border)", boxShadow: "0 8px 30px rgba(0,0,0,0.20)"
+    }}>
+      {!hideHeader && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+          <span style={{ fontFamily: "var(--fd)", fontSize: 14, fontWeight: 1000, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--text-pri)", textShadow: "var(--title-shadow)" }}>
+            Daily Progress
+          </span>
+        </div>
+      )}
 
       {/* CONTENT */}
       <div
@@ -3986,7 +3950,7 @@ function DailyGoalRing({ active, done }) {
   );
 }
 
-function AlbumCountPanel() {
+function AlbumCountPanel({ hideHeader = false }) {
   const now = new Date();
   const [year,  setYear]  = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
@@ -3994,56 +3958,43 @@ function AlbumCountPanel() {
   const isMobile = useIsMobile();
 
   useEffect(() => {
-  const load = () =>
-    apiFetch(`/api/stats/albums?year=${year}&month=${month}`)
-      .then(setIfChanged(setData)).catch(() => {});
-  load();
-  const t = setInterval(load, 10_000);
-  return () => clearInterval(t);
-}, [year, month]);
+    const load = () =>
+      apiFetch(`/api/stats/albums?year=${year}&month=${month}`)
+        .then(setIfChanged(setData)).catch(() => {});
+    load();
+    const t = setInterval(load, 10_000);
+    return () => clearInterval(t);
+  }, [year, month]);
 
   const monthLabel = new Date(year, month - 1, 1)
     .toLocaleDateString("en-GB", { month: "long", year: "numeric" });
 
   return (
-    <div style={{
-      background: "var(--card-bg)",
-      border: "1px solid var(--border)",
-      borderRadius: 10,
-      padding: "14px 16px",
+    <div style={hideHeader ? {} : {
+      background: "var(--card-bg)", border: "1px solid var(--border)",
+      borderRadius: 10, padding: "14px 16px",
       gridColumn: isMobile ? "1" : "1 / -1",
     }}>
-      {/* Header */}
       <div style={{
         display: "flex", alignItems: "center",
-        justifyContent: "space-between",
+        justifyContent: hideHeader ? "flex-end" : "space-between",
         marginBottom: 14, flexWrap: "wrap", gap: 8,
       }}>
-        <span style={{
-          fontFamily: "var(--fd)", fontSize: 14, fontWeight: 1000,
-          letterSpacing: ".1em", textTransform: "uppercase",
-          color: "var(--text-pri)", textShadow: "var(--title-shadow)",
-        }}>
-          Albums Produced
-        </span>
+        {!hideHeader && (
+          <span style={{
+            fontFamily: "var(--fd)", fontSize: 14, fontWeight: 1000,
+            letterSpacing: ".1em", textTransform: "uppercase",
+            color: "var(--text-pri)", textShadow: "var(--title-shadow)",
+          }}>
+            Albums Produced
+          </span>
+        )}
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-          <select
-            value={month}
-            onChange={e => setMonth(+e.target.value)}
-            style={{ width: "auto", margin: 0, fontSize: 12, padding: "5px 8px" }}>
-            {Array.from({ length: 12 }, (_, i) =>
-              <option key={i + 1} value={i + 1}>
-                {new Date(2000, i).toLocaleDateString("en-GB", { month: "short" })}
-              </option>
-            )}
+          <select value={month} onChange={e => setMonth(+e.target.value)} style={{ width: "auto", margin: 0, fontSize: 12, padding: "5px 8px" }}>
+            {Array.from({ length: 12 }, (_, i) => <option key={i + 1} value={i + 1}>{new Date(2000, i).toLocaleDateString("en-GB", { month: "short" })}</option>)}
           </select>
-          <select
-            value={year}
-            onChange={e => setYear(+e.target.value)}
-            style={{ width: "auto", margin: 0, fontSize: 12, padding: "5px 8px" }}>
-            {[now.getFullYear(), now.getFullYear() - 1].map(y =>
-              <option key={y} value={y}>{y}</option>
-            )}
+          <select value={year} onChange={e => setYear(+e.target.value)} style={{ width: "auto", margin: 0, fontSize: 12, padding: "5px 8px" }}>
+            {[now.getFullYear(), now.getFullYear() - 1].map(y => <option key={y} value={y}>{y}</option>)}
           </select>
         </div>
       </div>
@@ -4136,6 +4087,8 @@ function OperatorStatRow({ row, accent, dept, field, year, month, isMobile, isTo
   const [page, setPage] = useState(1);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [viewJob, setViewJob] = useState(null);        // ← NEW
+  const [loadingJob, setLoadingJob] = useState(null);  // ← NEW (id currently loading, for a spinner state if you want)
 
   function load(pg) {
     setLoading(true);
@@ -4154,6 +4107,18 @@ function OperatorStatRow({ row, accent, dept, field, year, month, isMobile, isTo
   function changePage(pg) {
     setPage(pg);
     load(pg);
+  }
+
+  async function openFullJob(jobId) {          // ← NEW
+    setLoadingJob(jobId);
+    try {
+      const full = await api.getJob(jobId);
+      setViewJob(full);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingJob(null);
+    }
   }
 
   return (
@@ -4203,16 +4168,24 @@ function OperatorStatRow({ row, accent, dept, field, year, month, isMobile, isTo
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 220, overflowY: "auto" }}>
                   {data.jobs.map((j, idx) => (
-                    <div key={idx} style={{
-                      display: "flex", justifyContent: "space-between", alignItems: "center",
-                      background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 4,
-                      padding: "6px 10px", gap: 8,
-                    }}>
-                      <span style={{ fontFamily: "var(--fm)", fontSize: 12, fontWeight: 800, color: accent, flexShrink: 0 }}>{j.job_no}</span>
+                    <button
+                      key={j.id ?? idx}
+                      onClick={() => openFullJob(j.id)}
+                      disabled={!j.id || loadingJob === j.id}
+                      style={{
+                        display: "flex", justifyContent: "space-between", alignItems: "center",
+                        background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 4,
+                        padding: "6px 10px", gap: 8, textAlign: "left", cursor: j.id ? "pointer" : "default",
+                        opacity: loadingJob === j.id ? 0.6 : 1,
+                      }}
+                    >
+                      <span style={{ fontFamily: "var(--fm)", fontSize: 12, fontWeight: 800, color: accent, flexShrink: 0 }}>
+                        {loadingJob === j.id ? "…" : j.job_no}
+                      </span>
                       <span style={{ fontSize: 12, color: "var(--text-sec)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {j.customer}{j.couple_name ? ` / ${j.couple_name}` : ""}
                       </span>
-                    </div>
+                    </button>
                   ))}
                 </div>
               )}
@@ -4227,6 +4200,8 @@ function OperatorStatRow({ row, accent, dept, field, year, month, isMobile, isTo
           )}
         </div>
       )}
+
+      {viewJob && <JobCardViewModal job={viewJob} onClose={() => setViewJob(null)} addToast={() => {}} />}
     </div>
   );
 }
@@ -4290,7 +4265,7 @@ function OperatorStatSection({ icon, label, accent, rows, dept, field, monthLabe
 }
 
 
-function OperatorStatsPanel() {
+function OperatorStatsPanel({hideHeader = false}) {
   const now = new Date();
   const [year,  setYear]  = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
@@ -4329,28 +4304,26 @@ function OperatorStatsPanel() {
   }
 
   return (
-    <div style={{
-      background: "var(--card-bg)",
-      border: "1px solid var(--border)",
-      borderRadius: 10,
-      padding: "14px 16px",
-      gridColumn: isMobile ? "1" : "1 / -1",
-    }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
-        <span style={{ fontFamily: "var(--fd)", fontSize: 14, fontWeight: 1000, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--text-pri)", textShadow: "var(--title-shadow)" }}>
-          Operator Activity
-        </span>
-        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-          <select value={month} onChange={e => setMonth(+e.target.value)} style={{ width: "auto", margin: 0, fontSize: 12, padding: "5px 8px" }}>
-            {Array.from({ length: 12 }, (_, i) =>
-              <option key={i + 1} value={i + 1}>{new Date(2000, i).toLocaleDateString("en-GB", { month: "short" })}</option>
-            )}
-          </select>
-          <select value={year} onChange={e => setYear(+e.target.value)} style={{ width: "auto", margin: 0, fontSize: 12, padding: "5px 8px" }}>
-            {[now.getFullYear(), now.getFullYear() - 1].map(y => <option key={y} value={y}>{y}</option>)}
-          </select>
+     <div style={hideHeader ? {} : {
+        background: "var(--card-bg)", border: "1px solid var(--border)",
+        borderRadius: 10, padding: "14px 16px",
+        gridColumn: isMobile ? "1" : "1 / -1",
+      }}>
+      {!hideHeader && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+          <span style={{ fontFamily: "var(--fd)", fontSize: 14, fontWeight: 1000, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--text-pri)", textShadow: "var(--title-shadow)" }}>
+            Operator Activity
+          </span>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <select value={month} onChange={e => setMonth(+e.target.value)} style={{ width: "auto", margin: 0, fontSize: 12, padding: "5px 8px" }}>
+              {Array.from({ length: 12 }, (_, i) => <option key={i + 1} value={i + 1}>{new Date(2000, i).toLocaleDateString("en-GB", { month: "short" })}</option>)}
+            </select>
+            <select value={year} onChange={e => setYear(+e.target.value)} style={{ width: "auto", margin: 0, fontSize: 12, padding: "5px 8px" }}>
+              {[now.getFullYear(), now.getFullYear() - 1].map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </div>
         </div>
-      </div>
+      )}
 
       {!data ? (
         <div style={{ textAlign: "center", padding: "24px 0", color: "var(--text-dim)", fontFamily: "var(--fd)", fontSize: 13, letterSpacing: ".08em" }}>
@@ -6645,7 +6618,7 @@ function OverdueAlert({ active }) {
 // Shows how many jobs were completed in the last N hours - live velocity.
 // Computed from `done` (last-24h completed jobs array).
 
-function ThroughputTicker({ done }) {
+function ThroughputTicker({ done, hideHeader = false }) {
   const [, setTick] = useState(0);
   const isMobile = useIsMobile();
 
@@ -6683,33 +6656,32 @@ function ThroughputTicker({ done }) {
   const nowHour    = new Date().getHours();
   const activeSlot = Math.floor(nowHour / 4);
 
-  return (
-    <div style={{
-      background: "var(--card-bg)",
-      border: "1px solid var(--border)",
+return (
+    <div style={hideHeader ? {} : {
+      background: "var(--card-bg)", border: "1px solid var(--border)",
       borderRadius: 12, padding: "14px 16px",
     }}>
-      {/* Header */}
       <div style={{
         display: "flex", alignItems: "center",
-        justifyContent: "space-between", marginBottom: 14, gap: 8,
+        justifyContent: hideHeader ? "flex-end" : "space-between",
+        marginBottom: 14, gap: 8,
       }}>
-        <span style={{
-          fontFamily: "var(--fd)", fontSize: 14, fontWeight: 1000,
-          letterSpacing: ".12em", textTransform: "uppercase",
-          color: "var(--text-pri)", textShadow: "var(--title-shadow)",
-        }}>
-          Throughput - Today
-        </span>
-        {/* Total badge */}
+        {!hideHeader && (
+          <span style={{
+            fontFamily: "var(--fd)", fontSize: 14, fontWeight: 1000,
+            letterSpacing: ".12em", textTransform: "uppercase",
+            color: "var(--text-pri)", textShadow: "var(--title-shadow)",
+          }}>
+            Throughput - Today
+          </span>
+        )}
         <div style={{
           display: "flex", alignItems: "center", gap: 6,
           background:"var(--bg2)", border: "1px solid var(--border)",
           borderRadius: 6, padding: "4px 10px", flexShrink: 0,
         }}>
           <span style={{
-            fontFamily: "var(--fm)",
-            fontSize: isMobile ? 30 : 35,
+            fontFamily: "var(--fm)", fontSize: isMobile ? 30 : 35,
             fontWeight: 900, lineHeight: 1,
             color: totalToday > 0 ? "var(--green)" : "var(--text-dim)",
           }}>
@@ -6831,7 +6803,7 @@ function ThroughputTicker({ done }) {
   );
 }
 
-function DeptTotalsPanel({ addToast }) {
+function DeptTotalsPanel({ addToast , hideHeader = false }) {
   const [data, setData]           = useState(null);
   const [expanded, setExpanded]   = useState(null); // dept key
   const [dateByDept, setDateByDept] = useState({});   // deptKey -> "YYYY-MM-DD" | null (null = today)
@@ -6923,13 +6895,16 @@ function DeptTotalsPanel({ addToast }) {
   }
 
   return (
-    <div style={{
-      background: "#a8a5a5", border: "1px solid #8f8c8c",
-      borderRadius: 12, padding: "14px 16px", marginBottom: 16,
-    }}>
-      <div style={{ fontSize: 16, fontWeight: 800, color: "#111", marginBottom: 12 }}>
-        Department Totals
-      </div>
+    <div style={hideHeader ? {} : {
+        background: "#a8a5a5", border: "1px solid #8f8c8c",
+        borderRadius: 12, padding: "14px 16px", marginBottom: 16,
+      
+      }}>
+      {!hideHeader && (
+        <div style={{ fontSize: 16, fontWeight: 800, color: "#111", marginBottom: 12 }}>
+          Department Totals
+        </div>
+      )}
 
       {!data ? (
         <div style={{ textAlign: "center", padding: "20px 0", color: "#333", fontSize: 13, letterSpacing: ".05em" }}>
@@ -7407,7 +7382,7 @@ const PRINTING_MACHINES = [
 
 const ALBUM_TYPE_LABELS = { NORMAL: "Magazine Album", STORY: "Story Albums", REBIND: "Rebind Albums" };
 
-function PrintingMachineBreakdownPanel() {
+function PrintingMachineBreakdownPanel({hideHeader = false}) {
   const [data, setData]                 = useState(null);
   const [expandedMachine, setExpMachine] = useState(null);
   const [expandedAlbum, setExpAlbum]     = useState(null); // `${machine}-${albumType}`
@@ -7509,15 +7484,17 @@ function calNav(machine, at, y, m) {
 }
 
   return (
-    <div style={{
-      background: "#a8a5a5", border: "1px solid #8f8c8c",
-      borderRadius: 12, padding: "14px 16px", marginBottom: 16,
-      gridColumn: isMobile ? "1" : "1 / -1",
-    }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 6 }}>
-        <div style={{ fontSize: 16, fontWeight: 800, color: "#111" }}>Printing Section - By Machine</div>
-        <div style={{ fontSize: 11, color: "#444" }}>tap a machine, then an album type</div>
-      </div>
+    <div style={hideHeader ? {} : {
+        background: "#a8a5a5", border: "1px solid #8f8c8c",
+        borderRadius: 12, padding: "14px 16px", marginBottom: 16,
+      
+      }}>
+      {!hideHeader && (
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 6 }}>
+          <div style={{ fontSize: 16, fontWeight: 800, color: "#111" }}>Printing Section - By Machine</div>
+          <div style={{ fontSize: 11, color: "#444" }}>tap a machine, then an album type</div>
+        </div>
+      )}
 
       {!data ? (
         <div style={{ textAlign: "center", padding: "20px 0", color: "#333", fontSize: 13 }}>LOADING…</div>
@@ -7866,7 +7843,7 @@ function PrintingSectionPanel() {
   );
 }
 
-function DamageSummaryPanel() {
+function DamageSummaryPanel({hideHeader = false}) {
   const [data, setData] = useState(null);
   const [expanded, setExpanded] = useState(null); // "PRINTING" | "LAMINATING" | "BINDING" | null
   const isMobile = useIsMobile();
@@ -7886,22 +7863,19 @@ function DamageSummaryPanel() {
   const SIZE_ORDER = ["9x13", "10x16", "12x16", "13x19"];
 
   return (
-    <div style={{
+    <div style={hideHeader ? {} : {
       background: "var(--card-bg)", border: "1px solid var(--border)",
-      borderRadius: 10, padding: "14px 16px", gridColumn: isMobile ? "1" : "1 / -1",
+      borderRadius: 10, padding: "14px 16px",
+      gridColumn: isMobile ? "1" : "1 / -1",
     }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
-        <span style={{
-          fontFamily: "var(--fd)", fontSize: 14, fontWeight: 1000, letterSpacing: ".1em",
-          textTransform: "uppercase", color: "var(--text-pri)", textShadow: "var(--title-shadow)",
-        }}>
-          Paper Damage Summary
-        </span>
-        <button onClick={() => navigate("/damages")} style={{
-          padding: "5px 12px", fontSize: 11, fontWeight: 700, borderRadius: 5,
-          background: "var(--bg3)", color: "var(--red)", border: "1px solid var(--red)",
-        }}>View All →</button>
-      </div>
+      {!hideHeader && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+          <span style={{ fontFamily: "var(--fd)", fontSize: 14, fontWeight: 1000, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--text-pri)", textShadow: "var(--title-shadow)" }}>
+            Paper Damage Summary
+          </span>
+          <button onClick={() => navigate("/damages")} style={{ padding: "5px 12px", fontSize: 11, fontWeight: 700, borderRadius: 5, background: "var(--bg3)", color: "var(--red)", border: "1px solid var(--red)" }}>View All →</button>
+        </div>
+      )}
 
       {!data ? (
         <div style={{ textAlign: "center", padding: "24px 0", color: "var(--text-dim)", fontFamily: "var(--fd)", fontSize: 13, letterSpacing: ".08em" }}>LOADING…</div>
@@ -8018,7 +7992,7 @@ function DamageSummaryPanel() {
   );
 }
 
-function PaperStockSummaryPanel() {
+function PaperStockSummaryPanel({hideHeader = false}) {
   const [data, setData] = useState(null);
   const isMobile = useIsMobile();
   useEffect(() => {
@@ -8029,22 +8003,19 @@ function PaperStockSummaryPanel() {
   }, []);
 
   return (
-    <div style={{
-      background: "var(--card-bg)", border: "1px solid var(--border)",
-      borderRadius: 10, padding: "14px 16px", gridColumn: isMobile ? "1" : "1 / -1",
-    }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
-        <span style={{
-          fontFamily: "var(--fd)", fontSize: 14, fontWeight: 1000, letterSpacing: ".1em",
-          textTransform: "uppercase", color: "var(--text-pri)", textShadow: "var(--title-shadow)",
-        }}>
-          Print - Paper Stock Summary
-        </span>
-        <button onClick={() => navigate("/papers")} style={{
-          padding: "5px 12px", fontSize: 11, fontWeight: 700, borderRadius: 5,
-          background: "var(--bg3)", color: "var(--blue)", border: "1px solid var(--blue)",
-        }}>View All →</button>
-      </div>
+    <div style={hideHeader ? {} : {
+        background: "var(--card-bg)", border: "1px solid var(--border)",
+        borderRadius: 10, padding: "14px 16px",
+        gridColumn: isMobile ? "1" : "1 / -1",
+      }}>
+      {!hideHeader && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+          <span style={{ fontFamily: "var(--fd)", fontSize: 14, fontWeight: 1000, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--text-pri)", textShadow: "var(--title-shadow)" }}>
+            Print - Paper Stock Summary
+          </span>
+          <button onClick={() => navigate("/papers")} style={{ padding: "5px 12px", fontSize: 11, fontWeight: 700, borderRadius: 5, background: "var(--bg3)", color: "var(--blue)", border: "1px solid var(--blue)" }}>View All →</button>
+        </div>
+      )}
 
       {!data ? (
         <div style={{ textAlign: "center", padding: "24px 0", color: "var(--text-dim)", fontFamily: "var(--fd)", fontSize: 13, letterSpacing: ".08em" }}>LOADING…</div>
@@ -8074,7 +8045,7 @@ function PaperStockSummaryPanel() {
   );
 }
 
-function PaperUsageBreakdownPanel() {
+function PaperUsageBreakdownPanel({hideHeader = false}) {
   const [data, setData] = useState(null);
   const [expanded, setExpanded] = useState(null);
   const isMobile = useIsMobile();
@@ -8092,22 +8063,19 @@ function PaperUsageBreakdownPanel() {
   };
 
   return (
-    <div style={{
-      background: "var(--card-bg)", border: "1px solid var(--border)",
-      borderRadius: 10, padding: "14px 16px", gridColumn: isMobile ? "1" : "1 / -1",
-    }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
-        <span style={{
-          fontFamily: "var(--fd)", fontSize: 14, fontWeight: 1000, letterSpacing: ".1em",
-          textTransform: "uppercase", color: "var(--text-pri)", textShadow: "var(--title-shadow)",
-        }}>
-          Paper Usage Summary
-        </span>
-        <button onClick={() => navigate("/papers")} style={{
-          padding: "5px 12px", fontSize: 11, fontWeight: 700, borderRadius: 5,
-          background: "var(--bg3)", color: "var(--blue)", border: "1px solid var(--blue)",
-        }}>View All →</button>
-      </div>
+   <div style={hideHeader ? {} : {
+        background: "var(--card-bg)", border: "1px solid var(--border)",
+        borderRadius: 10, padding: "14px 16px",
+        gridColumn: isMobile ? "1" : "1 / -1",
+      }}>
+      {!hideHeader && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+          <span style={{ fontFamily: "var(--fd)", fontSize: 14, fontWeight: 1000, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--text-pri)", textShadow: "var(--title-shadow)" }}>
+            Paper Usage Summary
+          </span>
+          <button onClick={() => navigate("/papers")} style={{ padding: "5px 12px", fontSize: 11, fontWeight: 700, borderRadius: 5, background: "var(--bg3)", color: "var(--blue)", border: "1px solid var(--blue)" }}>View All →</button>
+        </div>
+      )}
 
       {!data ? (
         <div style={{ textAlign: "center", padding: "24px 0", color: "var(--text-dim)", fontFamily: "var(--fd)", fontSize: 13, letterSpacing: ".08em" }}>LOADING…</div>
@@ -8180,6 +8148,87 @@ function PaperUsageBreakdownPanel() {
               </div>
             );
           })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PriorityWatchPanel({ active, stats }) {
+  const isMobile = useIsMobile();
+  const urgentCount = stats?.urgent_pending || 0;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {urgentCount > 0 && (
+        <div className="pulse" style={{
+          background: "var(--danger-bg)", border: "1px solid var(--red)", borderRadius: 8,
+          padding: "10px 14px", display: "flex", alignItems: "center", gap: 10,
+        }}>
+          <Flame size={18} color="#ff5100" />
+          <span style={{ fontFamily: "var(--fd)", fontWeight: 700, fontSize: isMobile ? 14 : 16, color: "var(--red)", letterSpacing: ".04em" }}>
+            {urgentCount} URGENT JOB{urgentCount > 1 ? "S" : ""} IN PIPELINE
+          </span>
+        </div>
+      )}
+      <OverdueAlert active={active} />
+      {urgentCount === 0 && active.filter(j => new Date(j.dele_date).getTime() < Date.now()).length === 0 && (
+        <div style={{ textAlign: "center", padding: "16px 0", color: "var(--text-dim)", fontSize: 13 }}>
+          ✓ No urgent or overdue jobs right now.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FoldableSection({ title, accent = "var(--amber)", badge, defaultOpen = false, children }) {
+  const [open, setOpen] = useState(defaultOpen);
+
+
+  useEffect(() => {
+    if (defaultOpen) setOpen(true);
+  }, [defaultOpen]);
+
+  return (
+    <div style={{
+      background: "var(--card-bg)",
+      border: "1px solid var(--border)",          
+      borderLeft: `4px solid ${accent}`,
+      borderRadius: 10,
+      overflow: "hidden",
+      gridColumn: "1 / -1",
+    }}>
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => setOpen(o => !o)}
+        onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen(o => !o); } }}
+        style={{
+          width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "14px 16px", background: "transparent", textAlign: "left", gap: 10,
+          cursor: "pointer", userSelect: "none",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+          <ChevronDown size={16} style={{
+            color: accent, transition: "transform .2s ease", flexShrink: 0,
+            transform: open ? "rotate(180deg)" : "rotate(0deg)",
+          }} />
+          <span style={{
+            fontFamily: "var(--fd)", fontSize: 14, fontWeight: 1000,
+            letterSpacing: ".1em", textTransform: "uppercase",
+            color: accent, textShadow: "var(--title-shadow)",
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+          }}>{title}</span>
+        </div>
+        {badge && (
+          <div style={{ flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+            {badge}
+          </div>
+        )}
+      </div>
+      {open && (
+        <div className="si" style={{ padding: "0 14px 14px" }}>
+          {children}
         </div>
       )}
     </div>
@@ -8265,68 +8314,97 @@ const reload = useCallback(async () => {
 
         </div>
  
-        <DeptTotalsPanel addToast={add} />
-                      
- 
-        {/* Intelligence row - side-by-side on desktop, stacked on mobile */}
-        <div className="r-grid-intelligence" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
-          <PrintingMachineBreakdownPanel /> 
-          <OperatorStatsPanel />
-          <AlbumCountPanel />
-          <DamageSummaryPanel />
-          <PaperStockSummaryPanel />
-          <PaperUsageBreakdownPanel />
-          <BottleneckRadar active={active} />
-          <DailyGoalRing   active={active} done={done} />
-        </div>
- 
-        {/* Throughput ticker */}
-        <div style={{ marginBottom: 16 }}>
-          <ThroughputTicker done={done} />
-        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
+          <FoldableSection title="Department Totals" accent="var(--text-pri)">
+            <DeptTotalsPanel addToast={add} hideHeader />
+          </FoldableSection>
 
-        {/* <div className="r-grid-stats" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
-          <Stat label="Active Jobs"     val={stats?.active_jobs}    clr="var(--amber)" />
-          <Stat label="Completed (24h)" val={stats?.completed_jobs} clr="var(--green)" sub="Auto-clears after 24 h" />
-          <Stat label="Delayed"         val={stats?.delayed_jobs}   clr={stats?.delayed_jobs > 0 ? "var(--red)" : "var(--text-sec)"} />
-        </div> */}
+          <FoldableSection title="Printing Section - By Machine" accent="var(--text-pri)">
+            <PrintingMachineBreakdownPanel hideHeader />
+          </FoldableSection>
 
-                {/* Urgent banner */}
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-  
-          {stats?.urgent_pending > 0 && (
-            <div
-              className="pulse"
-              style={{
-                background: "var(--danger-bg)",
-                border: "1px solid var(--red)",
-                borderRadius: 8,
-                padding: "10px 14px",
-                flex: 1,
-                minWidth: 280,
-                display: "flex",
-                marginBottom :"10px",
-                alignItems: "center",
-                gap: 10
-              }}
+          <FoldableSection title="Operator Activity" accent="var(--text-pri)">
+            <OperatorStatsPanel hideHeader />
+          </FoldableSection>
+
+                  <FoldableSection title="Paper Damage Summary" accent="var(--text-pri)"
+          badge={
+            <button onClick={() => navigate("/damages")} style={{
+              padding: "5px 12px", fontSize: 11, fontWeight: 700, borderRadius: 5,
+              background: "var(--bg3)", color: "var(--red)", border: "1px solid var(--red)",
+            }}>View All →</button>
+          }
+        >
+          <DamageSummaryPanel hideHeader />
+        </FoldableSection>
+
+        <FoldableSection title="Print - Paper Stock Summary" accent="var(--text-pri)"
+          badge={
+            <button onClick={() => navigate("/papers")} style={{
+              padding: "5px 12px", fontSize: 11, fontWeight: 700, borderRadius: 5,
+              background: "var(--bg3)", color: "var(--blue)", border: "1px solid var(--blue)",
+            }}>View All →</button>
+          }
+        >
+          <PaperStockSummaryPanel hideHeader />
+        </FoldableSection>
+
+        <FoldableSection title="Paper Usage Summary" accent="var(--text-pri)"
+          badge={
+            <button onClick={() => navigate("/papers")} style={{
+              padding: "5px 12px", fontSize: 11, fontWeight: 700, borderRadius: 5,
+              background: "var(--bg3)", color: "var(--blue)", border: "1px solid var(--blue)",
+            }}>View All →</button>
+          }
+        >
+          <PaperUsageBreakdownPanel hideHeader />
+        </FoldableSection>
+
+        <FoldableSection title="Albums Produced" accent="var(--text-pri)">
+          <AlbumCountPanel hideHeader />
+        </FoldableSection>
+
+        <FoldableSection title="Bottleneck Radar" accent="var(--text-pri)">
+          <BottleneckRadar active={active} hideHeader />
+        </FoldableSection>
+
+        <FoldableSection title="Daily Progress" accent="var(--text-pri)">
+          <DailyGoalRing active={active} done={done} hideHeader />
+        </FoldableSection>
+
+        <FoldableSection title="Throughput - Today" accent="var(--text-pri)">
+          <ThroughputTicker done={done} hideHeader />
+        </FoldableSection>
+
+          <FoldableSection
+              title="Priority Watch - Urgent & Overdue"
+              accent="var(--text-pri)"
+              defaultOpen={
+                stats?.urgent_pending > 0 ||
+                active.some(j => new Date(j.dele_date).getTime() < Date.now())
+              }
+              badge={
+                (stats?.urgent_pending > 0 ||
+                  active.some(j => new Date(j.dele_date).getTime() < Date.now())) && (
+                  <span
+                    className="blink"
+                    style={{
+                      fontSize: 30,
+                      fontWeight: 900,
+                      color: "var(--red)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      height: "100%",
+                    }}
+                  >
+                    .
+                  </span>
+                )
+              }
             >
-              <Flame  size ={18} color={"#ff5100"}/>
-              <span
-                style={{
-                  fontFamily: "var(--fd)",
-                  fontWeight: 700,
-                  fontSize: isMobile ? 14 : 16,
-                  color: "var(--red)",
-                  letterSpacing: ".04em"
-                }}
-              >
-                {stats.urgent_pending} URGENT JOB{stats.urgent_pending > 1 ? "S" : ""} IN PIPELINE
-              </span>
-            </div>
-          )}
-
-          <OverdueAlert active={active} />
-
+            <PriorityWatchPanel active={active} stats={stats} />
+          </FoldableSection>
         </div>
  
         {/* Tab bar */}

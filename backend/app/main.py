@@ -1773,12 +1773,10 @@ def operator_jobs_list(
     start = datetime(year, month, 1) - TZ_OFFSET
     end   = (datetime(year + 1, 1, 1) if month == 12 else datetime(year, month + 1, 1)) - TZ_OFFSET
 
-    # laminated_by is captured at completion → filter/sort by exited_at.
-    # operator_name / under_whom are captured at start → filter/sort by entered_at.
     ts_col = DepartmentLog.exited_at if field == "laminated_by" else DepartmentLog.entered_at
 
     q = (
-        db.query(JobCard.job_no, JobCard.customer, JobCard.couple_name, ts_col.label("ts"))
+        db.query(JobCard.id, JobCard.job_no, JobCard.customer, JobCard.couple_name, ts_col.label("ts"))  # ← added JobCard.id
         .join(DepartmentLog, DepartmentLog.job_id == JobCard.id)
         .filter(
             DepartmentLog.department == dept_enum,
@@ -1798,7 +1796,7 @@ def operator_jobs_list(
         "page_size": page_size,
         "pages": max(1, -(-total // page_size)),
         "jobs": [
-            {"job_no": r[0], "customer": r[1], "couple_name": r[2]}
+            {"id": r[0], "job_no": r[1], "customer": r[2], "couple_name": r[3]}  # ← added id
             for r in rows
         ],
     }
