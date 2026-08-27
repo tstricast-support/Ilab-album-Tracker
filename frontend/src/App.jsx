@@ -130,6 +130,10 @@ const api = {
   adminFixDate:      (jobId, department, new_date) => apiFetch(`/api/admin/jobs/${jobId}/date-correction`, {
     method: "PATCH", body: JSON.stringify({ department, new_date }),
   }),
+  adminFullEditJob:   (jobId, body) => apiFetch(`/api/admin/jobs/${jobId}/full-edit`, {
+    method: "PATCH", body: JSON.stringify(body),
+  }),
+  adminFullDeleteJob: (jobId) => apiFetch(`/api/admin/jobs/${jobId}/full-delete`, { method: "DELETE" }),
 };
 
 function fmtPackets(sheets) {
@@ -1012,7 +1016,8 @@ function getPage() {
   if (p === "/analytics") return { page: "analytics" };
   if (p === "/damages")   return { page: "damages" };
   if (p === "/papers")    return { page: "papers" };
-  if (p === "/admin/date-fix") return { page: "date-fix" }; 
+  if (p === "/admin/date-fix") return { page: "date-fix" };
+  if (p === "/admin/fix-jobcard") return { page: "fix-jobcard" }; 
   const md = p.match(/^\/station\/([\w]+)\/damages$/);
   if (md) return { page: "damages", dept: md[1] };
   const m = p.match(/^\/station\/([\w]+)$/);
@@ -1038,6 +1043,7 @@ const NAV_ITEMS = [
   { label: "Damages",       path: "/damages",              accent: "var(--red)"    },
   { label: "Papers",        path: "/papers",               accent: "#3b82f6"       },
   { label: "Fix Dates",     path: "/admin/date-fix",       accent: "var(--red)"    },
+  { label: "Fix Job Card",  path: "/admin/fix-jobcard",    accent: "var(--red)"    },  // ← ADD
 ];
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
@@ -6564,6 +6570,189 @@ function AdminDateFixPage() {
   );
 }
 
+function AdminFixJobCardPage() {
+  const { toasts, add } = useToast();
+
+  if (!IS_ADMIN) {
+    return (
+      <Shell title="ACCESS DENIED" accent="var(--red)">
+        <div style={{ textAlign: "center", padding: "60px 0", color: "var(--red)" }}>
+          This page is admin-only.
+        </div>
+      </Shell>
+    );
+  }
+
+  const [query, setQuery]           = useState("");
+  const [results, setResults]       = useState([]);
+  const [job, setJob]               = useState(null);
+  const [loading, setLoading]       = useState(false);
+  const [saving, setSaving]         = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  async function search() {
+    if (!query.trim()) return;
+    try { const d = await api.adminSearchJob(query.trim()); setResults(d.jobs || []); }
+    catch (err) { add(err.message, "error"); }
+  }
+
+  async function pick(j) {
+    setResults([]); setQuery("");
+    setLoading(true);
+    try { setJob(await api.getJob(j.id)); }
+    catch (err) { add(err.message, "error"); }
+    finally { setLoading(false); }
+  }
+
+  async function save(e) {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    setSaving(true);
+    try {
+      const updated = await api.adminFullEditJob(job.id, {
+        job_no:           fd.get("job_no")           || "",
+        customer:         fd.get("customer")         || "",
+        couple_name:      fd.get("couple_name")      || "",
+        order_no:         fd.get("order_no")         || "",
+        dele_date:        new Date(fd.get("dele_date")).toISOString(),
+        priority:         fd.get("priority"),
+        delivery_type:    fd.get("delivery_type"),
+        special_note:     fd.get("special_note")     || "",
+        print_size:       fd.get("print_size")       || "",
+        print_pages:      fd.get("print_pages")      || "",
+        laser_cover_type: fd.get("laser_cover_type") || "",
+        laminate_type:    fd.get("laminate_type")    || "",
+        bind_rexing_no:   fd.get("bind_rexing_no")   || "",
+        box_type:         fd.get("box_type")         || "",
+        payment_by:       fd.get("payment_by")       || "",
+        album_type:       fd.get("album_type")       || "",
+      });
+      add(`✓ Job #${updated.job_no} updated.`, "success");
+      setJob(updated);
+    } catch (err) { add(err.message, "error"); }
+    finally { setSaving(false); }
+  }
+
+  async function handleDelete() {
+    try {
+      await api.adminFullDeleteJob(job.id);
+      add(`Deleted #${job.job_no}`, "info");
+      setJob(null);
+      setConfirmDelete(false);
+    } catch (err) { add(err.message, "error"); }
+  }
+
+  return (
+    <>
+      <Shell title="ADMIN - FIX JOB CARD" accent="var(--red)">
+        <div style={{ maxWidth: 900, display: "flex", flexDirection: "column", gap: 16 }}>
+          <Sec title="Find Job" accent="var(--red)">
+            <div style={{ display: "flex", gap: 8 }}>
+              <input value={query} onChange={e => setQuery(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && search()}
+                placeholder="Job No / Customer / Couple…" style={{ flex: 1, margin: 0 }} />
+              <button onClick={search} style={{ padding: "0 18px", background: "var(--amber)", color: "#000", borderRadius: 8, fontWeight: 800 }}>Search</button>
+            </div>
+            {results.length > 0 && (
+              <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+                {results.map(r => (
+                  <button key={r.id} onClick={() => pick(r)} style={{
+                    display: "flex", justifyContent: "space-between", padding: "9px 12px",
+                    background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 6, textAlign: "left",
+                  }}>
+                    <span style={{ fontFamily: "var(--fm)", color: "var(--amber)", fontWeight: 800 }}>{r.job_no}</span>
+                    <span style={{ color: "var(--text-sec)" }}>{r.customer}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </Sec>
+
+          {loading && <div style={{ textAlign: "center", padding: 20, color: "var(--text-dim)" }}>LOADING…</div>}
+
+          {job && (
+            <>
+              <div style={{ background: "var(--warn-bg)", border: "1px solid var(--warn-border)", borderRadius: 6, padding: "10px 14px", fontSize: 12, color: "var(--warn-text)" }}>
+                ⚠ Admin override - this bypasses the normal edit window and production lock. Changes here don't touch stage status/logs - use the station pages for that.
+              </div>
+
+              <form onSubmit={save} autoComplete="off" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                <Sec title="Job Header" accent="var(--amber)">
+                  <div className="r-grid-3" style={{ marginBottom: 14 }}>
+                    <div><label>Job No *</label><input name="job_no" defaultValue={job.job_no} /></div>
+                    <div><label>Photographer / Studio *</label><input name="customer" defaultValue={job.customer} /></div>
+                    <div><label>Couple Name</label><input name="couple_name" defaultValue={job.couple_name || ""} /></div>
+                  </div>
+                  <div className="r-grid-3">
+                    <div><label>Order No</label><input name="order_no" defaultValue={job.order_no || ""} /></div>
+                    <div><label>Delivery Date *</label><input name="dele_date" type="date" defaultValue={job.dele_date?.slice(0, 10)} required /></div>
+                    <div><label>Priority</label>
+                      <select name="priority" defaultValue={job.priority || "NORMAL"}>
+                        <option value="NORMAL">NORMAL</option>
+                        <option value="URGENT">URGENT</option>
+                      </select>
+                    </div>
+                  </div>
+                </Sec>
+
+                <JobFields job={job} />
+
+                <Sec title="Additional" accent="#16a34a">
+                  <div className="r-grid-3">
+                    <div>
+                      <label>Album Type</label>
+                      <select name="album_type" defaultValue={job.album_type || "NORMAL"}>
+                        {ALBUM_TYPES.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label>Payment Taken By</label>
+                      <input name="payment_by" defaultValue={job.payment_by || ""} placeholder="Optional" />
+                    </div>
+                  </div>
+                </Sec>
+
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button type="submit" disabled={saving} style={{
+                    flex: 1, padding: "13px 0",
+                    background: saving ? "var(--bg3)" : "var(--amber)",
+                    color: saving ? "var(--text-dim)" : "#000",
+                    borderRadius: 8, fontSize: 15, fontWeight: 800,
+                  }}>{saving ? "Saving…" : "✓ Save Changes"}</button>
+                  <button type="button" onClick={() => setConfirmDelete(true)} style={{
+                    padding: "13px 20px", background: "var(--danger-bg)", color: "var(--red)",
+                    border: "1px solid var(--red)", borderRadius: 8, fontWeight: 800,
+                  }}>Delete Job</button>
+                </div>
+              </form>
+            </>
+          )}
+        </div>
+      </Shell>
+
+      {confirmDelete && job && (
+        <div style={{ position: "fixed", inset: 0, background: "var(--overlay)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9000 }} onClick={() => setConfirmDelete(false)}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "var(--bg1)", border: "1px solid var(--red)", borderRadius: 12, padding: 24, width: "100%", maxWidth: 400, display: "flex", flexDirection: "column", gap: 16 }}>
+            <div>
+              <div style={{ fontSize: 11, color: "var(--red)", textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 8 }}>⚠ Confirm Delete (Admin)</div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: "var(--amber)", fontFamily: "var(--fm)" }}>{job.job_no}</div>
+              <div style={{ fontSize: 14, color: "var(--text-pri)" }}>{job.customer}</div>
+              <div style={{ fontSize: 13, color: "var(--text-dim)", marginTop: 10 }}>
+                This bypasses all normal restrictions and permanently deletes the job card and all its logs. This cannot be undone.
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={handleDelete} style={{ flex: 1, padding: "12px 0", background: "var(--red)", color: "var(--text-pri)", borderRadius: 8, fontWeight: 800, fontSize: 15 }}>✕ Yes, Delete</button>
+              <button onClick={() => setConfirmDelete(false)} style={{ padding: "12px 18px", background: "var(--bg3)", color: "var(--text-sec)", border: "1px solid var(--border)", borderRadius: 8, fontWeight: 700 }}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+      <ToastStack toasts={toasts} />
+    </>
+  );
+}
+
 // ── 3. OVERDUE DELIVERY ALERT ─────────────────────────────────────────────────
 // Jobs that are past their delivery date but still in the pipeline.
 // Computed from `active` jobs - no backend needed.
@@ -8904,6 +9093,7 @@ export default function App() {
        page === "papers"    ? <PapersPage /> :
        page === "history"   ? <HistoryPage /> :
        page === "date-fix"  ? <AdminDateFixPage /> :
+       page === "fix-jobcard" ? <AdminFixJobCardPage /> :
        <DashboardPage />}
     </AppearanceProvider>
   );

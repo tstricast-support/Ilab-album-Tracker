@@ -616,6 +616,78 @@ def admin_fix_date(job_id: int, payload: DateCorrectionRequest, db: Session = De
     db.refresh(job)
     return _out(job, db)
 
+class AdminJobFullUpdate(BaseModel):
+    job_no:           Optional[str] = None
+    customer:         Optional[str] = None
+    couple_name:      Optional[str] = None
+    order_no:         Optional[str] = None
+    dele_date:        Optional[datetime] = None
+    priority:         Optional[PriorityEnum] = None
+    delivery_type:    Optional[DeliveryTypeEnum] = None
+    special_note:     Optional[str] = None
+    print_size:       Optional[str] = None
+    print_pages:      Optional[str] = None
+    laser_cover_type: Optional[str] = None
+    laminate_type:    Optional[str] = None
+    bind_rexing_no:   Optional[str] = None
+    box_type:         Optional[str] = None
+    payment_by:       Optional[str] = None
+    album_type:       Optional[str] = None
+    box_pouch_status: Optional[str] = None
+
+
+@app.patch("/api/admin/jobs/{job_id}/full-edit", response_model=JobCardOut)
+def admin_full_edit_job(job_id: int, payload: AdminJobFullUpdate, db: Session = Depends(get_db)):
+    """Admin-only: edit ANY field on a job card, bypassing the production
+    lock and the 4-minute edit window that normally apply."""
+    job = _job_or_404(job_id, db)
+    data = payload.model_dump(exclude_unset=True)
+
+    if "job_no" in data:
+        new_job_no = (data["job_no"] or "").strip()
+        if not new_job_no:
+            raise HTTPException(400, "Job No cannot be empty")
+        dup = db.query(JobCard).filter(
+            JobCard.job_no == new_job_no, JobCard.id != job_id
+        ).first()
+        if dup:
+            raise HTTPException(409, f"Job number '{new_job_no}' already exists")
+        data["job_no"] = new_job_no
+
+    if "customer" in data:
+        if not (data["customer"] or "").strip():
+            raise HTTPException(400, "Customer cannot be empty")
+        data["customer"] = data["customer"].strip()
+
+    if data.get("album_type"):
+        val = data["album_type"].strip().upper()
+        if val not in ("NORMAL", "STORY", "REBIND"):
+            raise HTTPException(400, "album_type must be NORMAL, STORY, or REBIND")
+        data["album_type"] = val
+
+    if data.get("box_pouch_status"):
+        val = data["box_pouch_status"].strip().upper()
+        if val not in ("COMPLETE", "PROCESSING", "NOT_NEEDED"):
+            raise HTTPException(400, "box_pouch_status must be COMPLETE, PROCESSING, or NOT_NEEDED")
+        data["box_pouch_status"] = val
+
+    for field, value in data.items():
+        setattr(job, field, value)
+
+    job.updated_at = datetime.utcnow()  # type:ignore
+    db.commit()
+    db.refresh(job)
+    return _out(job, db)
+
+
+@app.delete("/api/admin/jobs/{job_id}/full-delete", status_code=204)
+def admin_full_delete_job(job_id: int, db: Session = Depends(get_db)):
+    """Admin-only: delete a job card at any point in its lifecycle,
+    bypassing the production lock and edit window."""
+    job = _job_or_404(job_id, db)
+    db.delete(job)
+    db.commit()
+
 class DamageUpdate(BaseModel):
     paper_price_id: Optional[int] = None
     job_no: Optional[str] = None
