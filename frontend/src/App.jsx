@@ -18206,13 +18206,14 @@ function DashboardPage() {
             marginBottom: 16,
           }}
         >
-          <FoldableSection title="Department Totals" accent="var(--text-pri)">
+          <FoldableSection title="Department Totals" accent="var(--text-pri)" defaultOpen>
             <DeptTotalsPanel addToast={add} hideHeader />
           </FoldableSection>
 
           <FoldableSection
             title="Printing Section - By Machine"
             accent="var(--text-pri)"
+            defaultOpen
           >
             <PrintingMachineBreakdownPanel hideHeader />
           </FoldableSection>
@@ -18309,10 +18310,7 @@ function DashboardPage() {
           <FoldableSection
             title="Priority Watch - Urgent & Overdue"
             accent="var(--text-pri)"
-            defaultOpen={
-              stats?.urgent_pending > 0 ||
-              active.some((j) => new Date(j.dele_date).getTime() < Date.now())
-            }
+            
             badge={
               (stats?.urgent_pending > 0 ||
                 active.some(
