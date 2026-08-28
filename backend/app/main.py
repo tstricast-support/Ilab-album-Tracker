@@ -2319,19 +2319,31 @@ def create_thankyou_card(payload: ThankYouCardCreate, db: Session = Depends(get_
 def list_thankyou_cards(
     db: Session = Depends(get_db),
     machine: Optional[str] = Query(None),
-    date: Optional[str] = Query(None, description="YYYY-MM-DD, Sri Lanka calendar day"),
+    date: Optional[str] = Query(None, description="YYYY-MM-DD, Sri Lanka day. Omit for current month."),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
     q = db.query(ThankYouCard)
     if machine:
         q = q.filter(ThankYouCard.machine == machine.strip().upper())
+
     if date:
         day_start = datetime.strptime(date, "%Y-%m-%d") - SL_TZ_OFFSET
         day_end   = day_start + timedelta(days=1)
         q = q.filter(ThankYouCard.created_at >= day_start, ThankYouCard.created_at < day_end)
+    else:
+        utc_now = datetime.utcnow()
+        sl_now  = utc_now + SL_TZ_OFFSET
+        month_start = datetime(sl_now.year, sl_now.month, 1) - SL_TZ_OFFSET
+        month_end   = (
+            datetime(sl_now.year + 1, 1, 1) if sl_now.month == 12
+            else datetime(sl_now.year, sl_now.month + 1, 1)
+        ) - SL_TZ_OFFSET
+        q = q.filter(ThankYouCard.created_at >= month_start, ThankYouCard.created_at < month_end)
 
     total = q.count()
+    total_value    = q.with_entities(func.coalesce(func.sum(ThankYouCard.total_price), 0)).scalar() or 0
+    total_quantity = q.with_entities(func.coalesce(func.sum(ThankYouCard.quantity), 0)).scalar() or 0
     rows = (
         q.order_by(desc(ThankYouCard.created_at))
          .offset((page - 1) * page_size)
@@ -2340,6 +2352,8 @@ def list_thankyou_cards(
     )
     return {
         "total": total,
+        "total_value": int(total_value),
+        "total_quantity": int(total_quantity),
         "page": page,
         "page_size": page_size,
         "pages": max(1, -(-total // page_size)),
