@@ -253,8 +253,18 @@ def update_job(job_id: int, payload: JobCardUpdate, db: Session = Depends(get_db
 
     if (datetime.utcnow() - job.created_at) > timedelta(minutes=4): #type:ignore 
         raise HTTPException(403, "Edit window has expired. Job can no longer be edited.")
-    for field, value in payload.model_dump(exclude_unset=True).items():
+
+    data = payload.model_dump(exclude_unset=True)
+    for field, value in data.items():
         setattr(job, field, value)
+
+    # ── FIX: laser_cover_type වෙනස් උනොත්, status එක recompute කරන්න ──
+    if "laser_cover_type" in data:
+        has_laser = bool((job.laser_cover_type or "").strip())
+        job.status_laser_cutting = (
+            StageStatusEnum.PENDING if has_laser else StageStatusEnum.SKIPPED
+        )
+
     job.updated_at = datetime.utcnow() #type:ignore 
     db.commit()
     db.refresh(job)
@@ -673,6 +683,12 @@ def admin_full_edit_job(job_id: int, payload: AdminJobFullUpdate, db: Session = 
 
     for field, value in data.items():
         setattr(job, field, value)
+
+    if "laser_cover_type" in data:
+        has_laser = bool((job.laser_cover_type or "").strip())
+        job.status_laser_cutting = (
+            StageStatusEnum.PENDING if has_laser else StageStatusEnum.SKIPPED
+        )
 
     job.updated_at = datetime.utcnow()  # type:ignore
     db.commit()
@@ -1306,10 +1322,16 @@ def get_dept_stats(db: Session = Depends(get_db)):
     # THIS MONTH's per-department completed count — now correctly resets
     rows = (
         db.query(DepartmentLog.department, func.count(DepartmentLog.id))
+        .join(JobCard, JobCard.id == DepartmentLog.job_id)
         .filter(
             DepartmentLog.exited_at != None,
             DepartmentLog.exited_at >= month_start,
             DepartmentLog.exited_at <  month_end,
+         or_(
+            DepartmentLog.department != DepartmentEnum.PRINTING,
+            JobCard.album_type.is_(None),
+            JobCard.album_type != "REBIND",
+            ),
         )
         .group_by(DepartmentLog.department)
         .all()

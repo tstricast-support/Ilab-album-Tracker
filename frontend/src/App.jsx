@@ -6063,6 +6063,7 @@ function JobCardFull({
 // ── Shared field sections (used in both create & edit forms) ────────
 function JobFields({ job }) {
   const [laserEnabled, setLaserEnabled] = useState(!!job?.laser_cover_type);
+  const laserInputRef = useRef(null);
 
   return (
     <>
@@ -6107,11 +6108,8 @@ function JobFields({ job }) {
                 const enabled = e.target.value === "YES";
                 setLaserEnabled(enabled);
 
-                if (!enabled) {
-                  const input = document.querySelector(
-                    'input[name="laser_cover_type"]',
-                  );
-                  if (input) input.value = "";
+                if (!enabled && laserInputRef.current) {
+                  laserInputRef.current.value = "";
                 }
               }}
             >
@@ -6128,8 +6126,9 @@ function JobFields({ job }) {
             <div>
               <label>Cover Type / Description</label>
               <input
+                ref={laserInputRef}
                 name="laser_cover_type"
-                placeholder="Wood / Acrylic"
+                placeholder="LC 129 / Acrylic"
                 defaultValue={job?.laser_cover_type || ""}
               />
             </div>
