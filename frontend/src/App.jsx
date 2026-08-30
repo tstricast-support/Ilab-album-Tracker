@@ -4463,7 +4463,6 @@ function Shell({ title, accent = "var(--amber)", topRightPrimary, topRightMid, t
                     }}
                   />
                   <div
-                    onClick={() => setMenuOpen(false)}
                     style={{
                       position: "absolute",
                       top: "calc(100% + 8px)",
@@ -4488,9 +4487,10 @@ function Shell({ title, accent = "var(--amber)", topRightPrimary, topRightMid, t
 
                     {!IS_ADMIN && !onSubPage && DAMAGE_DEPTS.includes(ROLE) && (
                       <button
-                        onClick={() =>
-                          navigate(`/station/${ROLE.toLowerCase()}/damages`)
-                        }
+                        onClick={() => {
+                          navigate(`/station/${ROLE.toLowerCase()}/damages`);
+                          setMenuOpen(false);
+                        }}
                         style={{
                           ...menuItemStyle,
                           background: "var(--danger-bg)",
@@ -4504,11 +4504,16 @@ function Shell({ title, accent = "var(--amber)", topRightPrimary, topRightMid, t
 
                     {!IS_ADMIN && !onSubPage && ROLE === "PRINTING" && (
                       <button
-                        onClick={() => navigate("/papers")}
+                        onClick={() => {
+                          navigate("/papers");
+                          setMenuOpen(false);
+                        }}
                         className={lowStock ? "blink" : ""}
                         style={{
                           ...menuItemStyle,
-                          background: lowStock ? "var(--danger-bg)" : "var(--info-bg)",
+                          background: lowStock
+                            ? "var(--danger-bg)"
+                            : "var(--info-bg)",
                           color: lowStock ? "var(--red)" : "var(--blue)",
                           border: `1px solid ${lowStock ? "var(--red)" : "var(--blue)"}`,
                         }}
@@ -4522,7 +4527,10 @@ function Shell({ title, accent = "var(--amber)", topRightPrimary, topRightMid, t
 
                     {IS_ADMIN && !onHistory && (
                       <button
-                        onClick={() => navigate("/history")}
+                        onClick={() => {
+                          navigate("/history");
+                          setMenuOpen(false);
+                        }}
                         style={{
                           ...menuItemStyle,
                           background: "var(--bg3)",
@@ -4535,7 +4543,10 @@ function Shell({ title, accent = "var(--amber)", topRightPrimary, topRightMid, t
                     )}
                     {!IS_ADMIN && !onSubPage && (
                       <button
-                        onClick={() => navigate("/history")}
+                        onClick={() => {
+                          navigate("/history");
+                          setMenuOpen(false);
+                        }}
                         style={{
                           ...menuItemStyle,
                           background: "var(--bg3)",
@@ -4550,7 +4561,10 @@ function Shell({ title, accent = "var(--amber)", topRightPrimary, topRightMid, t
                     <AppearanceButton isMobile forceLabel />
 
                     <button
-                      onClick={downloadQR}
+                      onClick={() => {
+                        downloadQR();
+                        setMenuOpen(false);
+                      }}
                       style={{
                         ...menuItemStyle,
                         background: "var(--bg3)",
@@ -4612,7 +4626,9 @@ function Shell({ title, accent = "var(--amber)", topRightPrimary, topRightMid, t
 
               {!IS_ADMIN && !onSubPage && DAMAGE_DEPTS.includes(ROLE) && (
                 <button
-                  onClick={() => navigate(`/station/${ROLE.toLowerCase()}/damages`)}
+                  onClick={() =>
+                    navigate(`/station/${ROLE.toLowerCase()}/damages`)
+                  }
                   style={{
                     padding: "8px 14px",
                     background: "var(--danger-bg)",
@@ -4634,7 +4650,9 @@ function Shell({ title, accent = "var(--amber)", topRightPrimary, topRightMid, t
                   className={lowStock ? "blink" : ""}
                   style={{
                     padding: "8px 14px",
-                    background: lowStock ? "var(--danger-bg)" : "var(--info-bg)",
+                    background: lowStock
+                      ? "var(--danger-bg)"
+                      : "var(--info-bg)",
                     color: lowStock ? "var(--red)" : "var(--blue)",
                     border: `1px solid ${lowStock ? "var(--red)" : "var(--blue)"}`,
                     borderRadius: 6,
