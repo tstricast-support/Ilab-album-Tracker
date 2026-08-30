@@ -5,6 +5,7 @@ import {
   useRef,
   createContext,
   useContext,
+  cloneElement,
 } from "react";
 import {
   API_BASE,
@@ -42,6 +43,8 @@ import {
   Download,
   Gift,
   FileUp,
+  Menu,
+  X,  
 } from "lucide-react";
 import logo from "./assets/logo.jpg";
 import trackQR from "./assets/track-qr.png";
@@ -928,7 +931,7 @@ function AppearanceModal({ onClose }) {
   );
 }
 
-function AppearanceButton({ isMobile }) {
+function AppearanceButton({ isMobile, forceLabel = false }) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -936,19 +939,25 @@ function AppearanceButton({ isMobile }) {
         onClick={() => setOpen(true)}
         title="Appearance"
         style={{
-          padding: isMobile ? "6px 10px" : "8px 14px",
+          padding: forceLabel
+            ? "12px 14px"
+            : isMobile
+              ? "6px 10px"
+              : "8px 14px",
+          width: forceLabel ? "100%" : "auto",
           background: "var(--bg3)",
           color: "var(--text-sec)",
           border: "1px solid var(--border)",
           borderRadius: 6,
           fontWeight: 700,
-          fontSize: isMobile ? 11 : 13,
+          fontSize: forceLabel ? 14 : isMobile ? 11 : 13,
           display: "flex",
           alignItems: "center",
-          gap: 6,
+          gap: forceLabel ? 10 : 6,
         }}
       >
         <Palette size={14} />
+        {forceLabel && "Appearance"}
       </button>
       {open && <AppearanceModal onClose={() => setOpen(false)} />}
     </>
@@ -2234,7 +2243,7 @@ function ThankYouCardHistory() {
   );
 }
 
-function ThankYouCardButton({ isMobile }) {
+function ThankYouCardButton({ isMobile, forceLabel = false }) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -2242,25 +2251,31 @@ function ThankYouCardButton({ isMobile }) {
         onClick={() => setOpen(true)}
         title="Thank You Card"
         style={{
-          padding: isMobile ? "6px 10px" : "8px 14px",
+          padding: forceLabel
+            ? "12px 14px"
+            : isMobile
+              ? "6px 10px"
+              : "8px 14px",
+          width: forceLabel ? "100%" : "auto",
           background: "var(--bg3)",
           color: "var(--amber)",
           border: "1px solid var(--amber)",
           borderRadius: 6,
           fontWeight: 700,
-          fontSize: isMobile ? 11 : 13,
+          fontSize: forceLabel ? 14 : isMobile ? 11 : 13,
           display: "flex",
           alignItems: "center",
-          gap: 6,
+          gap: forceLabel ? 10 : 6,
         }}
       >
-        {isMobile ? <Gift size={14} /> : "ThankUcard"}
+        <Gift size={14} />
+        {(!isMobile || forceLabel) &&
+          (forceLabel ? "Thank You Card" : "ThankUcard")}
       </button>
       {open && <ThankYouCardModal onClose={() => setOpen(false)} />}
     </>
   );
 }
-
 function slDateStr(date) {
   // Shift any Date into Sri Lanka's calendar day (UTC+5:30), regardless
   // of what timezone the viewing device is set to.
@@ -3696,6 +3711,7 @@ function DeptCompletedDropdown({
   mrb = "0px",
   addToast,
   showBreakdown = false,
+  forceLabel = false,
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -3758,8 +3774,13 @@ function DeptCompletedDropdown({
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 6,
-          padding: isMobile ? "6px 10px" : "8px 14px",
+          gap: 8,
+          padding: forceLabel
+            ? "12px 14px"
+            : isMobile
+              ? "6px 10px"
+              : "8px 14px",
+          width: forceLabel ? "100%" : "auto",
           background: "var(--bg3)",
           color: accent,
           marginBottom: mrb,
@@ -3767,10 +3788,11 @@ function DeptCompletedDropdown({
           borderRadius: 6,
           fontWeight: 700,
           cursor: "pointer",
-          fontSize: isMobile ? 11 : 13,
+          fontSize: forceLabel ? 14 : isMobile ? 11 : 13,
         }}
       >
-        {isMobile ? <Calendar size={14} /> : title}
+        <Calendar size={14} />
+        {(!isMobile || forceLabel) && title}
         {data ? ` (${data.total})` : ""}
       </button>
 
@@ -4252,8 +4274,9 @@ function TrackPage() {
 }
 
 // ── Shell ─────────────────────────────────────────────────────────────────────
-function Shell({ title, accent = "var(--amber)", topRight, children }) {
+function Shell({ title, accent = "var(--amber)", topRightPrimary, topRightMid, topRight, children }) {
   const [, forceUpdate] = useState(0);
+  const [menuOpen, setMenuOpen] = useState(false);
   const isMobile = useIsMobile();
 
   useEffect(() => {
@@ -4268,7 +4291,28 @@ function Shell({ title, accent = "var(--amber)", topRight, children }) {
   const onDamages =
     path === "/damages" || /^\/station\/[\w]+\/damages$/.test(path);
   const onPapers = path === "/papers";
+  const onEntry = path === "/entry";
   const lowStock = useLowStockBlink();
+
+  const onSubPage = onHistory || onDamages || onPapers || onEntry;
+  const isAtOwnHome = !IS_ADMIN && path === getDeptHomePath();
+
+  // Close the mobile menu whenever the route changes
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [path]);
+
+  const menuItemStyle = {
+    width: "100%",
+    textAlign: "left",
+    padding: "12px 14px",
+    borderRadius: 8,
+    fontWeight: 700,
+    fontSize: 14,
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+  };
 
   return (
     <div
@@ -4337,183 +4381,334 @@ function Shell({ title, accent = "var(--amber)", topRight, children }) {
             justifyContent: "flex-end",
             width: isMobile ? "100%" : "auto",
             order: isMobile ? 3 : 0,
+            position: "relative",
           }}
         >
-          {IS_ADMIN && !onDashboard && (
-            <button
-              onClick={() => navigate("/")}
-              style={{
-                padding: isMobile ? "6px 10px" : "8px 14px",
-                background: "var(--amber)",
-                color: "#000",
-                border: "none",
-                borderRadius: 6,
-                fontWeight: 700,
-                cursor: "pointer",
-                fontSize: isMobile ? 11 : 13,
-              }}
-            >
-              ← {isMobile ? "" : "Dashboard"}
-              {isMobile ? "Home" : ""}
-            </button>
-          )}
+          {isMobile ? (
+            <>
+              {/* Back button — always visible */}
+              {IS_ADMIN && !onDashboard && (
+                <button
+                  onClick={() => navigate("/")}
+                  style={{
+                    padding: "6px 10px",
+                    background: "var(--amber)",
+                    color: "#000",
+                    border: "none",
+                    borderRadius: 6,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    fontSize: 11,
+                  }}
+                >
+                  ← Home
+                </button>
+              )}
+              {!IS_ADMIN && onSubPage && !isAtOwnHome && (
+                <button
+                  onClick={() => navigate(getDeptHomePath())}
+                  style={{
+                    padding: "6px 10px",
+                    background: "var(--amber)",
+                    color: "#000",
+                    border: "none",
+                    borderRadius: 6,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    fontSize: 11,
+                  }}
+                >
+                  ← {getDeptLabel()}
+                </button>
+              )}
 
-          {IS_ADMIN && !onHistory && (
-            <button
-              onClick={() => navigate("/history")}
-              style={{
-                padding: isMobile ? "6px 10px" : "8px 14px",
-                background: "var(--bg3)",
-                color: "var(--text-sec)",
-                border: "1px solid var(--border)",
-                borderRadius: 6,
-                fontWeight: 700,
-                cursor: "pointer",
-                fontSize: isMobile ? 11 : 13,
-              }}
-            >
-              {isMobile ? <Calendar size={14} /> : "History"}
-            </button>
-          )}
+              {/* Search — always visible */}
+              <GlobalSearchBar />
 
-          {!IS_ADMIN && !onHistory && (
-            <button
-              onClick={() => navigate("/history")}
-              style={{
-                padding: isMobile ? "6px 10px" : "8px 14px",
-                background: "var(--bg3)",
-                color: "var(--text-pri)",
-                border: "1px solid var(--border)",
-                borderRadius: 6,
-                fontWeight: 700,
-                cursor: "pointer",
-                fontSize: isMobile ? 11 : 13,
-              }}
-            >
-              {isMobile ? <Calendar size={14} /> : "History"}
-            </button>
-          )}
+              {/* Primary action stays visible */}
+              {topRightPrimary}
 
-          {!IS_ADMIN && onHistory && (
-            <button
-              onClick={() => navigate(getDeptHomePath())}
-              style={{
-                padding: isMobile ? "6px 10px" : "8px 14px",
-                background: "var(--amber)",
-                color: "#000",
-                border: "none",
-                borderRadius: 6,
-                fontWeight: 700,
-                cursor: "pointer",
-                fontSize: isMobile ? 11 : 13,
-              }}
-            >
-              ← {getDeptLabel()}
-            </button>
-          )}
+              {/* Hamburger toggle */}
+              <button
+                onClick={() => setMenuOpen((o) => !o)}
+                title="More options"
+                style={{
+                  padding: "8px 10px",
+                  background: menuOpen ? "var(--amber)" : "var(--bg3)",
+                  color: menuOpen ? "#000" : "var(--text-sec)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 6,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                }}
+              >
+                {menuOpen ? <X size={18} /> : <Menu size={18} />}
+              </button>
 
-          {/* ── ADD: Damages back button ── */}
-          {!IS_ADMIN && onDamages && (
-            <button
-              onClick={() => navigate(getDeptHomePath())}
-              style={{
-                padding: isMobile ? "6px 10px" : "8px 14px",
-                background: "var(--amber)",
-                color: "#000",
-                border: "none",
-                borderRadius: 6,
-                fontWeight: 700,
-                cursor: "pointer",
-                fontSize: isMobile ? 11 : 13,
-              }}
-            >
-              ← {getDeptLabel()}
-            </button>
-          )}
+              {/* Counts — always visible */}
+              {topRight}
 
-          {/* ── ADD: Damages entry button (only for the 3 relevant stations) ── */}
-          {!IS_ADMIN && !onDamages && DAMAGE_DEPTS.includes(ROLE) && (
-            <button
-              onClick={() => navigate(`/station/${ROLE.toLowerCase()}/damages`)}
-              style={{
-                padding: isMobile ? "6px 10px" : "8px 14px",
-                background: "var(--danger-bg)",
-                color: "var(--red)",
-                border: "1px solid var(--red)",
-                borderRadius: 6,
-                fontWeight: 700,
-                cursor: "pointer",
-                fontSize: isMobile ? 11 : 13,
-              }}
-            >
-              {isMobile ? "⚠" : "⚠ Damages"}
-            </button>
-          )}
+              {/* Backdrop + dropdown menu panel */}
+              {menuOpen && (
+                <>
+                  <div
+                    onClick={() => setMenuOpen(false)}
+                    style={{
+                      position: "fixed",
+                      inset: 0,
+                      zIndex: 140,
+                      background: "transparent",
+                    }}
+                  />
+                  <div
+                    onClick={() => setMenuOpen(false)}
+                    style={{
+                      position: "absolute",
+                      top: "calc(100% + 8px)",
+                      right: 0,
+                      width: "min(320px, 92vw)",
+                      background: "var(--bg1)",
+                      border: "1px solid var(--border)",
+                      borderRadius: 10,
+                      zIndex: 150,
+                      padding: 10,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 8,
+                      boxShadow: "0 10px 40px rgba(0,0,0,.55)",
+                      maxHeight: "70vh",
+                      overflowY: "auto",
+                    }}
+                  >
+                    {ROLE === "PRINTING" && !IS_ADMIN && (
+                      <ThankYouCardButton isMobile forceLabel />
+                    )}
 
-          {/* ── ADD: Papers entry button (Printing station only) ── */}
-          {!IS_ADMIN && !onPapers && ROLE === "PRINTING" && (
-            <button
-              onClick={() => navigate("/papers")}
-              className={lowStock ? "blink" : ""}
-              style={{
-                padding: isMobile ? "6px 10px" : "8px 14px",
-                background: lowStock ? "var(--danger-bg)" : "var(--info-bg)",
-                color: lowStock ? "var(--red)" : "var(--blue)",
-                border: `1px solid ${lowStock ? "var(--red)" : "var(--blue)"}`,
-                borderRadius: 6,
-                fontWeight: 700,
-                cursor: "pointer",
-                fontSize: isMobile ? 11 : 13,
-              }}
-            >
-              {isMobile ? "📄" : lowStock ? "Papers (Low!)" : "Papers"}
-            </button>
-          )}
+                    {!IS_ADMIN && !onSubPage && DAMAGE_DEPTS.includes(ROLE) && (
+                      <button
+                        onClick={() =>
+                          navigate(`/station/${ROLE.toLowerCase()}/damages`)
+                        }
+                        style={{
+                          ...menuItemStyle,
+                          background: "var(--danger-bg)",
+                          color: "var(--red)",
+                          border: "1px solid var(--red)",
+                        }}
+                      >
+                        <TriangleAlert size={14} /> Report Damages
+                      </button>
+                    )}
 
-          {/* ── ADD: Papers back button ── */}
-          {!IS_ADMIN && onPapers && (
-            <button
-              onClick={() => navigate(getDeptHomePath())}
-              style={{
-                padding: isMobile ? "6px 10px" : "8px 14px",
-                background: "var(--amber)",
-                color: "#000",
-                border: "none",
-                borderRadius: 6,
-                fontWeight: 700,
-                cursor: "pointer",
-                fontSize: isMobile ? 11 : 13,
-              }}
-            >
-              ← {getDeptLabel()}
-            </button>
-          )}
+                    {!IS_ADMIN && !onSubPage && ROLE === "PRINTING" && (
+                      <button
+                        onClick={() => navigate("/papers")}
+                        className={lowStock ? "blink" : ""}
+                        style={{
+                          ...menuItemStyle,
+                          background: lowStock ? "var(--danger-bg)" : "var(--info-bg)",
+                          color: lowStock ? "var(--red)" : "var(--blue)",
+                          border: `1px solid ${lowStock ? "var(--red)" : "var(--blue)"}`,
+                        }}
+                      >
+                        📄 {lowStock ? "Papers (Low Stock!)" : "Paper Stock"}
+                      </button>
+                    )}
 
-          <GlobalSearchBar />
-          <button
-            onClick={downloadQR}
-            title="Download Album Tracking QR"
-            style={{
-              padding: isMobile ? "6px 10px" : "8px 14px",
-              background: "var(--bg3)",
-              color: "var(--cyan)",
-              border: "1px solid var(--cyan)",
-              borderRadius: 6,
-              fontWeight: 700,
-              cursor: "pointer",
-              fontSize: isMobile ? 11 : 13,
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-            }}
-          >
-            <Download size={14} />
-          </button>
-          {ROLE === "PRINTING" && !IS_ADMIN && (
-            <ThankYouCardButton isMobile={isMobile} />
+                    {topRightMid &&
+                      cloneElement(topRightMid, { forceLabel: true })}
+
+                    {IS_ADMIN && !onHistory && (
+                      <button
+                        onClick={() => navigate("/history")}
+                        style={{
+                          ...menuItemStyle,
+                          background: "var(--bg3)",
+                          color: "var(--text-sec)",
+                          border: "1px solid var(--border)",
+                        }}
+                      >
+                        <Calendar size={14} /> History
+                      </button>
+                    )}
+                    {!IS_ADMIN && !onSubPage && (
+                      <button
+                        onClick={() => navigate("/history")}
+                        style={{
+                          ...menuItemStyle,
+                          background: "var(--bg3)",
+                          color: "var(--text-pri)",
+                          border: "1px solid var(--border)",
+                        }}
+                      >
+                        <Calendar size={14} /> History
+                      </button>
+                    )}
+
+                    <AppearanceButton isMobile forceLabel />
+
+                    <button
+                      onClick={downloadQR}
+                      style={{
+                        ...menuItemStyle,
+                        background: "var(--bg3)",
+                        color: "var(--cyan)",
+                        border: "1px solid var(--cyan)",
+                      }}
+                    >
+                      <Download size={14} /> Download Tracking QR
+                    </button>
+                  </div>
+                </>
+              )}
+            </>
+          ) : (
+            <>
+              {/* ── Desktop layout (unchanged) ── */}
+              {IS_ADMIN && !onDashboard && (
+                <button
+                  onClick={() => navigate("/")}
+                  style={{
+                    padding: "8px 14px",
+                    background: "var(--amber)",
+                    color: "#000",
+                    border: "none",
+                    borderRadius: 6,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    fontSize: 13,
+                  }}
+                >
+                  ← Dashboard
+                </button>
+              )}
+              {!IS_ADMIN && onSubPage && !isAtOwnHome && (
+                <button
+                  onClick={() => navigate(getDeptHomePath())}
+                  style={{
+                    padding: "8px 14px",
+                    background: "var(--amber)",
+                    color: "#000",
+                    border: "none",
+                    borderRadius: 6,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    fontSize: 13,
+                  }}
+                >
+                  ← {getDeptLabel()}
+                </button>
+              )}
+
+              <GlobalSearchBar />
+
+              {topRightPrimary}
+
+              {ROLE === "PRINTING" && !IS_ADMIN && (
+                <ThankYouCardButton isMobile={isMobile} />
+              )}
+
+              {!IS_ADMIN && !onSubPage && DAMAGE_DEPTS.includes(ROLE) && (
+                <button
+                  onClick={() => navigate(`/station/${ROLE.toLowerCase()}/damages`)}
+                  style={{
+                    padding: "8px 14px",
+                    background: "var(--danger-bg)",
+                    color: "var(--red)",
+                    border: "1px solid var(--red)",
+                    borderRadius: 6,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    fontSize: 13,
+                  }}
+                >
+                  ⚠ Damages
+                </button>
+              )}
+
+              {!IS_ADMIN && !onSubPage && ROLE === "PRINTING" && (
+                <button
+                  onClick={() => navigate("/papers")}
+                  className={lowStock ? "blink" : ""}
+                  style={{
+                    padding: "8px 14px",
+                    background: lowStock ? "var(--danger-bg)" : "var(--info-bg)",
+                    color: lowStock ? "var(--red)" : "var(--blue)",
+                    border: `1px solid ${lowStock ? "var(--red)" : "var(--blue)"}`,
+                    borderRadius: 6,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    fontSize: 13,
+                  }}
+                >
+                  {lowStock ? "Papers (Low!)" : "Papers"}
+                </button>
+              )}
+
+              {topRightMid}
+
+              {IS_ADMIN && !onHistory && (
+                <button
+                  onClick={() => navigate("/history")}
+                  style={{
+                    padding: "8px 14px",
+                    background: "var(--bg3)",
+                    color: "var(--text-sec)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 6,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    fontSize: 13,
+                  }}
+                >
+                  History
+                </button>
+              )}
+              {!IS_ADMIN && !onSubPage && (
+                <button
+                  onClick={() => navigate("/history")}
+                  style={{
+                    padding: "8px 14px",
+                    background: "var(--bg3)",
+                    color: "var(--text-pri)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 6,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    fontSize: 13,
+                  }}
+                >
+                  History
+                </button>
+              )}
+
+              <AppearanceButton isMobile={isMobile} />
+
+              <button
+                onClick={downloadQR}
+                title="Download Album Tracking QR"
+                style={{
+                  padding: "8px 14px",
+                  background: "var(--bg3)",
+                  color: "var(--cyan)",
+                  border: "1px solid var(--cyan)",
+                  borderRadius: 6,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  fontSize: 13,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                <Download size={14} />
+              </button>
+
+              {topRight}
+            </>
           )}
-          <AppearanceButton isMobile={isMobile} />
-          {topRight}
         </div>
       </header>
       <main
@@ -9952,6 +10147,38 @@ function StationPage({ deptKey }) {
       <Shell
         title={`${cfg.label} STATION`}
         accent={cfg.accent}
+        topRightPrimary={
+          deptKey === "printing" ? (
+            <button
+              onClick={() => navigate("/entry")}
+              style={{
+                padding: isMobile ? "6px 10px" : "8px 14px",
+                background: "var(--amber)",
+                color: "#000",
+                border: "none",
+                borderRadius: 6,
+                fontWeight: 800,
+                cursor: "pointer",
+                fontSize: isMobile ? 11 : 13,
+                display: "flex",
+                alignItems: "center",
+                gap: 5,
+                whiteSpace: "nowrap",
+              }}
+            >
+              <Plus size={14} /> {isMobile ? "Job Card" : "Create Job Card"}
+            </button>
+          ) : null
+        }
+        topRightMid={
+          <DeptCompletedDropdown
+            deptKey={cfg.dept}
+            title={`Done Today - ${cfg.label}`}
+            accent={cfg.accent}
+            addToast={add}
+            showBreakdown={cfg.dept !== "LASER_CUTTING"}
+          />
+        }
         topRight={
           <div
             style={{
@@ -9963,34 +10190,6 @@ function StationPage({ deptKey }) {
               justifyContent: isMobile ? "flex-end" : "flex-start",
             }}
           >
-            {deptKey === "printing" && (
-              <button
-                onClick={() => navigate("/entry")}
-                style={{
-                  padding: isMobile ? "6px 10px" : "8px 14px",
-                  background: "var(--amber)",
-                  color: "#000",
-                  border: "none",
-                  borderRadius: 6,
-                  fontWeight: 800,
-                  cursor: "pointer",
-                  fontSize: isMobile ? 11 : 13,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 5,
-                  whiteSpace: "nowrap",
-                }}
-              >
-                <Plus size={14} /> {isMobile ? "Job Card" : "Create Job Card"}
-              </button>
-            )}
-            <DeptCompletedDropdown
-              deptKey={cfg.dept}
-              title={`Done Today - ${cfg.label}`}
-              accent={cfg.accent}
-              addToast={add}
-              showBreakdown={cfg.dept !== "LASER_CUTTING"}
-            />
             {/* Queue count */}
             <div
               style={{
@@ -10053,18 +10252,18 @@ function StationPage({ deptKey }) {
               style={{
                 display: "flex",
                 alignItems: "center",
-                gap: isMobile ? 4 : 8,
+                gap: isMobile ? 6 : 8,
                 background: "#020015",
                 border: "1px solid #1a1c3a",
                 borderRadius: 8,
-                padding: isMobile ? "3px 8px" : "2px 10px 2px 8px",
+                padding: isMobile ? "4px 10px" : "2px 10px 2px 8px",
                 minWidth: 0,
               }}
             >
               <span
                 style={{
                   fontFamily: "var(--fd)",
-                  fontSize: isMobile ? 18 : 50,
+                  fontSize: isMobile ? 30 : 50,
                   fontWeight: 900,
                   lineHeight: 1,
                   color: deptDailyCount > 0 ? "#4749c2" : "var(--text-dim)",
@@ -10075,7 +10274,7 @@ function StationPage({ deptKey }) {
               <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
                 <span
                   style={{
-                    fontSize: isMobile ? 8 : 12,
+                    fontSize: isMobile ? 10 : 12,
                     fontWeight: 800,
                     color: "#ffff",
                     textTransform: "uppercase",
@@ -10088,7 +10287,7 @@ function StationPage({ deptKey }) {
                 </span>
                 <span
                   style={{
-                    fontSize: isMobile ? 7 : 10,
+                    fontSize: isMobile ? 9 : 10,
                     fontWeight: 600,
                     color: "#4749c2",
                     textTransform: "uppercase",
@@ -10102,23 +10301,23 @@ function StationPage({ deptKey }) {
               </div>
             </div>
 
-            {/* Completed count (24h) */}
+            {/* Completed count (24h / monthly) */}
             <div
               style={{
                 display: "flex",
                 alignItems: "center",
-                gap: isMobile ? 4 : 8,
+                gap: isMobile ? 6 : 8,
                 background: "#021b09",
                 border: "1px solid #1a3a2e",
                 borderRadius: 8,
-                padding: isMobile ? "3px 8px" : "2px 10px 2px 8px",
+                padding: isMobile ? "4px 10px" : "2px 10px 2px 8px",
                 minWidth: 0,
               }}
             >
               <span
                 style={{
                   fontFamily: "var(--fd)",
-                  fontSize: isMobile ? 18 : 50,
+                  fontSize: isMobile ? 30 : 50,
                   fontWeight: 900,
                   lineHeight: 1,
                   color:
@@ -10130,7 +10329,7 @@ function StationPage({ deptKey }) {
               <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
                 <span
                   style={{
-                    fontSize: isMobile ? 8 : 12,
+                    fontSize: isMobile ? 10 : 12,
                     fontWeight: 800,
                     color: "#ffff",
                     textTransform: "uppercase",
@@ -10143,7 +10342,7 @@ function StationPage({ deptKey }) {
                 </span>
                 <span
                   style={{
-                    fontSize: isMobile ? 7 : 10,
+                    fontSize: isMobile ? 9 : 10,
                     fontWeight: 600,
                     color: "var(--success-text)",
                     textTransform: "uppercase",
