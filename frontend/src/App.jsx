@@ -4401,7 +4401,7 @@ function Shell({ title, accent = "var(--amber)", topRightPrimary, topRightMid, t
                     fontSize: 11,
                   }}
                 >
-                  ← Home
+                  ← Dashboard
                 </button>
               )}
               {!IS_ADMIN && onSubPage && !isAtOwnHome && (
