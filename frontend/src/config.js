@@ -54,3 +54,12 @@ export const CORRECTABLE_DEPTS = [
 ];
 
 export const SHEETS_PER_PACKET = 100;
+
+const ALL_DEPTS = [
+  "ENTRY",
+  "PRINTING",
+  "LAMINATING",
+  "LASER_CUTTING",
+  "BINDING",
+  "ADMIN",
+];

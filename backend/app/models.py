@@ -357,6 +357,50 @@ def seed_paper_stock():
     finally:
         db.close()
 
+class ChatDeptEnum(str, enum.Enum):
+    ENTRY         = "ENTRY"
+    PRINTING      = "PRINTING"
+    LAMINATING    = "LAMINATING"
+    LASER_CUTTING = "LASER_CUTTING"
+    BINDING       = "BINDING"
+    ADMIN         = "ADMIN"
+
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+
+    id                   = Column(Integer, primary_key=True, autoincrement=True)
+    sender_department    = Column(String(32), nullable=False)
+    recipient_department = Column(String(32), nullable=False)
+    message_text         = Column(Text, nullable=True)
+    is_automatic         = Column(Boolean, nullable=False, default=False)
+    is_read              = Column(Boolean, nullable=False, default=False) 
+    request_type         = Column(String(64), nullable=True)   # e.g. ALBUM_LIST_3DAY_PRONTO, NAME_TAG_QUICK
+    created_at           = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    items = relationship(
+        "ChatMessageItem", back_populates="message", cascade="all, delete-orphan"
+    )
+
+    def __repr__(self) -> str:
+        return f"<ChatMessage {self.sender_department}->{self.recipient_department} auto={self.is_automatic}>"
+
+
+class ChatMessageItem(Base):
+    __tablename__ = "chat_message_items"
+
+    id              = Column(Integer, primary_key=True, autoincrement=True)
+    chat_message_id = Column(Integer, ForeignKey("chat_messages.id"), nullable=False, index=True)
+    job_no          = Column(String(64),  nullable=False)
+    customer        = Column(String(256), nullable=True)
+    couple_name     = Column(String(256), nullable=True)
+    is_checked      = Column(Boolean, nullable=False, default=False)
+
+    message = relationship("ChatMessage", back_populates="items")
+
+    def __repr__(self) -> str:
+        return f"<ChatMessageItem {self.job_no} checked={self.is_checked}>"
+
 
 def init_db():
     Base.metadata.create_all(bind=engine)
@@ -403,6 +447,13 @@ def run_migration():
             if "laminated_by" not in dept_log_cols:
                 conn.execute(text("ALTER TABLE department_logs ADD COLUMN laminated_by VARCHAR(128)"))
                 conn.commit()
+
+        if "chat_messages" in inspector.get_table_names():
+            chat_cols = {c["name"] for c in inspector.get_columns("chat_messages")}
+            with engine.connect() as conn:
+                if "is_read" not in chat_cols:
+                    conn.execute(text("ALTER TABLE chat_messages ADD COLUMN is_read BOOLEAN DEFAULT 0"))
+                    conn.commit()
 
         return
 
@@ -492,6 +543,10 @@ def run_migration():
         conn.execute(text("""
             ALTER TABLE damage_entries
             ADD COLUMN IF NOT EXISTS other_item VARCHAR(256);
+        """))
+        conn.execute(text("""
+            ALTER TABLE chat_messages
+            ADD COLUMN IF NOT EXISTS is_read BOOLEAN DEFAULT FALSE;
         """))
 
         conn.commit()

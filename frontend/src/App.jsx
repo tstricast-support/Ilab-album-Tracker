@@ -20,6 +20,7 @@ import {
   THANK_U_CARDS_SIZES,
   SHEETS_PER_PACKET,
 } from "./config.js";
+import { ChatWidget, AdminChatPage } from "./ChatWidget.jsx";
 import {
   ArrowRight,
   Calendar,
@@ -2294,6 +2295,7 @@ function getPage() {
   if (p === "/papers") return { page: "papers" };
   if (p === "/admin/date-fix") return { page: "date-fix" };
   if (p === "/admin/fix-jobcard") return { page: "fix-jobcard" };
+  if (p === "/admin/chat") return { page: "admin-chat" };
   const md = p.match(/^\/station\/([\w]+)\/damages$/);
   if (md) return { page: "damages", dept: md[1] };
   const m = p.match(/^\/station\/([\w]+)$/);
@@ -2317,7 +2319,8 @@ const NAV_ITEMS = [
   { label: "Damages", path: "/damages", accent: "var(--red)" },
   { label: "Papers", path: "/papers", accent: "#3b82f6" },
   { label: "Fix Dates", path: "/admin/date-fix", accent: "var(--red)" },
-  { label: "Fix Job Card", path: "/admin/fix-jobcard", accent: "var(--red)" }, // ← ADD
+  { label: "Fix Job Card", path: "/admin/fix-jobcard", accent: "var(--red)" },
+  { label: "Chat", path: "/admin/chat", accent: "var(--purple)" },
 ];
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
@@ -7083,7 +7086,7 @@ function EntryPage() {
                                 fontWeight: 700,
                               }}
                             >
-                              💰 {job.payment_by}
+                              💰{job.payment_by}
                             </span>
                           )}
                         </div>
@@ -7637,6 +7640,7 @@ function EntryPage() {
           addToast={add}
         />
       )}
+      <ChatWidget myDept="ENTRY" addToast={add} />
       <ToastStack toasts={toasts} />
     </>
   );
@@ -10467,6 +10471,7 @@ function StationPage({ deptKey }) {
         />
       )}
       <DamageTimeAlertModal />
+      <ChatWidget myDept={cfg.dept} addToast={add} />
       <ToastStack toasts={toasts} />
     </>
   );
@@ -18422,7 +18427,11 @@ function DashboardPage() {
             marginBottom: 16,
           }}
         >
-          <FoldableSection title="Department Totals" accent="var(--text-pri)" defaultOpen>
+          <FoldableSection
+            title="Department Totals"
+            accent="var(--text-pri)"
+            defaultOpen
+          >
             <DeptTotalsPanel addToast={add} hideHeader />
           </FoldableSection>
 
@@ -18526,7 +18535,6 @@ function DashboardPage() {
           <FoldableSection
             title="Priority Watch - Urgent & Overdue"
             accent="var(--text-pri)"
-            
             badge={
               (stats?.urgent_pending > 0 ||
                 active.some(
@@ -18627,6 +18635,7 @@ function DashboardPage() {
           )}
         </div>
       </Shell>
+      <ChatWidget myDept="ADMIN" addToast={add} />
       <ToastStack toasts={toasts} />
     </>
   );
@@ -19703,6 +19712,12 @@ export default function App() {
         <AdminDateFixPage />
       ) : page === "fix-jobcard" ? (
         <AdminFixJobCardPage />
+      ) : page === "admin-chat" ? (
+        <AdminChatPage
+          Shell={Shell}
+          useToast={useToast}
+          ToastStack={ToastStack}
+        />
       ) : (
         <DashboardPage />
       )}

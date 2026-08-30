@@ -12,7 +12,9 @@ from .models import (
     DepartmentLog,
     JobCard,
     TIMEOUT_MINUTES,
-    ThankYouCard
+    ThankYouCard,
+    ChatMessage, 
+    ChatMessageItem 
 )
 
 
@@ -216,3 +218,27 @@ def _out(job: JobCard, db: Session) -> JobCardOut:
             for lg in job.logs
         ],
     })
+
+class ChatMessageItemOut(BaseModel):
+    id: int
+    chat_message_id: int
+    job_no: str
+    customer: Optional[str] = None
+    couple_name: Optional[str] = None
+    is_checked: bool
+
+    model_config = {"from_attributes": True}
+
+
+class ChatMessageOut(BaseModel):
+    id: int
+    sender_department: str
+    recipient_department: str
+    message_text: Optional[str] = None
+    is_automatic: bool
+    is_read: bool
+    request_type: Optional[str] = None
+    created_at: datetime
+    items: List[ChatMessageItemOut] = []
+
+    model_config = {"from_attributes": True}
