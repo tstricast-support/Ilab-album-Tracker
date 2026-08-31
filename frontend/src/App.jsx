@@ -13166,6 +13166,10 @@ function PapersPage() {
             <PaperUsageForm onCreated={reloadAll} addToast={add} />
           </Sec>
 
+          <Sec title="Daily / Monthly Usage by Paper Size" accent="var(--blue)">
+            <PaperUsageBreakdownPanel hideHeader />
+          </Sec>
+
           <div
             className="r-history-layout"
             style={{
@@ -18037,7 +18041,6 @@ function PaperStockSummaryPanel({ hideHeader = false }) {
 
 function PaperUsageBreakdownPanel({ hideHeader = false }) {
   const [data, setData] = useState(null);
-  const [expanded, setExpanded] = useState(null);
   const isMobile = useIsMobile();
 
   useEffect(() => {
@@ -18050,12 +18053,11 @@ function PaperUsageBreakdownPanel({ hideHeader = false }) {
     return () => clearInterval(t);
   }, []);
 
-  const TYPE_LABELS = {
-    ok_pages: "OK Pages",
-    print_damage: "Print Damage",
-    accu_rp: "Accu RP",
-    bind_rp: "Bind RP",
-  };
+  const TYPE_ROWS = [
+    { key: "print_damage", label: "Print Damage", accent: "#e53e3e" },
+    { key: "accu_rp", label: "Accubind Return", accent: "#06b6d4" },
+    { key: "bind_rp", label: "Binding Return", accent: "#a855f7" },
+  ];
 
   return (
     <div
@@ -18126,17 +18128,7 @@ function PaperUsageBreakdownPanel({ hideHeader = false }) {
           LOADING…
         </div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <div
-            style={{
-              fontSize: 10,
-              color: "var(--text-dim)",
-              letterSpacing: ".08em",
-              marginBottom: 6,
-            }}
-          >
-            tap a size for usage-type breakdown
-          </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {PAPER_SIZES.map((size) => {
             const d = data.daily[size] || {
               total: 0,
@@ -18152,7 +18144,6 @@ function PaperUsageBreakdownPanel({ hideHeader = false }) {
               accu_rp: 0,
               bind_rp: 0,
             };
-            const isOpen = expanded === size;
 
             return (
               <div
@@ -18161,48 +18152,33 @@ function PaperUsageBreakdownPanel({ hideHeader = false }) {
                   background: "var(--surface-sunken)",
                   border: "1px solid var(--border-strong)",
                   borderLeft: "4px solid var(--blue)",
-                  borderRadius: 6,
+                  borderRadius: 8,
                   overflow: "hidden",
                 }}
               >
-                <button
-                  onClick={() => setExpanded(isOpen ? null : size)}
+                {/* Size header with packets+sheets totals */}
+                <div
                   style={{
-                    width: "100%",
+                    padding: "10px 14px",
+                    background: "var(--bg3)",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "space-between",
-                    padding: "10px 14px",
-                    background: "transparent",
-                    textAlign: "left",
                     flexWrap: "wrap",
-                    gap: 8,
+                    gap: 10,
                   }}
                 >
-                  <div
-                    style={{ display: "flex", alignItems: "center", gap: 8 }}
+                  <span
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 800,
+                      color: "var(--blue)",
+                      letterSpacing: ".05em",
+                    }}
                   >
-                    <ChevronDown
-                      size={14}
-                      style={{
-                        color: "var(--text-dim)",
-                        transition: "transform .2s ease",
-                        transform: isOpen ? "rotate(180deg)" : "rotate(0deg)",
-                        flexShrink: 0,
-                      }}
-                    />
-                    <span
-                      style={{
-                        fontSize: 13,
-                        fontWeight: 700,
-                        color: "var(--blue)",
-                        letterSpacing: ".05em",
-                      }}
-                    >
-                      {size}
-                    </span>
-                  </div>
-                  <div style={{ display: "flex", gap: 20 }}>
+                    {size}
+                  </span>
+                  <div style={{ display: "flex", gap: 22 }}>
                     <div style={{ textAlign: "right" }}>
                       <div
                         style={{
@@ -18216,22 +18192,15 @@ function PaperUsageBreakdownPanel({ hideHeader = false }) {
                       </div>
                       <div
                         style={{
-                          fontSize: 16,
-                          fontWeight: 700,
+                          fontSize: 17,
+                          fontWeight: 900,
                           color: "#3c24a5",
                         }}
                       >
-                        {d.total}
-                      </div>
-                      <div
-                        style={{
-                          fontSize: 11,
-                          color: "var(--text-dim)",
-                          marginTop: 1,
-                          fontWeight: 700,
-                        }}
-                      >
                         {fmtPackets(d.total)}
+                      </div>
+                      <div style={{ fontSize: 10, color: "var(--text-dim)" }}>
+                        {d.total} sheets
                       </div>
                     </div>
                     <div style={{ textAlign: "right" }}>
@@ -18247,106 +18216,97 @@ function PaperUsageBreakdownPanel({ hideHeader = false }) {
                       </div>
                       <div
                         style={{
-                          fontSize: 16,
-                          fontWeight: 700,
+                          fontSize: 17,
+                          fontWeight: 900,
                           color: "#2ECC71",
-                        }}
-                      >
-                        {m.total}
-                      </div>
-                      <div
-                        style={{
-                          fontSize: 11,
-                          color: "var(--text-dim)",
-                          marginTop: 1,
-                          fontWeight: 700,
                         }}
                       >
                         {fmtPackets(m.total)}
                       </div>
+                      <div style={{ fontSize: 10, color: "var(--text-dim)" }}>
+                        {m.total} sheets
+                      </div>
                     </div>
                   </div>
-                </button>
+                </div>
 
-                {isOpen && (
-                  <div
-                    className="si"
-                    style={{
-                      padding: "0 14px 12px",
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 6,
-                    }}
-                  >
-                    {Object.keys(TYPE_LABELS).map((tk) => (
-                      <div
-                        key={tk}
+                {/* Breakdown rows - always visible, no click needed */}
+                <div
+                  style={{
+                    padding: "8px 14px 12px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 6,
+                  }}
+                >
+                  {TYPE_ROWS.map((tr) => (
+                    <div
+                      key={tr.key}
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        background: "var(--bg2)",
+                        border: `1px solid ${tr.accent}33`,
+                        borderLeft: `3px solid ${tr.accent}`,
+                        borderRadius: 6,
+                        padding: "7px 12px",
+                      }}
+                    >
+                      <span
                         style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                          background: "var(--bg2)",
-                          border: "1px solid var(--border)",
-                          borderRadius: 6,
-                          padding: "7px 12px",
-                          marginLeft: isMobile ? 0 : 20,
+                          fontSize: 12,
+                          fontWeight: 700,
+                          color: tr.accent,
                         }}
                       >
-                        <span
-                          style={{
-                            fontSize: 12,
-                            fontWeight: 700,
-                            color: "var(--text-sec)",
-                          }}
-                        >
-                          {TYPE_LABELS[tk]}
-                        </span>
-                        <div style={{ display: "flex", gap: 16 }}>
-                          <div style={{ textAlign: "right" }}>
-                            <div
-                              style={{
-                                fontSize: 9,
-                                color: "var(--text-dim)",
-                                letterSpacing: ".12em",
-                              }}
-                            >
-                              TODAY
-                            </div>
-                            <div
-                              style={{
-                                fontSize: 13,
-                                fontWeight: 700,
-                                color: "var(--text-pri)",
-                              }}
-                            >
-                              {d[tk]}
-                            </div>
+                        {tr.label}
+                      </span>
+                      <div style={{ display: "flex", gap: 16 }}>
+                        <div style={{ textAlign: "right" }}>
+                          <div
+                            style={{
+                              fontSize: 9,
+                              color: "var(--text-dim)",
+                              letterSpacing: ".12em",
+                            }}
+                          >
+                            TODAY
                           </div>
-                          <div style={{ textAlign: "right" }}>
-                            <div
-                              style={{
-                                fontSize: 9,
-                                color: "var(--text-dim)",
-                                letterSpacing: ".12em",
-                              }}
-                            >
-                              MONTHLY
-                            </div>
-                            <div
-                              style={{
-                                fontSize: 13,
-                                fontWeight: 800,
-                                color: "var(--amber)",
-                              }}
-                            >
-                              {m[tk]}
-                            </div>
+                          <div
+                            style={{
+                              fontSize: 13,
+                              fontWeight: 700,
+                              color: "var(--text-pri)",
+                            }}
+                          >
+                            {d[tr.key]}
+                          </div>
+                        </div>
+                        <div style={{ textAlign: "right" }}>
+                          <div
+                            style={{
+                              fontSize: 9,
+                              color: "var(--text-dim)",
+                              letterSpacing: ".12em",
+                            }}
+                          >
+                            MONTHLY
+                          </div>
+                          <div
+                            style={{
+                              fontSize: 13,
+                              fontWeight: 800,
+                              color: "var(--amber)",
+                            }}
+                          >
+                            {m[tr.key]}
                           </div>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                )}
+                    </div>
+                  ))}
+                </div>
               </div>
             );
           })}
