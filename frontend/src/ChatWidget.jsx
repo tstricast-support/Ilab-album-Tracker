@@ -628,6 +628,7 @@ function AdminBroadcastAlert({ myDept, onOpenChat }) {
 
 // ── Main widget ───────────────────────────────────────────────────────
 export function ChatWidget({ myDept, addToast }) {
+  const isMobile = useIsMobile();
   const [open, setOpen] = useState(false);
   const [otherDept, setOtherDept] = useState(
     ALL_DEPTS.find((d) => d !== myDept) || "PRINTING",
@@ -712,11 +713,11 @@ export function ChatWidget({ myDept, addToast }) {
         title="Department Chat"
         style={{
           position: "fixed",
-          bottom: 24,
-          left: 24,
+          bottom: isMobile ? 18 : 26,
+          right: isMobile ? 66 : 84,
           zIndex: 8500,
-          width: 52,
-          height: 52,
+          width: isMobile ? 42 : 52,
+          height: isMobile ? 42 : 52,
           borderRadius: "50%",
           background: "var(--amber)",
           color: "#000",
@@ -735,8 +736,8 @@ export function ChatWidget({ myDept, addToast }) {
           className="si"
           style={{
             position: "fixed",
-            bottom: 88,
-            left: 24,
+            bottom: isMobile ? 70 : 92,
+            right: isMobile ? 12 : 24,
             zIndex: 8500,
             width: 340,
             maxWidth: "92vw",
