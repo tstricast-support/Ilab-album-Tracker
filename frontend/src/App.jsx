@@ -154,6 +154,8 @@ const api = {
     }),
   paperPrices: () => apiFetch(`/api/paper-prices`),
   paperUsageBreakdown: () => apiFetch(`/api/stats/paper-usage-breakdown`),
+  undoPaperPacket: (logId) =>
+    apiFetch(`/api/paper-packet-logs/${logId}/undo`, { method: "DELETE" }),
   updatePaperPrice: (id, unit_price) =>
     apiFetch(`/api/paper-prices/${id}`, {
       method: "PATCH",
@@ -176,6 +178,8 @@ const api = {
   damageStats: () => apiFetch(`/api/stats/damages`),
 
   paperStock: () => apiFetch(`/api/paper-stock`),
+  resetAllPaperStock: () =>
+    apiFetch(`/api/paper-stock/reset-all`, { method: "POST" }),
   addPaperPacket: (size) =>
     apiFetch(`/api/paper-stock/add-packet`, {
       method: "POST",
@@ -12204,16 +12208,21 @@ function PaperStockCards({ stock }) {
   );
 }
 
-function AddPacketControl({ onAdded, addToast }) {
-  const [size, setSize] = useState(PAPER_SIZES[0]);
-  const [saving, setSaving] = useState(false);
 
-  async function add() {
+function ResetPaperStockModal({ onClose, onDone, addToast }) {
+  const [confirmText, setConfirmText] = useState("");
+  const [saving, setSaving] = useState(false);
+  const isMobile = useIsMobile();
+  const canConfirm = confirmText.trim().toUpperCase() === "RESET";
+
+  async function doReset() {
+    if (!canConfirm) return;
     setSaving(true);
     try {
-      await api.addPaperPacket(size);
-      addToast(`✓ New ${size} packet added (+100 sheets)`, "success");
-      onAdded();
+      await api.resetAllPaperStock();
+      addToast("✓ All paper stock reset to 0.", "success");
+      onDone?.();
+      onClose();
     } catch (err) {
       addToast(err.message, "error");
     } finally {
@@ -12224,36 +12233,229 @@ function AddPacketControl({ onAdded, addToast }) {
   return (
     <div
       style={{
+        position: "fixed",
+        inset: 0,
+        background: "var(--overlay)",
         display: "flex",
-        gap: 8,
-        alignItems: "flex-end",
-        flexWrap: "wrap",
+        alignItems: isMobile ? "flex-end" : "center",
+        justifyContent: "center",
+        zIndex: 9500,
       }}
+      onClick={onClose}
     >
-      <div style={{ flex: 1, minWidth: 160 }}>
-        <label>Paper Size</label>
-        <select value={size} onChange={(e) => setSize(e.target.value)}>
-          {PAPER_SIZES.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
-      </div>
-      <button
-        onClick={add}
-        disabled={saving}
+      <div
+        onClick={(e) => e.stopPropagation()}
         style={{
-          padding: "11px 20px",
-          background: saving ? "var(--bg3)" : "var(--blue)",
-          color: saving ? "var(--text-dim)" : "#fff",
-          borderRadius: 8,
-          fontWeight: 800,
-          fontSize: 14,
+          background: "var(--bg1)",
+          border: "1px solid var(--red)",
+          borderRadius: isMobile ? "16px 16px 0 0" : 12,
+          padding: 24,
+          width: "100%",
+          maxWidth: 420,
+          display: "flex",
+          flexDirection: "column",
+          gap: 16,
         }}
       >
-        {saving ? "Adding…" : "+ Add New Packet (100)"}
-      </button>
+        <div>
+          <div
+            style={{
+              fontSize: 11,
+              color: "var(--red)",
+              textTransform: "uppercase",
+              letterSpacing: ".1em",
+              marginBottom: 6,
+            }}
+          >
+            ⚠ Admin - Reset Paper Stock
+          </div>
+          <div style={{ fontSize: 15, color: "var(--text-pri)", lineHeight: 1.6 }}>
+            This will set the balance of <b>every paper size</b> (9x13, 10x16,
+            12x16, 13x16, 13x19) to <b>0 sheets</b>.
+          </div>
+          <div
+            style={{
+              fontSize: 12,
+              color: "var(--text-dim)",
+              marginTop: 8,
+            }}
+          >
+            Usage history and packet logs are NOT deleted - only the current
+            "sheets left" count resets. This cannot be undone.
+          </div>
+        </div>
+
+        <div>
+          <label>
+            Type <b style={{ color: "var(--red)" }}>RESET</b> to confirm
+          </label>
+          <input
+            value={confirmText}
+            onChange={(e) => setConfirmText(e.target.value)}
+            placeholder="RESET"
+            autoFocus
+          />
+        </div>
+
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            onClick={doReset}
+            disabled={!canConfirm || saving}
+            style={{
+              flex: 1,
+              padding: "12px 0",
+              background: canConfirm ? "var(--red)" : "var(--bg3)",
+              color: canConfirm ? "#fff" : "var(--text-dim)",
+              borderRadius: 8,
+              fontWeight: 800,
+              fontSize: 14,
+            }}
+          >
+            {saving ? "Resetting…" : "✕ Reset All to 0"}
+          </button>
+          <button
+            onClick={onClose}
+            style={{
+              padding: "12px 18px",
+              background: "var(--bg3)",
+              color: "var(--text-sec)",
+              border: "1px solid var(--border)",
+              borderRadius: 8,
+              fontWeight: 700,
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AddPacketControl({ onAdded, addToast }) {
+  const [size, setSize] = useState(PAPER_SIZES[0]);
+  const [saving, setSaving] = useState(false);
+  const [lastAdded, setLastAdded] = useState(null); // { logId, size, addedAtMs }
+  const [now, setNow] = useState(Date.now());
+  const UNDO_WINDOW_MS = 5 * 60 * 1000;
+
+  useEffect(() => {
+    if (!lastAdded) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [lastAdded]);
+
+  useEffect(() => {
+    if (lastAdded && now - lastAdded.addedAtMs >= UNDO_WINDOW_MS) {
+      setLastAdded(null);
+    }
+  }, [now, lastAdded]);
+
+  async function add() {
+    setSaving(true);
+    try {
+      const res = await api.addPaperPacket(size);
+      addToast(`✓ New ${size} packet added (+100 sheets)`, "success");
+      setLastAdded({ logId: res.log_id, size, addedAtMs: Date.now() });
+      onAdded();
+    } catch (err) {
+      addToast(err.message, "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function undo() {
+    if (!lastAdded) return;
+    setSaving(true);
+    try {
+      await api.undoPaperPacket(lastAdded.logId);
+      addToast(`↺ Undone - ${lastAdded.size} packet removed.`, "info");
+      setLastAdded(null);
+      onAdded();
+    } catch (err) {
+      addToast(err.message, "error");
+      setLastAdded(null); // likely expired server-side, hide the button
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const remainingMs = lastAdded
+    ? Math.max(0, UNDO_WINDOW_MS - (now - lastAdded.addedAtMs))
+    : 0;
+  const remainingSec = Math.ceil(remainingMs / 1000);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div
+        style={{
+          display: "flex",
+          gap: 8,
+          alignItems: "flex-end",
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ flex: 1, minWidth: 160 }}>
+          <label>Paper Size</label>
+          <select value={size} onChange={(e) => setSize(e.target.value)}>
+            {PAPER_SIZES.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        </div>
+        <button
+          onClick={add}
+          disabled={saving}
+          style={{
+            padding: "11px 20px",
+            background: saving ? "var(--bg3)" : "var(--blue)",
+            color: saving ? "var(--text-dim)" : "#fff",
+            borderRadius: 8,
+            fontWeight: 800,
+            fontSize: 14,
+          }}
+        >
+          {saving ? "Adding…" : "+ Add New Packet (100)"}
+        </button>
+      </div>
+
+      {lastAdded && remainingSec > 0 && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 10,
+            background: "var(--warn-bg)",
+            border: "1px solid var(--warn-border)",
+            borderRadius: 8,
+            padding: "10px 14px",
+            flexWrap: "wrap",
+          }}
+        >
+          <span style={{ fontSize: 12, color: "var(--warn-text)" }}>
+            Added {lastAdded.size} packet (+100 sheets) - {remainingSec}s left
+            to undo
+          </span>
+          <button
+            onClick={undo}
+            disabled={saving}
+            style={{
+              padding: "6px 14px",
+              fontSize: 12,
+              fontWeight: 700,
+              borderRadius: 6,
+              background: "var(--red)",
+              color: "#fff",
+            }}
+          >
+            ↺ Undo
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -12856,6 +13058,7 @@ function PapersPage() {
   const [stock, setStock] = useState([]);
   const [data, setData] = useState(null);
   const [search, setSearch] = useState("");
+  const [showReset, setShowReset] = useState(false);
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -12924,7 +13127,36 @@ function PapersPage() {
     <>
       <Shell title="PAPER STOCK" accent="var(--blue)">
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <PaperStockCards stock={stock} />
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 10,
+              flexWrap: "wrap",
+            }}
+          >
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <PaperStockCards stock={stock} />
+            </div>
+            {IS_ADMIN && (
+              <button
+                onClick={() => setShowReset(true)}
+                style={{
+                  padding: "9px 16px",
+                  background: "var(--danger-bg)",
+                  color: "var(--red)",
+                  border: "1px solid var(--red)",
+                  borderRadius: 8,
+                  fontWeight: 700,
+                  fontSize: 13,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Reset All to 0
+              </button>
+            )}
+          </div>
 
           <Sec title="Add New Packet" accent="var(--blue)">
             <AddPacketControl onAdded={reloadAll} addToast={add} />
@@ -13124,6 +13356,13 @@ function PapersPage() {
           </div>
         </div>
       </Shell>
+      {showReset && (
+        <ResetPaperStockModal
+          onClose={() => setShowReset(false)}
+          onDone={reloadAll}
+          addToast={add}
+        />
+      )}
       <ToastStack toasts={toasts} />
     </>
   );

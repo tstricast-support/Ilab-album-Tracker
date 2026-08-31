@@ -349,6 +349,17 @@ def update_paper_price(price_id: int, payload: PaperPriceUpdate, db: Session = D
     db.refresh(row)
     return row
 
+@app.post("/api/paper-stock/reset-all", response_model=List[PaperStockOut])
+def reset_all_paper_stock(db: Session = Depends(get_db)):
+    """Admin-only: zero out every paper size's balance.
+    Does NOT touch paper_usage_entries or paper_packet_logs —
+    history/reports stay intact, only the current stock count resets."""
+    stocks = db.query(PaperStock).all()
+    for s in stocks:
+        s.balance = 0
+        s.updated_at = datetime.utcnow()
+    db.commit()
+    return db.query(PaperStock).order_by(PaperStock.size).all()
 
 # ── Damage Entries ────────────────────────────────────────────────────
 
@@ -1966,7 +1977,7 @@ class AddPacketRequest(BaseModel):
     size: str
 
 
-@app.post("/api/paper-stock/add-packet", response_model=PaperStockOut, status_code=201)
+@app.post("/api/paper-stock/add-packet", response_model=dict, status_code=201)
 def add_paper_packet(payload: AddPacketRequest, db: Session = Depends(get_db)):
     size = payload.size.strip()
     if size not in PAPER_SIZES:
@@ -1980,8 +1991,36 @@ def add_paper_packet(payload: AddPacketRequest, db: Session = Depends(get_db)):
     db.add(log)
     db.commit()
     db.refresh(stock)
-    return stock
+    db.refresh(log)
+    return {
+        "stock": PaperStockOut.model_validate(stock).model_dump(),
+        "log_id": log.id,
+        "log_created_at": log.created_at,
+    }
 
+PACKET_UNDO_WINDOW_MINUTES = 5
+
+@app.delete("/api/paper-packet-logs/{log_id}/undo", status_code=204)
+def undo_paper_packet(log_id: int, db: Session = Depends(get_db)):
+    log = db.query(PaperPacketLog).filter(PaperPacketLog.id == log_id).first()
+    if not log:
+        raise HTTPException(404, "Packet log not found")
+
+    elapsed = datetime.utcnow() - log.created_at  #type:ignore
+    if elapsed > timedelta(minutes=PACKET_UNDO_WINDOW_MINUTES):
+        raise HTTPException(
+            403,
+            f"Undo window expired ({PACKET_UNDO_WINDOW_MINUTES} min). This packet can no longer be undone.",
+        )
+
+    stock = _get_stock_or_404(log.size, db)  #type:ignore
+    if stock.balance - log.sheets_added < 0:  #type:ignore
+        raise HTTPException(400, f"Cannot undo: {log.size} balance would go negative.")
+
+    stock.balance -= log.sheets_added  #type:ignore
+    stock.updated_at = datetime.utcnow()  #type:ignore
+    db.delete(log)
+    db.commit()
 
 @app.get("/api/paper-packet-logs", response_model=dict)
 def list_packet_logs(
