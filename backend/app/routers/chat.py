@@ -34,9 +34,18 @@ def _cutoff() -> datetime:
 
 
 def _cleanup_expired(db: Session):
-    db.query(ChatMessage).filter(ChatMessage.created_at < _cutoff()).delete(
-        synchronize_session=False
-    )
+    cutoff = _cutoff()
+    expired_ids = [
+        row[0] for row in
+        db.query(ChatMessage.id).filter(ChatMessage.created_at < cutoff).all()
+    ]
+    if expired_ids:
+        db.query(ChatMessageItem).filter(
+            ChatMessageItem.chat_message_id.in_(expired_ids)
+        ).delete(synchronize_session=False)
+        db.query(ChatMessage).filter(
+            ChatMessage.id.in_(expired_ids)
+        ).delete(synchronize_session=False)
     db.commit()
 
 
