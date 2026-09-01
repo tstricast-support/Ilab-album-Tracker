@@ -6569,6 +6569,7 @@ function EntryPage() {
   const [paymentBy, setPaymentBy] = useState("");
   const [knownPayments, setKnownPayments] = useState([]);
   const [showNewPayment, setShowNewPayment] = useState(false);
+  const [showDayPlan, setShowDayPlan] = useState(false);
   const [search, setSearch] = useState("");
   const [now, setNow] = useState(Date.now());
   const formRef = useRef(null);
@@ -6768,6 +6769,27 @@ function EntryPage() {
       <Shell
         title="JOB ENTRY"
         accent="var(--amber)"
+        topRightPrimary={
+          <button
+            onClick={() => setShowDayPlan(true)}
+            style={{
+              padding: isMobile ? "6px 10px" : "8px 14px",
+              background: "var(--bg3)",
+              color: "var(--text-pri)",
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+              fontWeight: 800,
+              cursor: "pointer",
+              fontSize: isMobile ? 11 : 13,
+              display: "flex",
+              alignItems: "center",
+              gap: 5,
+              whiteSpace: "nowrap",
+            }}
+          >
+            <Calendar size={14} /> {isMobile ? "Day Plan" : "Create Day Plan"}
+          </button>
+        }
         topRight={
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <div
@@ -7627,6 +7649,7 @@ function EntryPage() {
       {printJob && (
         <PrintJobCardModal job={printJob} onClose={() => setPrintJob(null)} />
       )}
+      {showDayPlan && <DayPlanModal onClose={() => setShowDayPlan(false)} />}
 
       {albumTypeJob && (
         <AlbumTypeModal job={albumTypeJob} onConfirm={handleAlbumTypeConfirm} />
@@ -19726,6 +19749,56 @@ function HistoryCard({ job, fmtDate, fmtTime, onPrint, addToast }) {
   );
 }
 
+function buildDayPlanPrintHTML(jobs) {
+  const today = new Date().toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+
+  const rows = jobs
+    .map(
+      (j, i) => `
+    <tr>
+      <td class="idx">${i + 1}</td>
+      <td class="jobno">${j.job_no}</td>
+      <td>${j.customer || ""}${j.couple_name ? `<div class="couple">${j.couple_name}</div>` : ""}</td>
+      <td>${j.print_pages || "-"}</td>
+      <td>${j.print_size || "-"}</td>
+      <td class="chk">☐</td>
+    </tr>`,
+    )
+    .join("");
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Day Plan - ${today}</title>
+  <style>
+    @page { size: A5; margin: 10mm; }
+    body{ font-family: Arial, sans-serif; margin:0; padding:0; color:#111; }
+    .header{ text-align:center; border-bottom:2px solid #000; padding-bottom:8px; margin-bottom:10px; }
+    .title{ font-size:18px; font-weight:900; letter-spacing:.04em; }
+    .date{ font-size:12px; color:#555; margin-top:2px; }
+    table{ width:100%; border-collapse:collapse; font-size:11px; }
+    th{ background:#111; color:#fff; padding:5px 6px; text-align:left; font-size:9px; letter-spacing:.05em; text-transform:uppercase; }
+    td{ padding:5px 6px; border-bottom:1px solid #ccc; vertical-align:top; }
+    .idx{ width:20px; color:#888; }
+    .jobno{ font-weight:800; }
+    .couple{ font-size:9px; color:#777; }
+    .chk{ width:22px; text-align:center; font-size:14px; }
+    .footer{ margin-top:14px; font-size:9px; color:#999; text-align:right; }
+    @media print{ body{ padding:0; } }
+  </style></head><body>
+    <div class="header">
+      <div class="title">DAY PLAN</div>
+      <div class="date">${today} · ${jobs.length} job${jobs.length !== 1 ? "s" : ""}</div>
+    </div>
+    <table>
+      <thead><tr><th>#</th><th>Job No</th><th>Customer</th><th>Pages</th><th>Size</th><th>✓</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="footer">Printed ${new Date().toLocaleString("en-GB")}</div>
+  </body></html>`;
+}
+
 // ── Print helpers ─────────────────────────────────────────────────────────────
 function buildPrintHTML(job) {
   const fmtDate = (iso) =>
@@ -19910,6 +19983,254 @@ function PrintJobCardModal({ job, onClose }) {
             Cancel
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function DayPlanModal({ onClose }) {
+  const [jobs, setJobs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState(() => new Set());
+  const isMobile = useIsMobile();
+
+  useEffect(() => {
+    api
+      .jobs(false)
+      .then((list) => {
+        setJobs(list);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, []);
+
+  function toggle(id) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAll(filteredJobs) {
+    setSelected((prev) => {
+      const allSelected =
+        filteredJobs.length > 0 && filteredJobs.every((j) => prev.has(j.id));
+      const next = new Set(prev);
+      if (allSelected) {
+        filteredJobs.forEach((j) => next.delete(j.id));
+      } else {
+        filteredJobs.forEach((j) => next.add(j.id));
+      }
+      return next;
+    });
+  }
+
+  const filtered = jobs.filter((j) => matchesSearch(j, search));
+
+  function createPlan() {
+    const chosen = jobs.filter((j) => selected.has(j.id));
+    if (chosen.length === 0) return;
+    const win = window.open("", "_blank", "width=800,height=900");
+    win.document.write(buildDayPlanPrintHTML(chosen));
+    win.document.close();
+    win.focus();
+    setTimeout(() => win.print(), 400);
+  }
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "var(--overlay)",
+        display: "flex",
+        alignItems: isMobile ? "flex-end" : "center",
+        justifyContent: "center",
+        zIndex: 9600,
+      }}
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: "var(--bg1)",
+          border: "1px solid var(--border)",
+          borderRadius: isMobile ? "16px 16px 0 0" : 12,
+          padding: 20,
+          width: "100%",
+          maxWidth: 560,
+          maxHeight: isMobile ? "92dvh" : "88vh",
+          overflowY: "auto",
+          display: "flex",
+          flexDirection: "column",
+          gap: 14,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <div>
+            <div
+              style={{
+                fontSize: 11,
+                color: "var(--text-dim)",
+                textTransform: "uppercase",
+                letterSpacing: ".1em",
+              }}
+            >
+              Day Plan
+            </div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: "var(--amber)" }}>
+              Select Jobs for Today's Plan
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            style={{
+              padding: "8px 12px",
+              background: "var(--bg3)",
+              color: "var(--text-sec)",
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+              fontWeight: 700,
+            }}
+          >
+            ✕
+          </button>
+        </div>
+
+        <SearchBar
+          value={search}
+          onChange={setSearch}
+          placeholder="Search Job No / Studio / Couple…"
+        />
+
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <span style={{ fontSize: 12, color: "var(--text-dim)" }}>
+            {selected.size} selected of {jobs.length}
+          </span>
+          <button
+            onClick={() => toggleAll(filtered)}
+            style={{
+              padding: "5px 12px",
+              fontSize: 12,
+              fontWeight: 700,
+              borderRadius: 5,
+              background: "var(--bg3)",
+              color: "var(--amber)",
+              border: "1px solid var(--amber)",
+            }}
+          >
+            {filtered.length > 0 && filtered.every((j) => selected.has(j.id))
+              ? "Unselect All"
+              : "Select All"}
+          </button>
+        </div>
+
+        {loading ? (
+          <div
+            style={{ textAlign: "center", padding: "30px 0", color: "var(--text-dim)" }}
+          >
+            Loading…
+          </div>
+        ) : filtered.length === 0 ? (
+          <div
+            style={{ textAlign: "center", padding: "30px 0", color: "var(--text-dim)" }}
+          >
+            No active jobs found.
+          </div>
+        ) : (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 6,
+              maxHeight: 360,
+              overflowY: "auto",
+            }}
+          >
+            {filtered.map((j) => (
+              <label
+                key={j.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "8px 10px",
+                  borderRadius: 6,
+                  background: selected.has(j.id) ? "var(--bg3)" : "var(--bg2)",
+                  border: `1px solid ${selected.has(j.id) ? "var(--amber)" : "var(--border)"}`,
+                  cursor: "pointer",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={selected.has(j.id)}
+                  onChange={() => toggle(j.id)}
+                  style={{ width: 16, height: 16, margin: 0, flexShrink: 0 }}
+                />
+                <span
+                  style={{
+                    fontFamily: "var(--fm)",
+                    fontSize: 13,
+                    fontWeight: 800,
+                    color: "var(--amber)",
+                    minWidth: 70,
+                    flexShrink: 0,
+                  }}
+                >
+                  {j.job_no}
+                </span>
+                <span
+                  style={{
+                    flex: 1,
+                    fontSize: 13,
+                    color: "var(--text-pri)",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {j.customer}
+                </span>
+                <span style={{ fontSize: 11, color: "var(--text-dim)", flexShrink: 0 }}>
+                  {j.print_size || "-"}
+                </span>
+                <span style={{ fontSize: 11, color: "var(--text-dim)", flexShrink: 0 }}>
+                  {j.print_pages ? `${j.print_pages}p` : "-"}
+                </span>
+              </label>
+            ))}
+          </div>
+        )}
+
+        <button
+          onClick={createPlan}
+          disabled={selected.size === 0}
+          style={{
+            padding: "13px 0",
+            background: selected.size > 0 ? "var(--amber)" : "var(--bg3)",
+            color: selected.size > 0 ? "#000" : "var(--text-dim)",
+            borderRadius: 8,
+            fontWeight: 800,
+            fontSize: 15,
+          }}
+        >
+          Create Day Plan ({selected.size})
+        </button>
       </div>
     </div>
   );

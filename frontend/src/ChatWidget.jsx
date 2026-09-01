@@ -858,12 +858,36 @@ export function ChatWidget({ myDept, addToast }) {
               borderTop: "1px solid var(--border)",
             }}
           >
-            <input
+            <textarea
               value={text}
               onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && sendPlain()}
-              placeholder="Type a message…"
-              style={{ margin: 0, flex: 1, fontSize: 13 }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault(); // stop the newline from being inserted
+                  sendPlain();
+                }
+                // Shift+Enter: do nothing special — let the textarea insert a newline
+              }}
+              placeholder="Type a message… (Shift+Enter for new line)"
+              rows={1}
+              style={{
+                margin: 0,
+                flex: 1,
+                fontSize: 13,
+                resize: "none",
+                maxHeight: 120,
+                minHeight: 36,
+                lineHeight: 1.4,
+                padding: "8px 10px",
+                overflowY: "auto",
+                whiteSpace: "pre-wrap",
+              }}
+              onInput={(e) => {
+                // auto-grow the box as the user types more lines
+                e.target.style.height = "auto";
+                e.target.style.height =
+                  Math.min(e.target.scrollHeight, 120) + "px";
+              }}
             />
             <button
               onClick={sendPlain}
