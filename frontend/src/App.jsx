@@ -10,13 +10,11 @@ import {
 import {
   API_BASE,
   POLL_INTERVAL_MS,
-  APP_NAME,
   MACHINES,
   ALBUM_TYPES,
   DAMAGE_DEPTS,
   PAPER_SIZES,
   LOW_STOCK_THRESHOLD,
-  CORRECTABLE_DEPTS,
   THANK_U_CARDS_SIZES,
   SHEETS_PER_PACKET,
 } from "./config.js";
@@ -4822,13 +4820,6 @@ function Sec({ title, accent = "var(--amber)", children }) {
   );
 }
 
-// // ── STEPS config ──────────────────────────────────────────────────────────────
-// const STEPS = [
-//   { label: "PRINT", field: "status_printing",      color: "#0058e6", dept: "PRINTING" },
-//   { label: "LASER", field: "status_laser_cutting",  color: "#8100fa", dept: "LASER_CUTTING"},
-//   { label: "LAMINATING",   field: "status_laminating",     color: "#00d9ff", dept: "LAMINATING"},
-//   { label: "BIND",  field: "status_binding",        color: "#00ff5e", dept: "BINDING"},
-// ];
 
 function boxPouchLabel(status) {
   if (status === "COMPLETE") return "Complete";
@@ -7728,19 +7719,6 @@ const STATION_CFG = {
 };
 
 // ── Station page ──────────────────────────────────────────────────────────────
-// ── Station page ──────────────────────────────────────────────────────────────
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// NEW PRODUCTION DASHBOARD FEATURES
-// Drop these four components into your App.jsx (anywhere before DashboardPage),
-// then replace your DashboardPage with the one at the bottom of this file.
-// ═══════════════════════════════════════════════════════════════════════════════
-
-// ── 1. BOTTLENECK RADAR ───────────────────────────────────────────────────────
-// Shows per-department delayed + active counts. Worst offender floats to top.
-// Uses only the `active` jobs array already fetched by DashboardPage.
-
-// ── Single source of truth for department colors ─────────────────────────────
 const DEPTS = [
   {
     key: "PRINTING",
@@ -14837,6 +14815,7 @@ function DeptTotalsPanel({ addToast, hideHeader = false }) {
   const [calYear, setCalYear] = useState(new Date().getFullYear());
   const [calMonth, setCalMonth] = useState(new Date().getMonth() + 1);
   const [viewJob, setViewJob] = useState(null);
+  const [selectedMonthTotal, setSelectedMonthTotal] = useState({});
   const isMobile = useIsMobile();
 
   useEffect(() => {
@@ -14889,11 +14868,23 @@ function DeptTotalsPanel({ addToast, hideHeader = false }) {
     loadJobs(deptKey, date, page);
   }
 
+  async function loadMonthlyTotalForDate(deptKey, dateStr) {
+    const [y, m] = dateStr.split("-").map(Number);
+    try {
+      const counts = await api.stationHistoryDates(deptKey, y, m);
+      const total = Object.values(counts).reduce((s, c) => s + c, 0);
+      setSelectedMonthTotal((prev) => ({ ...prev, [deptKey]: total }));
+    } catch {
+      setSelectedMonthTotal((prev) => ({ ...prev, [deptKey]: 0 }));
+    }
+  }
+
   function selectDate(deptKey, date) {
     setDateByDept((d) => ({ ...d, [deptKey]: date }));
     setPageByDept((p) => ({ ...p, [deptKey]: 1 }));
     setCalOpenDept(null);
     loadJobs(deptKey, date, 1);
+    if (deptKey !== "PENDING_PRINT") loadMonthlyTotalForDate(deptKey, date);
   }
 
   function selectToday(deptKey) {
@@ -14901,6 +14892,11 @@ function DeptTotalsPanel({ addToast, hideHeader = false }) {
     setPageByDept((p) => ({ ...p, [deptKey]: 1 }));
     setCalOpenDept(null);
     loadJobs(deptKey, null, 1);
+    setSelectedMonthTotal((prev) => {
+      const next = { ...prev };
+      delete next[deptKey];
+      return next;
+    });
   }
 
   function changePage(deptKey, newPage) {
@@ -14984,6 +14980,27 @@ function DeptTotalsPanel({ addToast, hideHeader = false }) {
             const result = jobsCache[cacheKeyFor(r.key, selDate, page)];
             const isCalOpen = calOpenDept === r.key;
 
+            let dayLabel = "Today";
+            let dayValue = daily;
+            let monthLabel = "Monthly";
+            let monthValue = monthly;
+
+            if (!isPending && selDate) {
+              const dObj = new Date(selDate + "T00:00:00");
+              dayLabel = dObj.toLocaleDateString("en-GB", {
+                day: "2-digit",
+                month: "short",
+              });
+              monthLabel = dObj.toLocaleDateString("en-GB", {
+                month: "long",
+              });
+              dayValue =
+                result && result !== "loading" && result !== "error"
+                  ? result.total
+                  : "…";
+              monthValue = selectedMonthTotal[r.key] ?? "…";
+            }
+
             return (
               <div
                 key={r.key}
@@ -15066,7 +15083,7 @@ function DeptTotalsPanel({ addToast, hideHeader = false }) {
                             letterSpacing: ".08em",
                           }}
                         >
-                          Today
+                          {dayLabel}
                         </div>
                         <div
                           style={{
@@ -15075,7 +15092,7 @@ function DeptTotalsPanel({ addToast, hideHeader = false }) {
                             color: "#3c24a5",
                           }}
                         >
-                          {daily}
+                          {dayValue}
                         </div>
                       </div>
                       <div
@@ -15089,7 +15106,7 @@ function DeptTotalsPanel({ addToast, hideHeader = false }) {
                             letterSpacing: ".08em",
                           }}
                         >
-                          Monthly
+                          {monthLabel}
                         </div>
                         <div
                           style={{
@@ -15098,7 +15115,7 @@ function DeptTotalsPanel({ addToast, hideHeader = false }) {
                             color: "#2ECC71",
                           }}
                         >
-                          {monthly}
+                          {monthValue}
                         </div>
                       </div>
                     </div>
@@ -15210,49 +15227,6 @@ function DeptTotalsPanel({ addToast, hideHeader = false }) {
                     )}
                     {result && result !== "loading" && result !== "error" && (
                       <>
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "space-between",
-                            background: "#fff",
-                            border: "1px solid #ccc",
-                            borderLeft: "4px solid #3c24a5",
-                            borderRadius: 8,
-                            padding: "10px 14px",
-                            marginBottom: 4,
-                          }}
-                        >
-                          <div
-                            style={{
-                              fontSize: 13,
-                              fontWeight: 700,
-                              color: "#333",
-                            }}
-                          >
-                            {isPending
-                              ? "Awaiting Printing"
-                              : selDate
-                                ? new Date(
-                                    selDate + "T00:00:00",
-                                  ).toLocaleDateString("en-GB", {
-                                    day: "2-digit",
-                                    month: "short",
-                                    year: "numeric",
-                                  })
-                                : "Today"}
-                          </div>
-                          <div
-                            style={{
-                              fontSize: 20,
-                              fontWeight: 900,
-                              color: "#3c24a5",
-                              lineHeight: 1,
-                            }}
-                          >
-                            {result.total}
-                          </div>
-                        </div>
                         {result.jobs.length === 0 ? (
                           <div
                             style={{
@@ -16020,6 +15994,8 @@ function PrintingMachineBreakdownPanel({ hideHeader = false }) {
   const [tycData, setTycData] = useState(null);
   const [tycStats, setTycStats] = useState(null);
   const [viewCard, setViewCard] = useState(null);
+  const [selectedMonthTotals, setSelectedMonthTotals] = useState({}); // albumKey -> total for the selected month (album types only)
+
   useEffect(() => {
     const load = () =>
       api
@@ -16077,6 +16053,18 @@ function PrintingMachineBreakdownPanel({ hideHeader = false }) {
     }
   }
 
+  // Only used for the album-type (NORMAL/STORY/REBIND) rows now
+  async function loadMonthlyTotalForDate(albumKey, machine, at, dateStr) {
+    const [y, m] = dateStr.split("-").map(Number);
+    try {
+      const counts = await api.printingJobsDates(machine, at, y, m);
+      const total = Object.values(counts).reduce((s, c) => s + c, 0);
+      setSelectedMonthTotals((prev) => ({ ...prev, [albumKey]: total }));
+    } catch {
+      setSelectedMonthTotals((prev) => ({ ...prev, [albumKey]: 0 }));
+    }
+  }
+
   function openAlbum(albumKey, machine, at) {
     if (expandedAlbum === albumKey) {
       setExpAlbum(null);
@@ -16095,6 +16083,7 @@ function PrintingMachineBreakdownPanel({ hideHeader = false }) {
     setPageByAlbum((p) => ({ ...p, [albumKey]: 1 }));
     setCalOpenAlbum(null);
     loadJobs(machine, at, date, 1);
+    if (at !== "THANKYOU") loadMonthlyTotalForDate(albumKey, machine, at, date);
   }
 
   function selectThisMonth(albumKey, machine, at) {
@@ -16102,12 +16091,17 @@ function PrintingMachineBreakdownPanel({ hideHeader = false }) {
     setPageByAlbum((p) => ({ ...p, [albumKey]: 1 }));
     setCalOpenAlbum(null);
     loadJobs(machine, at, null, 1);
+    setSelectedMonthTotals((prev) => {
+      const next = { ...prev };
+      delete next[albumKey];
+      return next;
+    });
   }
 
   function selectToday_TYC(albumKey, machine, at) {
     const todayStr = slDateStr(new Date());
-    setDateByAlbum(d => ({ ...d, [albumKey]: todayStr }));
-    setPageByAlbum(p => ({ ...p, [albumKey]: 1 }));
+    setDateByAlbum((d) => ({ ...d, [albumKey]: todayStr }));
+    setPageByAlbum((p) => ({ ...p, [albumKey]: 1 }));
     setCalOpenAlbum(null);
     loadJobs(machine, at, todayStr, 1);
   }
@@ -16317,6 +16311,29 @@ function PrintingMachineBreakdownPanel({ hideHeader = false }) {
                         jobsCache[cacheKeyFor(m.key, at, selDate, page)];
                       const isCalOpen = calOpenAlbum === albumKey;
 
+                      let dayLabel = "TODAY";
+                      let dayValue = d;
+                      let monthLabel = "MONTHLY";
+                      let monthValue = mo;
+
+                      if (selDate) {
+                        const dObj = new Date(selDate + "T00:00:00");
+                        dayLabel = dObj
+                          .toLocaleDateString("en-GB", {
+                            day: "2-digit",
+                            month: "short",
+                          })
+                          .toUpperCase();
+                        monthLabel = dObj
+                          .toLocaleDateString("en-GB", { month: "long" })
+                          .toUpperCase();
+                        dayValue =
+                          result && result !== "loading" && result !== "error"
+                            ? result.total
+                            : "…";
+                        monthValue = selectedMonthTotals[albumKey] ?? "…";
+                      }
+
                       return (
                         <div
                           key={at}
@@ -16377,7 +16394,7 @@ function PrintingMachineBreakdownPanel({ hideHeader = false }) {
                                     letterSpacing: ".1em",
                                   }}
                                 >
-                                  TODAY
+                                  {dayLabel}
                                 </div>
                                 <div
                                   style={{
@@ -16386,7 +16403,7 @@ function PrintingMachineBreakdownPanel({ hideHeader = false }) {
                                     color: "#3c24a5",
                                   }}
                                 >
-                                  {d}
+                                  {dayValue}
                                 </div>
                               </div>
                               <div style={{ textAlign: "right" }}>
@@ -16397,7 +16414,7 @@ function PrintingMachineBreakdownPanel({ hideHeader = false }) {
                                     letterSpacing: ".1em",
                                   }}
                                 >
-                                  MONTHLY
+                                  {monthLabel}
                                 </div>
                                 <div
                                   style={{
@@ -16406,7 +16423,7 @@ function PrintingMachineBreakdownPanel({ hideHeader = false }) {
                                     color: "#2ECC71",
                                   }}
                                 >
-                                  {mo}
+                                  {monthValue}
                                 </div>
                               </div>
                             </div>
@@ -16520,13 +16537,6 @@ function PrintingMachineBreakdownPanel({ hideHeader = false }) {
                                 result !== "loading" &&
                                 result !== "error" && (
                                   <>
-                                    <div
-                                      style={{ fontSize: 11, color: "#555" }}
-                                    >
-                                      {result.total} job
-                                      {result.total !== 1 ? "s" : ""}{" "}
-                                      {selDate ? `on ${selDate}` : "this month"}
-                                    </div>
                                     {result.jobs.length === 0 ? (
                                       <div
                                         style={{
@@ -17013,346 +17023,416 @@ function PrintingMachineBreakdownPanel({ hideHeader = false }) {
           })}
 
           {(() => {
-  const albumKey = "ALL-THANKYOU";
-  const machine  = "";
-  const at       = "THANKYOU";
-  const isOpen   = expandedAlbum === albumKey;
-  const todayStr = slDateStr(new Date());
-  const selDate  = dateByAlbum[albumKey] ?? todayStr;   
-  const page     = pageByAlbum[albumKey] ?? 1;
-  const result   = jobsCache[cacheKeyFor(machine, at, selDate, page)];
-  const isCalOpen = calOpenAlbum === albumKey;
-  const jobList = result && result !== "loading" && result !== "error" ? (result.cards || result.jobs || []) : [];
-  const dailyCount   = tycStats?.daily?.count ?? 0;
-  const monthlyCount = tycStats?.monthly?.count ?? 0;
+            const albumKey = "ALL-THANKYOU";
+            const machine = "";
+            const at = "THANKYOU";
+            const isOpen = expandedAlbum === albumKey;
+            const todayStr = slDateStr(new Date());
+            const selDate = dateByAlbum[albumKey] ?? todayStr;
+            const page = pageByAlbum[albumKey] ?? 1;
+            const result = jobsCache[cacheKeyFor(machine, at, selDate, page)];
+            const isCalOpen = calOpenAlbum === albumKey;
+            const jobList =
+              result && result !== "loading" && result !== "error"
+                ? result.cards || result.jobs || []
+                : [];
+            const dailyCount = tycStats?.daily?.count ?? 0;
+            const monthlyCount = tycStats?.monthly?.count ?? 0;
 
-  function openAllThankYou() {
-    if (expandedAlbum === albumKey) {
-      setExpAlbum(null);
-      setCalOpenAlbum(null);
-      return;
-    }
-    setExpAlbum(albumKey);
-    setCalOpenAlbum(null);
-    const date = dateByAlbum[albumKey] ?? todayStr;
-    if (dateByAlbum[albumKey] == null) {
-      setDateByAlbum((d) => ({ ...d, [albumKey]: todayStr }));
-    }
-    loadJobs(machine, at, date, pageByAlbum[albumKey] ?? 1);
-  }
+            function openAllThankYou() {
+              if (expandedAlbum === albumKey) {
+                setExpAlbum(null);
+                setCalOpenAlbum(null);
+                return;
+              }
+              setExpAlbum(albumKey);
+              setCalOpenAlbum(null);
+              const date = dateByAlbum[albumKey] ?? todayStr;
+              if (dateByAlbum[albumKey] == null) {
+                setDateByAlbum((d) => ({ ...d, [albumKey]: todayStr }));
+              }
+              loadJobs(machine, at, date, pageByAlbum[albumKey] ?? 1);
+            }
 
-  return (
-    <div
-      style={{
-        background: "#e6e6e6",
-        borderLeft: "4px solid #b8860b",
-        borderRadius: 8,
-        overflow: "hidden",
-      }}
-    >
-      <button
-        onClick={openAllThankYou}
-        style={{
-          width: "100%",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: "14px 18px",
-          background: "transparent",
-          textAlign: "left",
-          flexWrap: "wrap",
-          gap: 8,
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <ChevronDown
-            size={16}
-            style={{
-              color: "#444",
-              transition: "transform .2s ease",
-              transform: isOpen ? "rotate(180deg)" : "rotate(0deg)",
-            }}
-          />
-          <Gift size={16} color="#b8860b" />
-          <span style={{ fontSize: 15, fontWeight: 800, color: "#111" }}>
-            Thank You Cards
-          </span>
-        </div>
-        <div style={{ display: "flex", gap: 20 }}>
-          <div style={{ textAlign: "right" }}>
-            <div
-              style={{ fontSize: 11, color: "#333", letterSpacing: ".08em" }}
-            >
-              Today
-            </div>
-            <div style={{ fontSize: 20, fontWeight: 800, color: "#3c24a5" }}>
-              {dailyCount}
-            </div>
-          </div>
-          <div style={{ width: 1, background: "#bbb" }} />
-          <div style={{ textAlign: "right" }}>
-            <div
-              style={{ fontSize: 11, color: "#333", letterSpacing: ".08em" }}
-            >
-              Monthly
-            </div>
-            <div style={{ fontSize: 20, fontWeight: 800, color: "#2ECC71" }}>
-              {monthlyCount}
-            </div>
-          </div>
-        </div>
-      </button>
-
-      {isOpen && (
-        <div
-          className="si"
-          style={{
-            padding: "0 14px 14px",
-            display: "flex",
-            flexDirection: "column",
-            gap: 10,
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              gap: 6,
-              alignItems: "center",
-              flexWrap: "wrap",
-            }}
-          >
-            <button
-              onClick={() => selectToday_TYC(albumKey, machine, at)}
-              style={{
-                padding: "5px 12px",
-                fontSize: 11,
-                fontWeight: 700,
-                borderRadius: 4,
-                background: selDate === todayStr ? "#2ECC71" : "#ddd",
-                color: selDate === todayStr ? "#fff" : "#333",
-              }}
-            >
-              Today
-            </button>
-
-            <button
-              onClick={() => openCalendar(albumKey, machine, at)}
-              style={{
-                padding: "5px 12px",
-                fontSize: 11,
-                fontWeight: 700,
-                borderRadius: 4,
-                background: selDate !== todayStr ? "#3c24a5" : "#ddd",
-                color: selDate !== todayStr ? "#fff" : "#333",
-                display: "flex",
-                alignItems: "center",
-                gap: 5,
-              }}
-            >
-              <Calendar size={12} />
-              {selDate !== todayStr
-                ? new Date(selDate + "T00:00:00").toLocaleDateString("en-GB", {
-                    day: "2-digit",
-                    month: "short",
-                  })
-                : "Today"}
-            </button>
-          </div>
-
-          {isCalOpen && (
-            <div style={{ width: "100%", maxWidth: 260 }}>
-              <EntryCalendar
-                year={calYear}
-                month={calMonth}
-                onYearMonth={(y, mo2) => calNav(machine, at, y, mo2)}
-                dotDays={dotDays}
-                selectedDate={selDate || ""}
-                onSelect={(dt) => selectDate(albumKey, machine, at, dt)}
-                accent="#3c24a5"
-              />
-            </div>
-          )}
-
-          {result === "loading" && (
-            <div style={{ fontSize: 12, color: "#555", padding: "6px 0" }}>
-              Loading…
-            </div>
-          )}
-          {result === "error" && (
-            <div style={{ fontSize: 12, color: "#b91c1c", padding: "6px 0" }}>
-              Failed to load.
-            </div>
-          )}
-          {result && result !== "loading" && result !== "error" && (
-            <>
+            return (
               <div
                 style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  background: "#fff",
-                  border: "1px solid #ccc",
+                  background: "#e6e6e6",
                   borderLeft: "4px solid #b8860b",
                   borderRadius: 8,
-                  padding: "10px 14px",
+                  overflow: "hidden",
                 }}
               >
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "#333" }}>
-                    {result.total} card{result.total !== 1 ? "s" : ""}{" "}
-                    {selDate === todayStr ? "Today" : `on ${selDate}`}
-                  </div>
-                  <div style={{ fontSize: 11, color: "#555", marginTop: 2 }}>
-                    Total Qty: {result.total_quantity ?? 0}
-                  </div>
-                </div>
-                <div style={{ textAlign: "right" }}>
-                  <div
-                    style={{
-                      fontSize: 9,
-                      color: "#555",
-                      letterSpacing: ".1em",
-                    }}
-                  >
-                    TOTAL SOLD
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 20,
-                      fontWeight: 900,
-                      color: "#b8860b",
-                      lineHeight: 1,
-                    }}
-                  >
-                    Rs. {result.total_value ?? 0}
-                  </div>
-                </div>
-              </div>
-
-              {jobList.length === 0 ? (
-                <div style={{ fontSize: 12, color: "#555", padding: "6px 0" }}>
-                  No thank you cards found.
-                </div>
-              ) : (
-                <div
+                <button
+                  onClick={openAllThankYou}
                   style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 4,
-                    maxHeight: 260,
-                    overflowY: "auto",
-                  }}
-                >
-                  {jobList.map((c, i) => (
-                    <button
-                      key={c.id ?? i}
-                      onClick={() => setViewCard(c)}
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        width: "100%",
-                        background: "#fff",
-                        border: "1px solid #ddd",
-                        borderRadius: 4,
-                        padding: "6px 10px",
-                        textAlign: "left",
-                        cursor: "pointer",
-                      }}
-                    >
-                      <span
-                        style={{ fontSize: 12, fontWeight: 700, color: "#111" }}
-                      >
-                        {c.job_no ? `${c.job_no} · ` : ""}
-                        {c.customer}
-                        <span
-                          style={{
-                            fontSize: 10,
-                            fontWeight: 500,
-                            color: "#666",
-                            marginLeft: 6,
-                          }}
-                        >
-                          (
-                          {{
-                            GREEN_2: "Green II",
-                            GREEN_3: "Green III",
-                            GREEN_3_NEW: "Green IV",
-                          }[c.machine] || c.machine}
-                          )
-                        </span>
-                      </span>
-                      <span style={{ fontSize: 12, color: "#333" }}>
-                        ×{c.quantity} · Rs.{c.total_price}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
-              {result.pages > 1 && (
-                <div
-                  style={{
+                    width: "100%",
                     display: "flex",
                     alignItems: "center",
-                    justifyContent: "center",
+                    justifyContent: "space-between",
+                    padding: "14px 18px",
+                    background: "transparent",
+                    textAlign: "left",
+                    flexWrap: "wrap",
                     gap: 8,
-                    marginTop: 4,
                   }}
                 >
-                  <button
-                    onClick={() =>
-                      changePage(albumKey, machine, at, Math.max(1, page - 1))
-                    }
-                    disabled={page === 1}
+                  <div
+                    style={{ display: "flex", alignItems: "center", gap: 8 }}
+                  >
+                    <ChevronDown
+                      size={16}
+                      style={{
+                        color: "#444",
+                        transition: "transform .2s ease",
+                        transform: isOpen ? "rotate(180deg)" : "rotate(0deg)",
+                      }}
+                    />
+                    <Gift size={16} color="#b8860b" />
+                    <span
+                      style={{ fontSize: 15, fontWeight: 800, color: "#111" }}
+                    >
+                      Thank You Cards
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", gap: 20 }}>
+                    <div style={{ textAlign: "right" }}>
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: "#333",
+                          letterSpacing: ".08em",
+                        }}
+                      >
+                        Today
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 20,
+                          fontWeight: 800,
+                          color: "#3c24a5",
+                        }}
+                      >
+                        {dailyCount}
+                      </div>
+                    </div>
+                    <div style={{ width: 1, background: "#bbb" }} />
+                    <div style={{ textAlign: "right" }}>
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: "#333",
+                          letterSpacing: ".08em",
+                        }}
+                      >
+                        Monthly
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 20,
+                          fontWeight: 800,
+                          color: "#2ECC71",
+                        }}
+                      >
+                        {monthlyCount}
+                      </div>
+                    </div>
+                  </div>
+                </button>
+
+                {isOpen && (
+                  <div
+                    className="si"
                     style={{
-                      padding: "4px 10px",
-                      background: "#ddd",
-                      color: "#333",
-                      borderRadius: 4,
-                      fontSize: 11,
-                      fontWeight: 700,
+                      padding: "0 14px 14px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 10,
                     }}
                   >
-                    ◀ Prev
-                  </button>
-                  <span style={{ fontSize: 11, color: "#333" }}>
-                    {page} / {result.pages}
-                  </span>
-                  <button
-                    onClick={() =>
-                      changePage(
-                        albumKey,
-                        machine,
-                        at,
-                        Math.min(result.pages, page + 1),
-                      )
-                    }
-                    disabled={page === result.pages}
-                    style={{
-                      padding: "4px 10px",
-                      background: "#ddd",
-                      color: "#333",
-                      borderRadius: 4,
-                      fontSize: 11,
-                      fontWeight: 700,
-                    }}
-                  >
-                    Next ▶
-                  </button>
-                </div>
-              )}
-            </>
-          )}
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 6,
+                        alignItems: "center",
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <button
+                        onClick={() => selectToday_TYC(albumKey, machine, at)}
+                        style={{
+                          padding: "5px 12px",
+                          fontSize: 11,
+                          fontWeight: 700,
+                          borderRadius: 4,
+                          background: selDate === todayStr ? "#2ECC71" : "#ddd",
+                          color: selDate === todayStr ? "#fff" : "#333",
+                        }}
+                      >
+                        Today
+                      </button>
+
+                      <button
+                        onClick={() => openCalendar(albumKey, machine, at)}
+                        style={{
+                          padding: "5px 12px",
+                          fontSize: 11,
+                          fontWeight: 700,
+                          borderRadius: 4,
+                          background: selDate !== todayStr ? "#3c24a5" : "#ddd",
+                          color: selDate !== todayStr ? "#fff" : "#333",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 5,
+                        }}
+                      >
+                        <Calendar size={12} />
+                        {selDate !== todayStr
+                          ? new Date(selDate + "T00:00:00").toLocaleDateString(
+                              "en-GB",
+                              {
+                                day: "2-digit",
+                                month: "short",
+                              },
+                            )
+                          : "Today"}
+                      </button>
+                    </div>
+
+                    {isCalOpen && (
+                      <div style={{ width: "100%", maxWidth: 260 }}>
+                        <EntryCalendar
+                          year={calYear}
+                          month={calMonth}
+                          onYearMonth={(y, mo2) => calNav(machine, at, y, mo2)}
+                          dotDays={dotDays}
+                          selectedDate={selDate || ""}
+                          onSelect={(dt) =>
+                            selectDate(albumKey, machine, at, dt)
+                          }
+                          accent="#3c24a5"
+                        />
+                      </div>
+                    )}
+
+                    {result === "loading" && (
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: "#555",
+                          padding: "6px 0",
+                        }}
+                      >
+                        Loading…
+                      </div>
+                    )}
+                    {result === "error" && (
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: "#b91c1c",
+                          padding: "6px 0",
+                        }}
+                      >
+                        Failed to load.
+                      </div>
+                    )}
+                    {result && result !== "loading" && result !== "error" && (
+                      <>
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            background: "#fff",
+                            border: "1px solid #ccc",
+                            borderLeft: "4px solid #b8860b",
+                            borderRadius: 8,
+                            padding: "10px 14px",
+                          }}
+                        >
+                          <div>
+                            <div
+                              style={{
+                                fontSize: 13,
+                                fontWeight: 700,
+                                color: "#333",
+                              }}
+                            >
+                              {result.total} card{result.total !== 1 ? "s" : ""}{" "}
+                              {selDate === todayStr ? "Today" : `on ${selDate}`}
+                            </div>
+                            <div
+                              style={{
+                                fontSize: 11,
+                                color: "#555",
+                                marginTop: 2,
+                              }}
+                            >
+                              Total Qty: {result.total_quantity ?? 0}
+                            </div>
+                          </div>
+                          <div style={{ textAlign: "right" }}>
+                            <div
+                              style={{
+                                fontSize: 9,
+                                color: "#555",
+                                letterSpacing: ".1em",
+                              }}
+                            >
+                              TOTAL SOLD
+                            </div>
+                            <div
+                              style={{
+                                fontSize: 20,
+                                fontWeight: 900,
+                                color: "#b8860b",
+                                lineHeight: 1,
+                              }}
+                            >
+                              Rs. {result.total_value ?? 0}
+                            </div>
+                          </div>
+                        </div>
+
+                        {jobList.length === 0 ? (
+                          <div
+                            style={{
+                              fontSize: 12,
+                              color: "#555",
+                              padding: "6px 0",
+                            }}
+                          >
+                            No thank you cards found.
+                          </div>
+                        ) : (
+                          <div
+                            style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: 4,
+                              maxHeight: 260,
+                              overflowY: "auto",
+                            }}
+                          >
+                            {jobList.map((c, i) => (
+                              <button
+                                key={c.id ?? i}
+                                onClick={() => setViewCard(c)}
+                                style={{
+                                  display: "flex",
+                                  justifyContent: "space-between",
+                                  alignItems: "center",
+                                  width: "100%",
+                                  background: "#fff",
+                                  border: "1px solid #ddd",
+                                  borderRadius: 4,
+                                  padding: "6px 10px",
+                                  textAlign: "left",
+                                  cursor: "pointer",
+                                }}
+                              >
+                                <span
+                                  style={{
+                                    fontSize: 12,
+                                    fontWeight: 700,
+                                    color: "#111",
+                                  }}
+                                >
+                                  {c.job_no ? `${c.job_no} · ` : ""}
+                                  {c.customer}
+                                  <span
+                                    style={{
+                                      fontSize: 10,
+                                      fontWeight: 500,
+                                      color: "#666",
+                                      marginLeft: 6,
+                                    }}
+                                  >
+                                    (
+                                    {{
+                                      GREEN_2: "Green II",
+                                      GREEN_3: "Green III",
+                                      GREEN_3_NEW: "Green IV",
+                                    }[c.machine] || c.machine}
+                                    )
+                                  </span>
+                                </span>
+                                <span style={{ fontSize: 12, color: "#333" }}>
+                                  ×{c.quantity} · Rs.{c.total_price}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        {result.pages > 1 && (
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              gap: 8,
+                              marginTop: 4,
+                            }}
+                          >
+                            <button
+                              onClick={() =>
+                                changePage(
+                                  albumKey,
+                                  machine,
+                                  at,
+                                  Math.max(1, page - 1),
+                                )
+                              }
+                              disabled={page === 1}
+                              style={{
+                                padding: "4px 10px",
+                                background: "#ddd",
+                                color: "#333",
+                                borderRadius: 4,
+                                fontSize: 11,
+                                fontWeight: 700,
+                              }}
+                            >
+                              ◀ Prev
+                            </button>
+                            <span style={{ fontSize: 11, color: "#333" }}>
+                              {page} / {result.pages}
+                            </span>
+                            <button
+                              onClick={() =>
+                                changePage(
+                                  albumKey,
+                                  machine,
+                                  at,
+                                  Math.min(result.pages, page + 1),
+                                )
+                              }
+                              disabled={page === result.pages}
+                              style={{
+                                padding: "4px 10px",
+                                background: "#ddd",
+                                color: "#333",
+                                borderRadius: 4,
+                                fontSize: 11,
+                                fontWeight: 700,
+                              }}
+                            >
+                              Next ▶
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </div>
       )}
-    </div>
-  );
-          })()}
 
-            </div>
-          )}
-
-       {viewCard && (
+      {viewCard && (
         <ThankYouCardViewModal
           card={viewCard}
           onClose={() => setViewCard(null)}
