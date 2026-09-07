@@ -1,6 +1,7 @@
 from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import List, Optional
+import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -21,6 +22,16 @@ QUICK_TEMPLATES = {
     "BOX_POUCH_CHECK": "Please confirm box/pouch status for pending jobs.",
 }
 
+# ── Cleanup throttling (module-level state) ─────────────────────────
+# _cleanup_expired() used to run on EVERY inbox/unread-count/admin-all
+# request. With multiple tabs polling every few seconds, that meant a
+# DELETE + commit() write transaction firing constantly against SQLite
+# (single-writer), which starved the connection pool and caused
+# "QueuePool limit ... connection timed out" errors on unrelated
+# endpoints. Now it only actually runs at most once per interval.
+_last_cleanup_ts: float = 0.0
+_CLEANUP_INTERVAL_SECONDS: float = 300  # run at most once every 5 minutes
+
 
 def _dept(name: str) -> str:
     d = (name or "").strip().upper()
@@ -33,7 +44,13 @@ def _cutoff() -> datetime:
     return datetime.utcnow() - timedelta(hours=RETENTION_HOURS)
 
 
-def _cleanup_expired(db: Session):
+def _cleanup_expired(db: Session, force: bool = False):
+    global _last_cleanup_ts
+    now = time.monotonic()
+    if not force and (now - _last_cleanup_ts) < _CLEANUP_INTERVAL_SECONDS:
+        return
+    _last_cleanup_ts = now
+
     cutoff = _cutoff()
     expired_ids = [
         row[0] for row in
@@ -46,7 +63,7 @@ def _cleanup_expired(db: Session):
         db.query(ChatMessage).filter(
             ChatMessage.id.in_(expired_ids)
         ).delete(synchronize_session=False)
-    db.commit()
+        db.commit()
 
 
 def _out(msg: ChatMessage) -> ChatMessageOut:
@@ -299,6 +316,6 @@ def admin_all_messages(
 @router.post("/cleanup")
 def cleanup_now(db: Session = Depends(get_db)):
     before = db.query(ChatMessage).count()
-    _cleanup_expired(db)
+    _cleanup_expired(db, force=True)  # manual trigger should always run
     after = db.query(ChatMessage).count()
     return {"deleted": before - after}

@@ -2,7 +2,7 @@ import enum
 from datetime import datetime
 from sqlalchemy import (
     Boolean, Column, DateTime, Enum, ForeignKey,
-    Integer, String, Text, create_engine)
+    Integer, String, Text, create_engine, event)
 from sqlalchemy.orm import DeclarativeBase, relationship, sessionmaker
 from .config import settings
 from datetime import timedelta
@@ -21,7 +21,8 @@ connect_args = {}
 
 if db_url.startswith("sqlite"):
     connect_args = {
-        "check_same_thread": False
+        "check_same_thread": False,
+        "timeout": 30,  # wait up to 30s for a SQLite file lock instead of the 5s default
     }
 
 engine = create_engine(
@@ -33,6 +34,23 @@ engine = create_engine(
     pool_recycle=1800,   # recycle connections older than 30 min (avoids stale conn errors)
     pool_pre_ping=True,  # checks connection is alive before using it — avoids crash on a dropped conn
 )
+
+# ── SQLite-only tuning ────────────────────────────────────────────────
+# WAL (write-ahead log) mode lets readers proceed without blocking on a
+# writer (and vice versa), which matters a lot here since many endpoints
+# poll frequently while occasional writes (job updates, chat inserts,
+# cleanup deletes) happen concurrently. Without this, SQLite's default
+# rollback-journal mode serializes almost everything and connections
+# queue up waiting for the single writer, which is what was causing the
+# QueuePool timeout errors under load.
+if db_url.startswith("sqlite"):
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragma(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute("PRAGMA busy_timeout=30000")
+        cursor.close()
 
 SessionLocal = sessionmaker(
     bind=engine,
