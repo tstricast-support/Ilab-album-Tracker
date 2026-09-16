@@ -2,7 +2,7 @@ import enum
 from datetime import datetime
 from sqlalchemy import (
     Boolean, Column, DateTime, Enum, ForeignKey,
-    Integer, String, Text, create_engine, event)
+    Integer, String, Text, create_engine, event,Index)
 from sqlalchemy.orm import DeclarativeBase, relationship, sessionmaker
 from .config import settings
 from datetime import timedelta
@@ -49,7 +49,13 @@ if db_url.startswith("sqlite"):
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA synchronous=NORMAL")
-        cursor.execute("PRAGMA busy_timeout=30000")
+        # Was 30000 (30s) - almost as long as pool_timeout itself, so a
+        # single contended write could hold a pooled connection hostage
+        # for nearly the whole pool timeout, compounding contention for
+        # every other request waiting on the pool. Failing faster here
+        # means a blocked write gives up and releases its connection
+        # well before pool_timeout is reached.
+        cursor.execute("PRAGMA busy_timeout=5000")
         cursor.close()
 
 SessionLocal = sessionmaker(
@@ -400,9 +406,15 @@ class ChatMessage(Base):
         "ChatMessageItem", back_populates="message", cascade="all, delete-orphan"
     )
 
+    __table_args__ = (
+        Index(
+            "ix_chat_messages_recipient_sender_unread",
+            "recipient_department", "sender_department", "is_read",
+        ),
+    )
+
     def __repr__(self) -> str:
         return f"<ChatMessage {self.sender_department}->{self.recipient_department} auto={self.is_automatic}>"
-
 
 class ChatMessageItem(Base):
     __tablename__ = "chat_message_items"
@@ -471,6 +483,15 @@ def run_migration():
             with engine.connect() as conn:
                 if "is_read" not in chat_cols:
                     conn.execute(text("ALTER TABLE chat_messages ADD COLUMN is_read BOOLEAN DEFAULT 0"))
+                    conn.commit()
+
+            existing_indexes = {ix["name"] for ix in inspector.get_indexes("chat_messages")}
+            if "ix_chat_messages_recipient_sender_unread" not in existing_indexes:
+                with engine.connect() as conn:
+                    conn.execute(text(
+                        "CREATE INDEX IF NOT EXISTS ix_chat_messages_recipient_sender_unread "
+                        "ON chat_messages (recipient_department, sender_department, is_read)"
+                    ))
                     conn.commit()
 
         return

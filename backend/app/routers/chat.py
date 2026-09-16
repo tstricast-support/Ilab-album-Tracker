@@ -95,13 +95,28 @@ def get_inbox(
                 and_(ChatMessage.sender_department == other, ChatMessage.recipient_department == dept),
             )
         )
-        # Opening this specific thread = the recipient has now seen it → mark read
-        db.query(ChatMessage).filter(
-            ChatMessage.recipient_department == dept,
-            ChatMessage.sender_department == other,
-            ChatMessage.is_read == False,  # noqa
-        ).update({"is_read": True}, synchronize_session=False)
-        db.commit()
+        # Opening this specific thread = the recipient has now seen it → mark
+        # read. Only actually write when there's something unread - this
+        # endpoint is polled every few seconds by every open chat tab, so an
+        # unconditional UPDATE + COMMIT on every poll was hammering SQLite's
+        # single-writer lock and starving the connection pool.
+        has_unread = (
+            db.query(ChatMessage.id)
+            .filter(
+                ChatMessage.recipient_department == dept,
+                ChatMessage.sender_department == other,
+                ChatMessage.is_read == False,  # noqa
+            )
+            .first()
+            is not None
+        )
+        if has_unread:
+            db.query(ChatMessage).filter(
+                ChatMessage.recipient_department == dept,
+                ChatMessage.sender_department == other,
+                ChatMessage.is_read == False,  # noqa
+            ).update({"is_read": True}, synchronize_session=False)
+            db.commit()
 
     rows = q.order_by(ChatMessage.created_at.asc()).all()
     return [_out(m) for m in rows]
