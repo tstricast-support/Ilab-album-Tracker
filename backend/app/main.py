@@ -1431,6 +1431,31 @@ def get_dept_stats(db: Session = Depends(get_db)):
         "pending_print_count": pending_print_count,
     }
 
+@app.get("/api/stats/departments/monthly")
+def get_dept_month_total(
+    year: int = Query(...),
+    month: int = Query(..., ge=1, le=12),
+    db: Session = Depends(get_db),
+):
+    month_start, month_end = _month_window(year, month)
+    rows = (
+        db.query(DepartmentLog.department, func.count(DepartmentLog.id))
+        .join(JobCard, JobCard.id == DepartmentLog.job_id)
+        .filter(
+            DepartmentLog.exited_at != None,
+            DepartmentLog.exited_at >= month_start,
+            DepartmentLog.exited_at <  month_end,
+            or_(
+                DepartmentLog.department != DepartmentEnum.PRINTING,
+                JobCard.album_type.is_(None),
+                JobCard.album_type != "REBIND",
+            ),
+        )
+        .group_by(DepartmentLog.department)
+        .all()
+    )
+    return {str(r[0]).split(".")[-1]: r[1] for r in rows}
+
 @app.get("/api/stats/pending-print-jobs")
 def pending_print_jobs(
     db: Session = Depends(get_db),
@@ -1459,6 +1484,14 @@ def pending_print_jobs(
         "pages": max(1, -(-total // page_size)),
         "jobs": [_out(j, db).model_dump() for j in rows],
     }
+
+def _month_window(year: int, month: int):
+    start = datetime(year, month, 1) - SL_TZ_OFFSET
+    end = (
+        datetime(year + 1, 1, 1) if month == 12
+        else datetime(year, month + 1, 1)
+    ) - SL_TZ_OFFSET
+    return start, end
 
 _ALBUM_DEPTS = ("ENTRY", "PRINTING", "LAMINATING", "BINDING")
 
@@ -1648,7 +1681,11 @@ def printing_section_stats(db: Session = Depends(get_db)):
             "daily": counts_for(day_start, day_end)}
 
 @app.get("/api/stats/printing-breakdown")
-def printing_breakdown_stats(db: Session = Depends(get_db)):
+def printing_breakdown_stats(
+    year: Optional[int] = Query(None),
+    month: Optional[int] = Query(None, ge=1, le=12),
+    db: Session = Depends(get_db),
+):
     utc_now = datetime.utcnow()
     sl_now  = utc_now + SL_TZ_OFFSET
     day_start = datetime(sl_now.year, sl_now.month, sl_now.day) - SL_TZ_OFFSET
@@ -1658,6 +1695,10 @@ def printing_breakdown_stats(db: Session = Depends(get_db)):
         datetime(sl_now.year + 1, 1, 1) if sl_now.month == 12
         else datetime(sl_now.year, sl_now.month + 1, 1)
     ) - SL_TZ_OFFSET
+
+    # If a specific month was requested, override the current-month window
+    if year and month:
+        month_start, month_end = _month_window(year, month)
 
     def counts_for(start, end):
         rows = (
@@ -1686,18 +1727,24 @@ def printing_breakdown_stats(db: Session = Depends(get_db)):
 
     return {"daily": counts_for(day_start, day_end), "monthly": counts_for(month_start, month_end)}
 
+
 @app.get("/api/stats/printing-jobs")
 def printing_jobs_list(
     db: Session = Depends(get_db),
     machine: str = Query(...),
     album_type: str = Query(..., description="NORMAL / STORY / REBIND"),
     date: Optional[str] = Query(None, description="YYYY-MM-DD, Sri Lanka day. Omit for current month."),
+    year: Optional[int] = Query(None),
+    month: Optional[int] = Query(None, ge=1, le=12),
     page: int = Query(1, ge=1),
     page_size: int = Query(15, ge=1, le=100),
 ):
     if date:
         start = datetime.strptime(date, "%Y-%m-%d") - SL_TZ_OFFSET
         end   = start + timedelta(days=1)
+    elif year and month:
+        # a specific month was requested from the month filter
+        start, end = _month_window(year, month)
     else:
         utc_now = datetime.utcnow()
         sl_now  = utc_now + SL_TZ_OFFSET
@@ -1737,6 +1784,7 @@ def printing_jobs_list(
             {"job_no": r[0], "customer": r[1], "couple_name": r[2]} for r in rows
         ],
     }
+
 
 @app.get("/api/stats/printing-jobs/dates-with-entries")
 def printing_jobs_dates_with_entries(
@@ -2377,12 +2425,13 @@ def create_thankyou_card(payload: ThankYouCardCreate, db: Session = Depends(get_
     db.commit()
     db.refresh(entry)
     return entry
-
 @app.get("/api/thankyou-cards", response_model=dict)
 def list_thankyou_cards(
     db: Session = Depends(get_db),
     machine: Optional[str] = Query(None),
     date: Optional[str] = Query(None, description="YYYY-MM-DD, Sri Lanka day. Omit for current month."),
+    year: Optional[int] = Query(None),
+    month: Optional[int] = Query(None, ge=1, le=12),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
@@ -2402,6 +2451,11 @@ def list_thankyou_cards(
             datetime(sl_now.year + 1, 1, 1) if sl_now.month == 12
             else datetime(sl_now.year, sl_now.month + 1, 1)
         ) - SL_TZ_OFFSET
+
+        # override with the requested month BEFORE applying the filter
+        if year and month:
+            month_start, month_end = _month_window(year, month)
+
         q = q.filter(ThankYouCard.created_at >= month_start, ThankYouCard.created_at < month_end)
 
     total = q.count()
@@ -2423,6 +2477,7 @@ def list_thankyou_cards(
         "cards": [ThankYouCardOut.model_validate(r).model_dump() for r in rows],
     }
 
+    
 class ThankYouCardUpdate(BaseModel):
     job_no: Optional[str] = None
     customer: Optional[str] = None
@@ -2534,7 +2589,11 @@ def thankyou_dates_with_entries(
 
 
 @app.get("/api/stats/thankyou-cards-by-machine")
-def thankyou_cards_by_machine(db: Session = Depends(get_db)):
+def thankyou_cards_by_machine(
+    year: Optional[int] = Query(None),
+    month: Optional[int] = Query(None, ge=1, le=12),
+    db: Session = Depends(get_db),
+):
     utc_now = datetime.utcnow()
     sl_now  = utc_now + SL_TZ_OFFSET
     day_start = datetime(sl_now.year, sl_now.month, sl_now.day) - SL_TZ_OFFSET
@@ -2544,6 +2603,10 @@ def thankyou_cards_by_machine(db: Session = Depends(get_db)):
         datetime(sl_now.year + 1, 1, 1) if sl_now.month == 12
         else datetime(sl_now.year, sl_now.month + 1, 1)
     ) - SL_TZ_OFFSET
+
+    # If a specific month was requested, override the current-month window
+    if year and month:
+        month_start, month_end = _month_window(year, month)
 
     def counts_for(start, end):
         rows = (
@@ -2562,6 +2625,7 @@ def thankyou_cards_by_machine(db: Session = Depends(get_db)):
         return result
 
     return {"daily": counts_for(day_start, day_end), "monthly": counts_for(month_start, month_end)}
+
 
 @app.get("/api/stats/thankyou-cards")
 def thankyou_card_stats(db: Session = Depends(get_db)):

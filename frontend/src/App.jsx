@@ -88,6 +88,8 @@ const api = {
   searchJobs: (q) => apiFetch(`/api/jobs/search?q=${encodeURIComponent(q)}`),
   stats: () => apiFetch("/api/stats"),
   deptStats: () => apiFetch("/api/stats/departments"),
+  deptMonthTotal: (year, month) =>
+    apiFetch(`/api/stats/departments/monthly?year=${year}&month=${month}`),
   pendingPrintJobs: (search = "", page = 1) =>
     apiFetch(
       `/api/stats/pending-print-jobs?search=${encodeURIComponent(search)}&page=${page}&page_size=15`,
@@ -105,11 +107,19 @@ const api = {
       `/api/stats/album-jobs?dept=${dept}&album_type=${albumType}${date ? `&date=${date}` : ""}&page=${page}&page_size=15`,
     ),
   printingSection: () => apiFetch("/api/stats/printing-section"),
-  printingBreakdown: () => apiFetch(`/api/stats/printing-breakdown`),
-  printingJobsList: (machine, album_type, date, page) =>
-    apiFetch(
-      `/api/stats/printing-jobs?machine=${machine}&album_type=${album_type}${date ? `&date=${date}` : ""}&page=${page}&page_size=15`,
-    ),
+
+  printingBreakdown: (ym) => {
+    const [y, m] = ym ? ym.split("-") : [];
+    return apiFetch(
+      `/api/stats/printing-breakdown${ym ? `?year=${y}&month=${+m}` : ""}`,
+    );
+  },
+  printingJobsList: (machine, album_type, date, page, ym) => {
+    const [y, m] = ym ? ym.split("-") : [];
+    return apiFetch(
+      `/api/stats/printing-jobs?machine=${machine}&album_type=${album_type}${date ? `&date=${date}` : ""}${!date && ym ? `&year=${y}&month=${+m}` : ""}&page=${page}&page_size=15`,
+    );
+  },
   printingJobsDates: (machine, album_type, year, month) =>
     apiFetch(
       `/api/stats/printing-jobs/dates-with-entries?machine=${machine}&album_type=${album_type}&year=${year}&month=${month}`,
@@ -219,16 +229,22 @@ const api = {
     }),
   deleteThankYouCard: (id) =>
     apiFetch(`/api/thankyou-cards/${id}`, { method: "DELETE" }),
-  thankYouCards: (machine = "", date = "", page = 1) =>
-    apiFetch(
-      `/api/thankyou-cards?${machine ? `machine=${machine}&` : ""}${date ? `date=${date}&` : ""}page=${page}&page_size=15`,
-    ),
+  thankYouCards: (machine = "", date = "", page = 1, ym = "") => {
+    const [y, m] = ym ? ym.split("-") : [];
+    return apiFetch(
+      `/api/thankyou-cards?${machine ? `machine=${machine}&` : ""}${date ? `date=${date}&` : ""}${!date && ym ? `year=${y}&month=${+m}&` : ""}page=${page}&page_size=15`,
+    );
+  },
   thankYouCardDates: (year, month, machine = "") =>
     apiFetch(
       `/api/thankyou-cards/dates-with-entries?year=${year}&month=${month}${machine ? `&machine=${machine}` : ""}`,
     ),
-  thankYouCardsByMachine: () =>
-    apiFetch(`/api/stats/thankyou-cards-by-machine`),
+  thankYouCardsByMachine: (ym) => {
+    const [y, m] = ym ? ym.split("-") : [];
+    return apiFetch(
+      `/api/stats/thankyou-cards-by-machine${ym ? `?year=${y}&month=${+m}` : ""}`,
+    );
+  },
   thankYouCardStats: () => apiFetch(`/api/stats/thankyou-cards`),
   knownThankYouNames: () => apiFetch(`/api/thankyou-cards/known-names`),
   paperStockStats: () => apiFetch(`/api/stats/paper-stock`),
@@ -10000,6 +10016,25 @@ function DamageTimeAlertModal() {
   );
 }
 
+function shiftYM(ym, delta) {
+  let [y, m] = ym.split("-").map(Number);
+  m += delta;
+  while (m < 1) {
+    m += 12;
+    y -= 1;
+  }
+  while (m > 12) {
+    m -= 12;
+    y += 1;
+  }
+  return `${y}-${String(m).padStart(2, "0")}`;
+}
+function ymLabel(ym) {
+  return new Date(ym + "-01T00:00:00")
+    .toLocaleDateString("en-GB", { month: "short", year: "numeric" })
+    .toUpperCase();
+}
+
 function StationPage({ deptKey }) {
   const cfg = STATION_CFG[deptKey];
   const { toasts, add } = useToast();
@@ -10012,6 +10047,10 @@ function StationPage({ deptKey }) {
   const [identityPending, setIdentityPending] = useState(null);
   const [boxPouchPending, setBoxPouchPending] = useState(null);
   const [deptDailyCount, setDeptDailyCount] = useState(null);
+  const [monthOpen, setMonthOpen] = useState(false);
+  const [selMonth, setSelMonth] = useState(null); // null = current month, else "YYYY-MM"
+  const [selMonthTotal, setSelMonthTotal] = useState(null);
+  const curYM = slDateStr(new Date()).slice(0, 7);
   const [laminatingFinisherPending, setLaminatingFinisherPending] =
     useState(null);
   const isMobile = useIsMobile();
@@ -10036,6 +10075,19 @@ function StationPage({ deptKey }) {
     const t = setInterval(reload, POLL_INTERVAL_MS);
     return () => clearInterval(t);
   }, [reload]);
+
+  useEffect(() => {
+    if (!selMonth) {
+      setSelMonthTotal(null);
+      return;
+    }
+    const [y, m] = selMonth.split("-").map(Number);
+    setSelMonthTotal(null);
+    api
+      .deptMonthTotal(y, m)
+      .then((r) => setSelMonthTotal(r?.[cfg?.dept] ?? 0))
+      .catch(() => setSelMonthTotal(0));
+  }, [selMonth, deptKey]);
 
   if (!cfg)
     return (
@@ -10330,6 +10382,8 @@ function StationPage({ deptKey }) {
 
             {/* Completed count (24h / monthly) */}
             <div
+              onClick={() => setMonthOpen((o) => !o)}
+              title="Click to choose a month"
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -10337,6 +10391,7 @@ function StationPage({ deptKey }) {
                 background: "#021b09",
                 border: "1px solid #1a3a2e",
                 borderRadius: 8,
+                cursor: "pointer",
                 padding: isMobile ? "4px 10px" : "2px 10px 2px 8px",
                 minWidth: 0,
               }}
@@ -10351,7 +10406,9 @@ function StationPage({ deptKey }) {
                     deptCompletedCount > 0 ? "var(--green)" : "var(--text-dim)",
                 }}
               >
-                {deptCompletedCount ?? "-"}
+                {selMonth
+                  ? (selMonthTotal ?? "…")
+                  : (deptCompletedCount ?? "-")}
               </span>
               <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
                 <span
@@ -10365,7 +10422,7 @@ function StationPage({ deptKey }) {
                     whiteSpace: "nowrap",
                   }}
                 >
-                  Monthly
+                  {selMonth ? ymLabel(selMonth) : "Monthly"}
                 </span>
                 <span
                   style={{
@@ -10386,6 +10443,106 @@ function StationPage({ deptKey }) {
         }
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {monthOpen && (
+            <div
+              style={{
+                background: "var(--bg2)",
+                border: "1px solid var(--border)",
+                borderRadius: 10,
+                padding: 12,
+                display: "flex",
+                flexDirection: "column",
+                gap: 12,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                }}
+              >
+                <button
+                  onClick={() => setSelMonth(null)}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: 6,
+                    fontWeight: 700,
+                    background:
+                      selMonth === null ? "var(--amber)" : "var(--bg3)",
+                    color: selMonth === null ? "#000" : "var(--text-sec)",
+                  }}
+                >
+                  This Month
+                </button>
+                <button
+                  onClick={() => setSelMonth(shiftYM(curYM, -1))}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: 6,
+                    fontWeight: 700,
+                    background:
+                      selMonth === shiftYM(curYM, -1)
+                        ? "var(--amber)"
+                        : "var(--bg3)",
+                    color:
+                      selMonth === shiftYM(curYM, -1)
+                        ? "#000"
+                        : "var(--text-sec)",
+                  }}
+                >
+                  Last Month
+                </button>
+                <input
+                  type="month"
+                  max={curYM}
+                  value={selMonth ?? curYM}
+                  onChange={(e) =>
+                    setSelMonth(
+                      !e.target.value || e.target.value === curYM
+                        ? null
+                        : e.target.value,
+                    )
+                  }
+                  style={{
+                    width: "auto",
+                    margin: 0,
+                    padding: "6px 10px",
+                    borderRadius: 6,
+                  }}
+                />
+                <button
+                  onClick={() => setMonthOpen(false)}
+                  style={{
+                    marginLeft: "auto",
+                    padding: "6px 12px",
+                    borderRadius: 6,
+                    background: "var(--bg3)",
+                    color: "var(--text-sec)",
+                    border: "1px solid var(--border)",
+                  }}
+                >
+                  Close
+                </button>
+              </div>
+
+              {cfg.dept === "PRINTING" && (
+                <div>
+                  <div
+                    style={{
+                      fontWeight: 800,
+                      marginBottom: 8,
+                      color: "var(--text-pri)",
+                    }}
+                  >
+                    Printing Section - By Machine
+                  </div>
+                  <PrintingMachineBreakdownPanel hideHeader ym={selMonth} />
+                </div>
+              )}
+            </div>
+          )}
           <SearchBar value={search} onChange={setSearch} />
 
           {queue.filter((j) => matchesSearch(j, search)).length === 0 ? (
@@ -15979,7 +16136,7 @@ const ALBUM_TYPE_LABELS = {
   REBIND: "Rebind Albums",
 };
 
-function PrintingMachineBreakdownPanel({ hideHeader = false }) {
+function PrintingMachineBreakdownPanel({ hideHeader = false, ym = null }) {
   const [data, setData] = useState(null);
   const [expandedMachine, setExpMachine] = useState(null);
   const [expandedAlbum, setExpAlbum] = useState(null); // `${machine}-${albumType}`
@@ -15999,24 +16156,24 @@ function PrintingMachineBreakdownPanel({ hideHeader = false }) {
   useEffect(() => {
     const load = () =>
       api
-        .thankYouCardsByMachine()
+        .thankYouCardsByMachine(ym)
         .then(setIfChanged(setTycData))
         .catch(() => {});
     load();
     const t = setInterval(load, POLL_INTERVAL_MS);
     return () => clearInterval(t);
-  }, []);
+  }, [ym]);
 
   useEffect(() => {
     const load = () =>
       api
-        .printingBreakdown()
+        .printingBreakdown(ym)
         .then(setIfChanged(setData))
         .catch(() => {});
     load();
     const t = setInterval(load, POLL_INTERVAL_MS);
     return () => clearInterval(t);
-  }, []);
+  }, [ym]);
 
   useEffect(() => {
     const load = () =>
@@ -16029,6 +16186,14 @@ function PrintingMachineBreakdownPanel({ hideHeader = false }) {
     return () => clearInterval(t);
   }, []);
 
+  useEffect(() => {
+      setExpAlbum(null);
+      setCalOpenAlbum(null);
+      setDateByAlbum({});
+      setPageByAlbum({});
+      setSelectedMonthTotals({});
+    }, [ym]);
+
   function toggleMachine(mKey) {
     setExpMachine((prev) => (prev === mKey ? null : mKey));
     setExpAlbum(null);
@@ -16036,8 +16201,8 @@ function PrintingMachineBreakdownPanel({ hideHeader = false }) {
   }
 
   function cacheKeyFor(machine, at, date, page) {
-    return `${machine}-${at}-${date || "month"}-${page}`;
-  }
+      return `${machine}-${at}-${date || "month"}-${page}-${ym || "cur"}`;
+    }
 
   async function loadJobs(machine, at, date, page) {
     const key = cacheKeyFor(machine, at, date, page);
@@ -16045,8 +16210,8 @@ function PrintingMachineBreakdownPanel({ hideHeader = false }) {
     try {
       const res =
         at === "THANKYOU"
-          ? await api.thankYouCards(machine, date, page)
-          : await api.printingJobsList(machine, at, date, page);
+          ? await api.thankYouCards(machine, date, page, ym)
+          : await api.printingJobsList(machine, at, date, page, ym);
       setJobsCache((c) => ({ ...c, [key]: res }));
     } catch {
       setJobsCache((c) => ({ ...c, [key]: "error" }));
@@ -16116,7 +16281,7 @@ function PrintingMachineBreakdownPanel({ hideHeader = false }) {
     const isOpen = calOpenAlbum === albumKey;
     setCalOpenAlbum(isOpen ? null : albumKey);
     if (!isOpen) {
-      const now = new Date();
+      const now = ym ? new Date(ym + "-01T00:00:00") : new Date();
       setCalYear(now.getFullYear());
       setCalMonth(now.getMonth() + 1);
       const fetcher =
@@ -17037,7 +17202,12 @@ function PrintingMachineBreakdownPanel({ hideHeader = false }) {
                 ? result.cards || result.jobs || []
                 : [];
             const dailyCount = tycStats?.daily?.count ?? 0;
-            const monthlyCount = tycStats?.monthly?.count ?? 0;
+            const monthlyCount = ym
+              ? Object.values(tycData?.monthly || {}).reduce(
+                  (s, x) => s + (x.entries || 0),
+                  0,
+                )
+              : (tycStats?.monthly?.count ?? 0);
 
             function openAllThankYou() {
               if (expandedAlbum === albumKey) {

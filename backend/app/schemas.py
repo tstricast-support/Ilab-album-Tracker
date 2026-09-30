@@ -164,18 +164,17 @@ def _str(val) -> str:
 
 def _refresh_delays(job: JobCard, db: Session):
     now = datetime.utcnow()
-
+    changed = False
     for log in job.logs:
         if log.exited_at is None:
             limit = TIMEOUT_MINUTES.get(_str(log.department), 9999)
-
-            elapsed = (
-                now - log.entered_at
-            ).total_seconds() / 60
-
-            log.is_delayed = elapsed > limit
-
-    db.commit()
+            elapsed = (now - log.entered_at).total_seconds() / 60
+            new_val = elapsed > limit
+            if log.is_delayed != new_val:
+                log.is_delayed = new_val
+                changed = True
+    if changed:
+        db.commit()   
 
 
 def _out(job: JobCard, db: Session) -> JobCardOut:
