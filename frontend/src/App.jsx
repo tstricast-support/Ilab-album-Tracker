@@ -4801,7 +4801,7 @@ function Shell({ title, accent = "var(--amber)", topRightPrimary, topRightMid, t
   );
 }
 
-// ── Sec ───────────────────────────────────────────────────────────────────────
+// ── Sec ──────────────────────────────────────────────────────────────────
 function Sec({ title, accent = "var(--amber)", children }) {
   return (
     <div
