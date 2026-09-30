@@ -283,6 +283,26 @@ const api = {
     }),
   adminFullDeleteJob: (jobId) =>
     apiFetch(`/api/admin/jobs/${jobId}/full-delete`, { method: "DELETE" }),
+  returnReasons: () => apiFetch(`/api/returns/reasons`),
+  sendReturn: (body) =>
+    apiFetch(`/api/returns/send`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  receiveReturn: (id, received_by) =>
+    apiFetch(`/api/returns/${id}/receive`, {
+      method: "POST",
+      body: JSON.stringify({ received_by }),
+    }),
+  resolveReturn: (id, resolved_by, note) =>
+    apiFetch(`/api/returns/${id}/resolve`, {
+      method: "POST",
+      body: JSON.stringify({ resolved_by, note: note || undefined }),
+    }),
+  openReturns: (department = "") =>
+    apiFetch(
+      `/api/returns/open${department ? `?department=${department}` : ""}`,
+    ),
 };
 
 function fmtPackets(sheets) {
@@ -3639,6 +3659,7 @@ function CompactJobPreviewModal({ job, onClose, onViewFull }) {
             <Chip label="Size" value={job.print_size} accent="#3b82f6" />
           )}
           {job.album_type && <AlbumTypeBadge type={job.album_type} />}
+          {job.open_return && <LocationChip movement={job.open_return} />}
           {job.payment_by && (
             <Chip label="Payment" value={job.payment_by} accent="#16a34a" />
           )}
@@ -5978,6 +5999,725 @@ function LivePanel() {
   );
 }
 
+// ── Album Return tracking ─────────────────────────────────────────────
+const RETURN_DEPT_LABELS = {
+  PRINTING: "Printing",
+  LASER_CUTTING: "Laser Cutting",
+  LAMINATING: "Laminating",
+  BINDING: "Binding",
+};
+const RETURN_DEPT_RANK = {
+  PRINTING: 1,
+  LASER_CUTTING: 2,
+  LAMINATING: 3,
+  BINDING: 4,
+};
+const RETURN_NAME_KEY = `ilab-return-name:${ROLE}`;
+
+function getSavedReturnName() {
+  try {
+    return localStorage.getItem(RETURN_NAME_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+function saveReturnName(n) {
+  try {
+    localStorage.setItem(RETURN_NAME_KEY, n);
+  } catch {}
+}
+
+function returnAgeMins(iso) {
+  return Math.max(0, Math.floor((Date.now() - parseUTC(iso).getTime()) / 60000));
+}
+function returnAgeText(iso) {
+  const mins = returnAgeMins(iso);
+  if (mins < 60) return `${mins}m`;
+  const h = Math.floor(mins / 60);
+  if (h < 24) return `${h}h ${mins % 60}m`;
+  return `${Math.floor(h / 24)}d ${h % 24}h`;
+}
+
+function returnLocationText(m) {
+  if (!m) return null;
+  const from = RETURN_DEPT_LABELS[m.from_department] || m.from_department;
+  const to = RETURN_DEPT_LABELS[m.to_department] || m.to_department;
+  if (m.status === "IN_TRANSIT")
+    return m.kind === "FORWARD"
+      ? `In transit: ${from} → ${to} (fixed)`
+      : `In transit: ${from} → ${to} (returned)`;
+  return `At ${to} (returned from ${from})`;
+}
+
+function LocationChip({ movement }) {
+  if (!movement) return null;
+  const transit = movement.status === "IN_TRANSIT";
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <Chip
+        label="Location"
+        value={returnLocationText(movement)}
+        accent={transit ? "#f59e0b" : "#e53e3e"}
+      />
+      {movement.reason && (
+        <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
+          Reason: {movement.reason} · sent by {movement.sent_by}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Modal: send an album back ─────────────────────────────────────────
+function ReturnAlbumModal({ job, fromDept, onClose, onDone, addToast }) {
+  const isMobile = useIsMobile();
+  const destinations = ["PRINTING", "LASER_CUTTING", "LAMINATING"].filter(
+    (d) =>
+      RETURN_DEPT_RANK[d] < RETURN_DEPT_RANK[fromDept] &&
+      !(d === "LASER_CUTTING" && job.status_laser_cutting === "SKIPPED"),
+  );
+  const [to, setTo] = useState(destinations[0] || "");
+  const [presets, setPresets] = useState([]);
+  const [preset, setPreset] = useState("");
+  const [custom, setCustom] = useState("");
+  const [name, setName] = useState(getSavedReturnName);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api
+      .returnReasons()
+      .then((d) => setPresets(d.reasons || []))
+      .catch(() => {});
+  }, []);
+
+  const reason = [preset && preset !== "Other" ? preset : "", custom.trim()]
+    .filter(Boolean)
+    .join(" - ");
+  const canSend = to && reason && name.trim() && !saving;
+
+  async function send() {
+    if (!canSend) return;
+    setSaving(true);
+    try {
+      await api.sendReturn({
+        job_id: job.id,
+        from_department: fromDept,
+        to_department: to,
+        reason,
+        sent_by: name.trim(),
+      });
+      saveReturnName(name.trim());
+      addToast?.(
+        `↩ #${job.job_no} sent back to ${RETURN_DEPT_LABELS[to]}.`,
+        "success",
+      );
+      onDone?.();
+      onClose();
+    } catch (err) {
+      addToast?.(err.message, "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "var(--overlay)",
+        display: "flex",
+        alignItems: isMobile ? "flex-end" : "center",
+        justifyContent: "center",
+        zIndex: 9400,
+      }}
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: "var(--bg1)",
+          border: "1px solid var(--red)",
+          borderRadius: isMobile ? "16px 16px 0 0" : 12,
+          padding: 22,
+          width: "100%",
+          maxWidth: 440,
+          maxHeight: isMobile ? "92dvh" : "90vh",
+          overflowY: "auto",
+          display: "flex",
+          flexDirection: "column",
+          gap: 14,
+        }}
+      >
+        <div>
+          <div
+            style={{
+              fontSize: 11,
+              color: "var(--red)",
+              textTransform: "uppercase",
+              letterSpacing: ".1em",
+              marginBottom: 4,
+            }}
+          >
+            ↩ Return Album from {RETURN_DEPT_LABELS[fromDept]}
+          </div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: "var(--amber)" }}>
+            {job.job_no}
+          </div>
+          <div style={{ fontSize: 14, color: "var(--text-sec)" }}>
+            {job.customer}
+          </div>
+        </div>
+
+        {destinations.length === 0 ? (
+          <div style={{ color: "var(--red)", fontSize: 13 }}>
+            There is no earlier department this album can be returned to.
+          </div>
+        ) : (
+          <>
+            <div>
+              <label>Return to *</label>
+              <select value={to} onChange={(e) => setTo(e.target.value)}>
+                {destinations.map((d) => (
+                  <option key={d} value={d}>
+                    {RETURN_DEPT_LABELS[d]}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label>Reason *</label>
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: 6,
+                  marginTop: 6,
+                }}
+              >
+                {presets.map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setPreset(preset === p ? "" : p)}
+                    style={{
+                      padding: "5px 12px",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      borderRadius: 4,
+                      background: preset === p ? "var(--amber)" : "var(--bg3)",
+                      color: preset === p ? "#000" : "var(--text-sec)",
+                      border: `1px solid ${preset === p ? "var(--amber)" : "var(--border)"}`,
+                    }}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
+              <textarea
+                value={custom}
+                onChange={(e) => setCustom(e.target.value)}
+                placeholder="Extra details (required if you pick 'Other')…"
+                rows={2}
+              />
+            </div>
+
+            <div>
+              <label>Your name *</label>
+              <input
+                value={name}
+                onChange={(e) =>
+                  setName(e.target.value.replace(/\b\w/g, (c) => c.toUpperCase()))
+                }
+                placeholder="Enter your name"
+              />
+            </div>
+          </>
+        )}
+
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            onClick={send}
+            disabled={!canSend || destinations.length === 0}
+            style={{
+              flex: 1,
+              padding: "12px 0",
+              background: canSend ? "var(--red)" : "var(--bg3)",
+              color: canSend ? "#fff" : "var(--text-dim)",
+              borderRadius: 8,
+              fontWeight: 800,
+              fontSize: 14,
+            }}
+          >
+            {saving ? "Sending…" : "↩ Send Back"}
+          </button>
+          <button
+            onClick={onClose}
+            style={{
+              padding: "12px 18px",
+              background: "var(--bg3)",
+              color: "var(--text-sec)",
+              border: "1px solid var(--border)",
+              borderRadius: 8,
+              fontWeight: 700,
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Modal: receive / resolve a returned album ─────────────────────────
+function ReturnActionModal({ movement, mode, onClose, onDone, addToast }) {
+  const isMobile = useIsMobile();
+  const [name, setName] = useState(getSavedReturnName);
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const isReceive = mode === "receive";
+  const fromLabel = RETURN_DEPT_LABELS[movement.from_department];
+  const toLabel = RETURN_DEPT_LABELS[movement.to_department];
+
+  async function submit() {
+    if (!name.trim()) return;
+    setSaving(true);
+    try {
+      if (isReceive) {
+        await api.receiveReturn(movement.id, name.trim());
+        addToast?.(`✓ #${movement.job_no} received.`, "success");
+      } else {
+        await api.resolveReturn(movement.id, name.trim(), note.trim());
+        addToast?.(
+          `✔ #${movement.job_no} sent back to ${fromLabel}.`,
+          "success",
+        );
+      }
+      saveReturnName(name.trim());
+      onDone?.();
+      onClose();
+    } catch (err) {
+      addToast?.(err.message, "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "var(--overlay)",
+        display: "flex",
+        alignItems: isMobile ? "flex-end" : "center",
+        justifyContent: "center",
+        zIndex: 9400,
+      }}
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: "var(--bg1)",
+          border: "1px solid var(--amber)",
+          borderRadius: isMobile ? "16px 16px 0 0" : 12,
+          padding: 22,
+          width: "100%",
+          maxWidth: 420,
+          display: "flex",
+          flexDirection: "column",
+          gap: 14,
+        }}
+      >
+        <div>
+          <div
+            style={{
+              fontSize: 11,
+              color: "var(--text-dim)",
+              textTransform: "uppercase",
+              letterSpacing: ".1em",
+              marginBottom: 4,
+            }}
+          >
+            {isReceive
+              ? "Confirm album arrived"
+              : `Fixed - send back to ${fromLabel}`}
+          </div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: "var(--amber)" }}>
+            {movement.job_no}
+          </div>
+          <div style={{ fontSize: 14, color: "var(--text-sec)" }}>
+            {movement.customer}
+          </div>
+          <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 6 }}>
+            {fromLabel} → {toLabel}
+            {movement.reason ? ` · ${movement.reason}` : ""}
+          </div>
+        </div>
+
+        <div>
+          <label>Your name *</label>
+          <input
+            value={name}
+            onChange={(e) =>
+              setName(e.target.value.replace(/\b\w/g, (c) => c.toUpperCase()))
+            }
+            placeholder="Enter your name"
+            autoFocus
+          />
+        </div>
+
+        {!isReceive && (
+          <div>
+            <label>What was fixed? (optional)</label>
+            <textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="e.g. Reprinted pages 12-14"
+              rows={2}
+            />
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            onClick={submit}
+            disabled={saving || !name.trim()}
+            style={{
+              flex: 1,
+              padding: "12px 0",
+              background: name.trim() ? "var(--amber)" : "var(--bg3)",
+              color: name.trim() ? "#000" : "var(--text-dim)",
+              borderRadius: 8,
+              fontWeight: 800,
+              fontSize: 14,
+            }}
+          >
+            {saving
+              ? "Saving…"
+              : isReceive
+                ? "✓ Yes, I Received It"
+                : "✔ Send Back"}
+          </button>
+          <button
+            onClick={onClose}
+            style={{
+              padding: "12px 18px",
+              background: "var(--bg3)",
+              color: "var(--text-sec)",
+              border: "1px solid var(--border)",
+              borderRadius: 8,
+              fontWeight: 700,
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Station panel: albums returned TO this department ─────────────────
+function ReturnedToMePanel({ dept, addToast }) {
+  const [rows, setRows] = useState([]);
+  const [action, setAction] = useState(null); // { movement, mode }
+  const [viewJob, setViewJob] = useState(null);
+
+  const load = useCallback(() => {
+    api
+      .openReturns(dept)
+      .then(setIfChanged(setRows))
+      .catch(() => {});
+  }, [dept]);
+
+  useEffect(() => {
+    load();
+    const t = setInterval(load, POLL_INTERVAL_MS);
+    return () => clearInterval(t);
+  }, [load]);
+
+  function openJob(m) {
+    api
+      .getJob(m.job_id)
+      .then(setViewJob)
+      .catch(() => {});
+  }
+
+  if (rows.length === 0 && !action) return null;
+
+  return (
+    <div
+      style={{
+        background: "var(--card-bg)",
+        border: "1px solid var(--red)",
+        borderLeft: "4px solid var(--red)",
+        borderRadius: 10,
+        padding: "12px 14px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+      }}
+    >
+      <div
+        style={{
+          fontFamily: "var(--fd)",
+          fontSize: 13,
+          fontWeight: 900,
+          letterSpacing: ".1em",
+          textTransform: "uppercase",
+          color: "var(--red)",
+        }}
+      >
+        ↩ Returned to {RETURN_DEPT_LABELS[dept] || "me"} ({rows.length})
+      </div>
+
+      {rows.map((m) => {
+        const transit = m.status === "IN_TRANSIT";
+        return (
+          <div
+            key={m.id}
+            style={{
+              background: "var(--bg2)",
+              border: `1px solid ${transit ? "var(--amber)" : "var(--border)"}`,
+              borderRadius: 8,
+              padding: "10px 12px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 6,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "flex-start",
+                gap: 8,
+                flexWrap: "wrap",
+              }}
+            >
+              <div style={{ minWidth: 0 }}>
+                <button
+                  onClick={() => openJob(m)}
+                  style={{
+                    fontFamily: "var(--fm)",
+                    fontSize: 15,
+                    fontWeight: 800,
+                    color: "var(--amber)",
+                    textDecoration: "underline",
+                    padding: 0,
+                    minHeight: "unset",
+                  }}
+                >
+                  {m.job_no}
+                </button>
+                <div
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: "var(--text-pri)",
+                  }}
+                >
+                  {m.customer}
+                  {m.couple_name ? ` / ${m.couple_name}` : ""}
+                </div>
+              </div>
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 800,
+                  padding: "3px 9px",
+                  borderRadius: 20,
+                  background: transit ? "#f59e0b22" : "#22c55e22",
+                  color: transit ? "#f59e0b" : "#22c55e",
+                  border: `1px solid ${transit ? "#f59e0b55" : "#22c55e55"}`,
+                }}
+              >
+                {transit ? "IN TRANSIT" : "AT MY DESK"}
+              </span>
+            </div>
+
+            <div style={{ fontSize: 12, color: "var(--text-sec)" }}>
+              {m.kind === "FORWARD" ? "Fixed and sent back by" : "Returned by"}{" "}
+              <b>{RETURN_DEPT_LABELS[m.from_department]}</b> ({m.sent_by}) ·{" "}
+              {returnAgeText(m.sent_at)} ago
+            </div>
+            {m.reason && (
+              <div style={{ fontSize: 12, color: "var(--text-pri)" }}>
+                Reason: {m.reason}
+              </div>
+            )}
+
+            {transit ? (
+              <button
+                onClick={() => setAction({ movement: m, mode: "receive" })}
+                style={{
+                  padding: "9px 0",
+                  background: "var(--amber)",
+                  color: "#000",
+                  borderRadius: 6,
+                  fontWeight: 800,
+                  fontSize: 13,
+                }}
+              >
+                ✓ Receive Album
+              </button>
+            ) : (
+              <button
+                onClick={() => setAction({ movement: m, mode: "resolve" })}
+                style={{
+                  padding: "9px 0",
+                  background: "#16a34a",
+                  color: "#fff",
+                  borderRadius: 6,
+                  fontWeight: 800,
+                  fontSize: 13,
+                }}
+              >
+                ✔ Fixed - Send Back to {RETURN_DEPT_LABELS[m.from_department]}
+              </button>
+            )}
+          </div>
+        );
+      })}
+
+      {action && (
+        <ReturnActionModal
+          movement={action.movement}
+          mode={action.mode}
+          onClose={() => setAction(null)}
+          onDone={load}
+          addToast={addToast}
+        />
+      )}
+      {viewJob && (
+        <JobCardViewModal
+          job={viewJob}
+          onClose={() => setViewJob(null)}
+          addToast={addToast}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Admin dashboard panel: every open return ──────────────────────────
+function ReturnedAlbumsPanel() {
+  const [rows, setRows] = useState(null);
+  const [viewJob, setViewJob] = useState(null);
+
+  useEffect(() => {
+    const load = () =>
+      api
+        .openReturns()
+        .then(setIfChanged(setRows))
+        .catch(() => {});
+    load();
+    const t = setInterval(load, POLL_INTERVAL_MS);
+    return () => clearInterval(t);
+  }, []);
+
+  if (!rows)
+    return (
+      <div
+        style={{ textAlign: "center", padding: "16px 0", color: "var(--text-dim)" }}
+      >
+        LOADING…
+      </div>
+    );
+
+  if (rows.length === 0)
+    return (
+      <div
+        style={{ textAlign: "center", padding: "16px 0", color: "var(--text-dim)", fontSize: 13 }}
+      >
+        ✓ No albums are currently returned.
+      </div>
+    );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {rows.map((m) => {
+        const stuck = returnAgeMins(m.sent_at) > 120; // 2 hours
+        return (
+          <div
+            key={m.id}
+            style={{
+              background: "var(--bg2)",
+              border: `1px solid ${stuck ? "var(--red)" : "var(--border)"}`,
+              borderLeft: `4px solid ${stuck ? "var(--red)" : "#f59e0b"}`,
+              borderRadius: 8,
+              padding: "10px 12px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 8,
+                flexWrap: "wrap",
+              }}
+            >
+              <button
+                onClick={() =>
+                  api
+                    .getJob(m.job_id)
+                    .then(setViewJob)
+                    .catch(() => {})
+                }
+                style={{
+                  fontFamily: "var(--fm)",
+                  fontSize: 14,
+                  fontWeight: 800,
+                  color: "var(--amber)",
+                  textDecoration: "underline",
+                  padding: 0,
+                  minHeight: "unset",
+                }}
+              >
+                {m.job_no}{" "}
+                <span style={{ color: "var(--text-pri)", textDecoration: "none" }}>
+                  {m.customer}
+                </span>
+              </button>
+              <span
+                style={{
+                  fontSize: 12,
+                  fontWeight: 800,
+                  color: stuck ? "var(--red)" : "var(--text-dim)",
+                }}
+              >
+                {returnAgeText(m.sent_at)} {stuck ? "⚠" : ""}
+              </span>
+            </div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-pri)" }}>
+               {returnLocationText(m)}
+            </div>
+            {m.reason && (
+              <div style={{ fontSize: 12, color: "var(--text-sec)" }}>
+                Reason: {m.reason} · sent by {m.sent_by}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {viewJob && (
+        <JobCardViewModal
+          job={viewJob}
+          onClose={() => setViewJob(null)}
+          addToast={() => {}}
+        />
+      )}
+    </div>
+  );
+}
+
 // ── Full Job Card ─────────────────────────────────────────────────────────────
 function JobCardFull({
   job,
@@ -5988,6 +6728,8 @@ function JobCardFull({
   showExpiry = false,
   onAddReason,
   reasonDept,
+  onReturn,
+  returnDept,
   addToast = () => {},
 }) {
   const isMobile = useIsMobile();
@@ -6201,12 +6943,14 @@ function JobCardFull({
         </div>
         <PaymentField job={job} addToast={addToast} />
         <BoxPouchField job={job} addToast={addToast} />
+        <LocationChip movement={job.open_return} />
         <SpecialNote note={job.special_note} />
         <StageRow job={job} />
         <DelayReasonsList logs={job.logs} />
 
         {actionLabel &&
           onAction &&
+          !job.open_return &&
           (() => {
             const isDone =
               actionLabel.toLowerCase().includes("done") ||
@@ -6252,6 +6996,28 @@ function JobCardFull({
               </button>
             );
           })()}
+
+        {onReturn &&
+          returnDept &&
+          !job.open_return &&
+          !job.is_fully_completed &&
+          job.status_printing === "COMPLETED" && (
+            <button
+              onClick={() => onReturn(job)}
+              style={{
+                padding: "9px 16px",
+                borderRadius: 6,
+                fontSize: 13,
+                fontWeight: 800,
+                background: "var(--danger-bg)",
+                color: "var(--red)",
+                border: "1px solid var(--red)",
+                letterSpacing: ".05em",
+              }}
+            >
+              ↩ RETURN ALBUM TO EARLIER DEPARTMENT
+            </button>
+          )}
 
         {onAddReason &&
           (() => {
@@ -10051,6 +10817,7 @@ function StationPage({ deptKey }) {
   const [selMonth, setSelMonth] = useState(null); // null = current month, else "YYYY-MM"
   const [selMonthTotal, setSelMonthTotal] = useState(null);
   const curYM = slDateStr(new Date()).slice(0, 7);
+  const [returnJob, setReturnJob] = useState(null);
   const [laminatingFinisherPending, setLaminatingFinisherPending] =
     useState(null);
   const isMobile = useIsMobile();
@@ -10543,6 +11310,7 @@ function StationPage({ deptKey }) {
               )}
             </div>
           )}
+          <ReturnedToMePanel dept={cfg.dept} addToast={add} />
           <SearchBar value={search} onChange={setSearch} />
 
           {queue.filter((j) => matchesSearch(j, search)).length === 0 ? (
@@ -10586,6 +11354,8 @@ function StationPage({ deptKey }) {
                       actionBlocked={isBlocked}
                       onAddReason={setReasonJob}
                       reasonDept={cfg.dept}
+                      onReturn={setReturnJob}
+                      returnDept={cfg.dept === "PRINTING" ? undefined : cfg.dept}
                       addToast={add}
                     />
                   </div>
@@ -10630,6 +11400,15 @@ function StationPage({ deptKey }) {
         <LaminatingFinisherModal
           onConfirm={handleLaminatingFinisherConfirm}
           onCancel={() => setLaminatingFinisherPending(null)}
+        />
+      )}
+      {returnJob && (
+        <ReturnAlbumModal
+          job={returnJob}
+          fromDept={cfg.dept}
+          onClose={() => setReturnJob(null)}
+          onDone={reload}
+          addToast={add}
         />
       )}
       <DamageTimeAlertModal />
@@ -18957,6 +19736,14 @@ function DashboardPage() {
             defaultOpen
           >
             <PrintingMachineBreakdownPanel hideHeader />
+          </FoldableSection>
+
+         <FoldableSection
+            title="Returned Albums"
+            accent="var(--red)"
+            defaultOpen
+          >
+            <ReturnedAlbumsPanel />
           </FoldableSection>
 
           <FoldableSection title="Operator Activity" accent="var(--text-pri)">

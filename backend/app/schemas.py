@@ -38,6 +38,29 @@ class DepartmentLogOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class AlbumMovementOut(BaseModel):
+    id: int
+    job_id: int
+    kind: str
+    from_department: str
+    to_department: str
+    reason: Optional[str] = None
+    sent_by: str
+    sent_at: datetime
+    received_by: Optional[str] = None
+    received_at: Optional[datetime] = None
+    resolved_by: Optional[str] = None
+    resolved_at: Optional[datetime] = None
+    status: str
+    parent_id: Optional[int] = None
+    # filled in by the returns router (for the panels)
+    job_no: Optional[str] = None
+    customer: Optional[str] = None
+    couple_name: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+
 class JobCardOut(BaseModel):
     id: int
     job_no: str
@@ -70,6 +93,8 @@ class JobCardOut(BaseModel):
 
     completed_at: Optional[datetime]
     hours_since_completed: Optional[float]
+
+    open_return: Optional[AlbumMovementOut] = None
 
     created_at: datetime
     updated_at: datetime
@@ -193,6 +218,15 @@ def _out(job: JobCard, db: Session) -> JobCardOut:
         else None
     )
 
+    open_return = next(
+        (
+            AlbumMovementOut.model_validate(m, from_attributes=True)
+            for m in sorted(job.movements, key=lambda x: x.sent_at, reverse=True)
+            if m.status in ("IN_TRANSIT", "RECEIVED")
+        ),
+        None,
+    )
+
     return JobCardOut.model_validate({
         **{
             c.name: (
@@ -208,6 +242,8 @@ def _out(job: JobCard, db: Session) -> JobCardOut:
         "completed_at": completed_at,
 
         "hours_since_completed": hours_since,
+
+        "open_return": open_return,
 
         "logs": [
             DepartmentLogOut.model_validate(

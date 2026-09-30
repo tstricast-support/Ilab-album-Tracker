@@ -37,6 +37,7 @@ from .models import (
 )
 from .routers import history as history_router
 from .routers import chat as chat_router
+from .routers import returns as returns_router
 
 from .schemas import (
     DepartmentLogOut,
@@ -101,7 +102,7 @@ class JobCardCreate(BaseModel):
 app.include_router(history_router.router)
 # app.include_router(analytics_router.router)
 app.include_router(chat_router.router)
-
+app.include_router(returns_router.router)
 
 
 class StageAdvanceRequest(BaseModel):

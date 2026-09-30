@@ -187,6 +187,9 @@ class JobCard(Base):
     logs = relationship(
         "DepartmentLog", back_populates="job", cascade="all, delete-orphan"
     )
+    movements = relationship(
+        "AlbumMovement", back_populates="job", cascade="all, delete-orphan"
+    )
 
     @property
     def binding_unlocked(self) -> bool:
@@ -431,6 +434,35 @@ class ChatMessageItem(Base):
     def __repr__(self) -> str:
         return f"<ChatMessageItem {self.job_no} checked={self.is_checked}>"
 
+
+class AlbumMovement(Base):
+    """Records physical returns between departments.
+    Sits beside the normal pipeline - never changes stage statuses."""
+    __tablename__ = "album_movements"
+
+    id              = Column(Integer, primary_key=True, autoincrement=True)
+    job_id          = Column(Integer, ForeignKey("job_cards.id"), nullable=False, index=True)
+    kind            = Column(String(16), nullable=False, default="RETURN")   # RETURN / FORWARD
+    from_department = Column(String(32), nullable=False)
+    to_department   = Column(String(32), nullable=False)
+    reason          = Column(Text, nullable=True)
+    sent_by         = Column(String(128), nullable=False)
+    sent_at         = Column(DateTime, nullable=False, default=datetime.utcnow)
+    received_by     = Column(String(128), nullable=True)
+    received_at     = Column(DateTime, nullable=True)
+    resolved_by     = Column(String(128), nullable=True)
+    resolved_at     = Column(DateTime, nullable=True)
+    status          = Column(String(16), nullable=False, default="IN_TRANSIT")  # IN_TRANSIT / RECEIVED / RESOLVED
+    parent_id       = Column(Integer, nullable=True)
+
+    job = relationship("JobCard", back_populates="movements")
+
+    __table_args__ = (
+        Index("ix_album_movements_status_to", "status", "to_department"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<AlbumMovement job={self.job_id} {self.from_department}->{self.to_department} {self.status}>"
 
 def init_db():
     Base.metadata.create_all(bind=engine)
