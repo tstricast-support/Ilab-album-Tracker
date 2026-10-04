@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import os
+import time
 from datetime import datetime, timedelta
 from typing import List, Optional
 from fastapi import Depends, FastAPI, HTTPException,Query
@@ -10,7 +11,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 from sqlalchemy import case, desc, func, or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from .models import SL_TZ_OFFSET
 
 from .models import (
@@ -40,11 +41,9 @@ from .routers import chat as chat_router
 from .routers import returns as returns_router
 
 from .schemas import (
-    DepartmentLogOut,
     JobCardOut,
     _out,
     _str,
-    _refresh_delays,
     PaperPriceOut,     
     DamageEntryOut,
     PaperStockOut,          
@@ -239,6 +238,7 @@ def create_job(payload: JobCardCreate, db: Session = Depends(get_db)):
     )
     db.add(job)
     db.commit()
+    _bust_dept_stats_cache()
     db.refresh(job)
     return _out(job, db)
 
@@ -291,7 +291,11 @@ def search_jobs(q: str = Query(..., min_length=1), db: Session = Depends(get_db)
 
 @app.get("/api/jobs", response_model=List[JobCardOut])
 def list_jobs(completed: bool = False, db: Session = Depends(get_db)):
-    q = db.query(JobCard).filter(JobCard.is_fully_completed == completed)
+    q = (
+        db.query(JobCard)
+        .options(selectinload(JobCard.logs), selectinload(JobCard.movements))
+        .filter(JobCard.is_fully_completed == completed)
+    )
     if completed:
         q = q.filter(JobCard.completed_at >= _24h_cutoff())  
     return [_out(j, db) for j in q.order_by(_urgent_first(), JobCard.dele_date.asc()).all()]
@@ -320,6 +324,7 @@ def delete_job(job_id: int, db: Session = Depends(get_db)):
 
     db.delete(job)
     db.commit()
+    _bust_dept_stats_cache()
     
 
 
@@ -637,6 +642,7 @@ def admin_fix_date(job_id: int, payload: DateCorrectionRequest, db: Session = De
         raise HTTPException(400, f"Unknown department: {dept}")
 
     db.commit()
+    _bust_dept_stats_cache()
     db.refresh(job)
     return _out(job, db)
 
@@ -706,7 +712,9 @@ def admin_full_edit_job(job_id: int, payload: AdminJobFullUpdate, db: Session = 
 
     job.updated_at = datetime.utcnow()  # type:ignore
     db.commit()
+    _bust_dept_stats_cache()
     db.refresh(job)
+    
     return _out(job, db)
 
 
@@ -717,6 +725,7 @@ def admin_full_delete_job(job_id: int, db: Session = Depends(get_db)):
     job = _job_or_404(job_id, db)
     db.delete(job)
     db.commit()
+    _bust_dept_stats_cache()
 
 class DamageUpdate(BaseModel):
     paper_price_id: Optional[int] = None
@@ -914,6 +923,7 @@ def update_album_type(job_id: int, payload: AlbumTypeUpdate, db: Session = Depen
         raise HTTPException(400, "album_type must be NORMAL, STORY, or REBIND")
     job.album_type = val #type:ignore 
     db.commit()
+    _bust_dept_stats_cache()
     db.refresh(job)
     return _out(job, db)
 
@@ -1013,6 +1023,7 @@ def advance(
 
     job.updated_at = datetime.utcnow() #type:ignore 
     db.commit()
+    _bust_dept_stats_cache()
     db.refresh(job)
     return _out(job, db)
 
@@ -1070,9 +1081,13 @@ def station_queue(department: str, db: Session = Depends(get_db)):
     field  = DEPT_FIELD[dept]
     active = [StageStatusEnum.PENDING, StageStatusEnum.IN_PROGRESS]
 
-    q = db.query(JobCard).filter(
-        JobCard.is_fully_completed == False,  # noqa
-        getattr(JobCard, field).in_(active),
+    q = (
+        db.query(JobCard)
+        .options(selectinload(JobCard.logs), selectinload(JobCard.movements))
+        .filter(
+            JobCard.is_fully_completed == False,  # noqa
+            getattr(JobCard, field).in_(active),
+        )
     )
     if dept == "LAMINATING":
         q = q.filter(JobCard.status_printing == StageStatusEnum.COMPLETED)
@@ -1182,7 +1197,8 @@ def station_history(
 
     
     jobs = (
-        q.order_by(desc(order_col))
+        q.options(selectinload(JobCard.logs), selectinload(JobCard.movements))
+        .order_by(desc(order_col))
         .offset((page - 1) * page_size)
         .limit(page_size)
         .all()
@@ -1314,8 +1330,20 @@ def get_stats(db: Session = Depends(get_db)):
         expiring_soon=expiring_soon,
     )
 
+_dept_stats_cache = {"ts": 0.0, "data": None}
+_DEPT_STATS_TTL = 5  # seconds
+
+
+def _bust_dept_stats_cache():
+    _dept_stats_cache["data"] = None
+
 @app.get("/api/stats/departments")
 def get_dept_stats(db: Session = Depends(get_db)):
+
+    if (_dept_stats_cache["data"] is not None
+            and time.monotonic() - _dept_stats_cache["ts"] < _DEPT_STATS_TTL):
+        return _dept_stats_cache["data"]
+
     # Always derive "now" from UTC, then shift into Sri Lanka time.
     # This makes the result identical whether the server is your local
     # machine or a Railway container — both store/compare in UTC.
@@ -1388,34 +1416,34 @@ def get_dept_stats(db: Session = Depends(get_db)):
     result["ENTRY"] = entry_count_monthly
 
     # ── Per-machine breakdown for PRINTING ──────────────
-    machine_monthly_rows = (
-        db.query(DepartmentLog.machine, func.count(DepartmentLog.id))
-        .filter(
-            DepartmentLog.department == DepartmentEnum.PRINTING,
-            DepartmentLog.machine.isnot(None),
-            DepartmentLog.exited_at != None,
-            DepartmentLog.exited_at >= month_start,
-            DepartmentLog.exited_at <  month_end,
-        )
-        .group_by(DepartmentLog.machine)
-        .all()
-    )
-    machine_daily_rows = (
-        db.query(DepartmentLog.machine, func.count(DepartmentLog.id))
-        .filter(
-            DepartmentLog.department == DepartmentEnum.PRINTING,
-            DepartmentLog.machine.isnot(None),
-            DepartmentLog.exited_at != None,
-            DepartmentLog.exited_at >= day_start,
-            DepartmentLog.exited_at <  day_end,
-        )
-        .group_by(DepartmentLog.machine)
-        .all()
-    )
-    machines = {
-        "monthly": {r[0]: r[1] for r in machine_monthly_rows},
-        "daily":   {r[0]: r[1] for r in machine_daily_rows},
-    }
+    # machine_monthly_rows = (
+    #     db.query(DepartmentLog.machine, func.count(DepartmentLog.id))
+    #     .filter(
+    #         DepartmentLog.department == DepartmentEnum.PRINTING,
+    #         DepartmentLog.machine.isnot(None),
+    #         DepartmentLog.exited_at != None,
+    #         DepartmentLog.exited_at >= month_start,
+    #         DepartmentLog.exited_at <  month_end,
+    #     )
+    #     .group_by(DepartmentLog.machine)
+    #     .all()
+    # )
+    # machine_daily_rows = (
+    #     db.query(DepartmentLog.machine, func.count(DepartmentLog.id))
+    #     .filter(
+    #         DepartmentLog.department == DepartmentEnum.PRINTING,
+    #         DepartmentLog.machine.isnot(None),
+    #         DepartmentLog.exited_at != None,
+    #         DepartmentLog.exited_at >= day_start,
+    #         DepartmentLog.exited_at <  day_end,
+    #     )
+    #     .group_by(DepartmentLog.machine)
+    #     .all()
+    # )
+    # machines = {
+    #     "monthly": {r[0]: r[1] for r in machine_monthly_rows},
+    #     "daily":   {r[0]: r[1] for r in machine_daily_rows},
+    # }
 
     # ── Pending-print backlog: entered but printing not yet started ──
     pending_print_count = (
@@ -1427,10 +1455,13 @@ def get_dept_stats(db: Session = Depends(get_db)):
         .scalar() or 0
     )
 
-    return {
-        "monthly": result, "daily": daily, "machines": machines,
+    payload = {
+        "monthly": result, "daily": daily,
         "pending_print_count": pending_print_count,
     }
+    _dept_stats_cache["data"] = payload
+    _dept_stats_cache["ts"] = time.monotonic()
+    return payload
 
 @app.get("/api/stats/departments/monthly")
 def get_dept_month_total(
@@ -2792,17 +2823,23 @@ print(f"assets exists: {os.path.isdir(os.path.join(DIST_DIR, 'assets'))}")
 @app.get("/ilab_icon.jpg")
 def icon():
     f = os.path.join(DIST_DIR, "ilab_icon.jpg")
-    return FileResponse(f) if os.path.exists(f) else HTTPException(404)
+    if not os.path.exists(f):
+        raise HTTPException(404)
+    return FileResponse(f)
 
 @app.get("/favicon.svg")
 def favicon():
     f = os.path.join(DIST_DIR, "favicon.svg")
-    return FileResponse(f) if os.path.exists(f) else HTTPException(404)
+    if not os.path.exists(f):
+        raise HTTPException(404)
+    return FileResponse(f)
 
 @app.get("/icons.svg")
 def icons():
     f = os.path.join(DIST_DIR, "icons.svg")
-    return FileResponse(f) if os.path.exists(f) else HTTPException(404)
+    if not os.path.exists(f):
+        raise HTTPException(404)
+    return FileResponse(f)
 
 @app.get("/{full_path:path}")
 def serve_spa(full_path: str):

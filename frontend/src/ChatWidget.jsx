@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { MessageCircle, X, Search, Send, Zap } from "lucide-react";
 import { API_BASE, POLL_INTERVAL_MS } from "./config.js";
+import { usePolling } from "./usePolling.js";
 
 async function chatFetch(path, opts = {}) {
   const res = await fetch(`${API_BASE}${path}`, {
@@ -486,7 +487,7 @@ function AlbumListModal({ onClose, onSent, addToast }) {
 // ── Admin Broadcast Alert — full-screen, blocking, persists until dismissed ──
 const ADMIN_ALERT_STORAGE_PREFIX = "ilab-admin-alert-seen:";
 
-function AdminBroadcastAlert({ myDept, onOpenChat }) {
+function AdminBroadcastAlert({ myDept, onOpenChat, adminUnread }) {
   const [pending, setPending] = useState(null); // latest unseen admin message
   const isMobile = useIsMobile();
 
@@ -508,10 +509,8 @@ function AdminBroadcastAlert({ myDept, onOpenChat }) {
   }, [myDept]);
 
   useEffect(() => {
-    check();
-    const t = setInterval(check, POLL_INTERVAL_MS);
-    return () => clearInterval(t);
-  }, [check]);
+      if (adminUnread > 0) check(); // only fetch when ADMIN actually sent something
+    }, [adminUnread, check]);
 
   function dismiss() {
     if (pending) {
@@ -665,21 +664,9 @@ export function ChatWidget({ myDept, addToast }) {
     } catch {}
   }, [myDept, open, addToast]);
 
-  useEffect(() => {
-    pollUnread();
-    const t = setInterval(pollUnread, POLL_INTERVAL_MS);
-    return () => clearInterval(t);
-  }, [pollUnread]);
+  usePolling(pollUnread);
 
-  useEffect(() => {
-    if (!open) return;
-    reload();
-    const t = setInterval(() => {
-      reload();
-      pollUnread();
-    }, POLL_INTERVAL_MS);
-    return () => clearInterval(t);
-  }, [open, reload, pollUnread]);
+  usePolling(reload, POLL_INTERVAL_MS, open, otherDept);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -916,6 +903,7 @@ export function ChatWidget({ myDept, addToast }) {
 
       <AdminBroadcastAlert
         myDept={myDept}
+        adminUnread={unread.by_sender?.ADMIN || 0}
         onOpenChat={() => {
           setOtherDept("ADMIN");
           setOpen(true);
@@ -940,9 +928,9 @@ export function AdminChatPage({ Shell, useToast, ToastStack }) {
 
   useEffect(() => {
     reload();
-    const t = setInterval(reload, POLL_INTERVAL_MS);
-    return () => clearInterval(t);
   }, [reload]);
+
+  usePolling(reload, POLL_INTERVAL_MS, true, filterDept);
 
   return (
     <>

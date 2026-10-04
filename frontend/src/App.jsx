@@ -19,6 +19,7 @@ import {
   SHEETS_PER_PACKET,
 } from "./config.js";
 import { ChatWidget, AdminChatPage } from "./ChatWidget.jsx";
+import { usePolling } from "./usePolling.js";
 import {
   ArrowRight,
   Calendar,
@@ -3978,19 +3979,16 @@ function DeptCompletedDropdown({
 
 function useLowStockBlink() {
   const [low, setLow] = useState(false);
-  useEffect(() => {
-    if (ROLE !== "PRINTING" && !IS_ADMIN) return;
-    const check = () =>
+  const enabled = ROLE === "PRINTING" || IS_ADMIN;
+  usePolling(
+    () =>
       api
         .paperStockStats()
-        .then((d) => {
-          setLow((d.low_stock_sizes || []).length > 0);
-        })
-        .catch(() => {});
-    check();
-    const t = setInterval(check, POLL_INTERVAL_MS);
-    return () => clearInterval(t);
-  }, []);
+        .then((d) => setLow((d.low_stock_sizes || []).length > 0))
+        .catch(() => {}),
+    30000,
+    enabled,
+  );
   return low;
 }
 
@@ -5931,16 +5929,16 @@ function CompactCard({ job }) {
 function LivePanel() {
   const [jobs, setJobs] = useState([]);
   const [open, setOpen] = useState(false);
+  const load = () =>
+    api
+      .jobs()
+      .then(setIfChanged(setJobs))
+      .catch(() => {});
+
   useEffect(() => {
-    const load = () =>
-      api
-        .jobs()
-        .then(setIfChanged(setJobs))
-        .catch(() => {});
     load();
-    const t = setInterval(load, POLL_INTERVAL_MS);
-    return () => clearInterval(t);
-  }, []);
+  }, []); // one fetch so the header count shows
+  usePolling(load, POLL_INTERVAL_MS, open); // keep polling only while expanded
   const active = jobs.filter((j) => !j.is_fully_completed);
   return (
     <div style={{ marginTop: 28 }}>
@@ -6434,11 +6432,7 @@ function ReturnedToMePanel({ dept, addToast }) {
       .catch(() => {});
   }, [dept]);
 
-  useEffect(() => {
-    load();
-    const t = setInterval(load, POLL_INTERVAL_MS);
-    return () => clearInterval(t);
-  }, [load]);
+  usePolling(load, POLL_INTERVAL_MS, true, dept);
 
   function openJob(m) {
     api
@@ -6609,16 +6603,9 @@ function ReturnedAlbumsPanel() {
   const [rows, setRows] = useState(null);
   const [viewJob, setViewJob] = useState(null);
 
-  useEffect(() => {
-    const load = () =>
-      api
-        .openReturns()
-        .then(setIfChanged(setRows))
-        .catch(() => {});
-    load();
-    const t = setInterval(load, POLL_INTERVAL_MS);
-    return () => clearInterval(t);
-  }, []);
+  usePolling(() =>
+    api.openReturns().then(setIfChanged(setRows)).catch(() => {}),
+  );
 
   if (!rows)
     return (
@@ -7368,17 +7355,20 @@ function EntryPage() {
         return prev === next ? prev : next;
       });
     } catch {}
-    try {
-      const pn = await api.knownPaymentNames();
-      setIfChanged(setKnownPayments)(pn?.names || []);
-    } catch {}
+    
   }, []);
 
+ usePolling(reload);
+
+  const loadKnownPayments = useCallback(() => {
+    api
+      .knownPaymentNames()
+      .then((pn) => setIfChanged(setKnownPayments)(pn?.names || []))
+      .catch(() => {});
+  }, []);
   useEffect(() => {
-    reload();
-    const t = setInterval(reload, POLL_INTERVAL_MS);
-    return () => clearInterval(t);
-  }, [reload]);
+    loadKnownPayments();
+  }, [loadKnownPayments]);
 
   // Tick every second to drive countdown + auto-hide
   useEffect(() => {
@@ -7459,6 +7449,7 @@ function EntryPage() {
       setPaymentBy("");
       setShowNewPayment(false);
       reload();
+      loadKnownPayments();
       setAlbumTypeJob(created); // ← ADD: triggers the modal
     } catch (err) {
       add(err.message, "error");
@@ -8436,6 +8427,7 @@ function EntryPage() {
           onSaved={() => {
             setPaymentJob(null);
             reload();
+            loadKnownPayments();
           }}
           addToast={add}
         />
@@ -9025,7 +9017,7 @@ function AlbumCountPanel({ hideHeader = false }) {
         .then(setIfChanged(setData))
         .catch(() => {});
     load();
-    const t = setInterval(load, 10_000);
+      const t = setInterval(() => !document.hidden && load(), 60_000);
     return () => clearInterval(t);
   }, [year, month]);
 
@@ -9679,7 +9671,7 @@ function OperatorStatsPanel({ hideHeader = false }) {
         .then(setIfChanged(setData))
         .catch(() => {});
     load();
-    const t = setInterval(load, 10_000);
+      const t = setInterval(() => !document.hidden && load(), 60_000);
     return () => clearInterval(t);
   }, [year, month]);
 
@@ -10837,11 +10829,7 @@ function StationPage({ deptKey }) {
     } catch {}
   }, [deptKey]);
 
-  useEffect(() => {
-    reload();
-    const t = setInterval(reload, POLL_INTERVAL_MS);
-    return () => clearInterval(t);
-  }, [reload]);
+  usePolling(reload, POLL_INTERVAL_MS, true, deptKey);
 
   useEffect(() => {
     if (!selMonth) {
@@ -12767,13 +12755,8 @@ function DamagesPage({ deptKey }) {
   useEffect(() => {
     setPage(1);
   }, [selectedDate, activeDept]);
-  useEffect(() => {
-    reload();
-  }, [reload]);
-  useEffect(() => {
-    const t = setInterval(reload, POLL_INTERVAL_MS);
-    return () => clearInterval(t);
-  }, [reload]);
+
+ usePolling(reload, POLL_INTERVAL_MS, true, `${activeDept}|${page}|${selectedDate}`);
 
   const accent = isAdminView
     ? "var(--red)"
@@ -14041,19 +14024,14 @@ function PapersPage() {
   useEffect(() => {
     setPage(1);
   }, [selectedDate]);
-  useEffect(() => {
-    reloadStock();
-  }, [reloadStock]);
-  useEffect(() => {
-    reloadUsage();
-  }, [reloadUsage]);
-  useEffect(() => {
-    const t = setInterval(() => {
-      reloadStock();
-      reloadUsage();
-    }, POLL_INTERVAL_MS);
-    return () => clearInterval(t);
-  }, [reloadStock, reloadUsage]);
+
+  usePolling(reloadStock);
+    usePolling(
+      reloadUsage,
+      POLL_INTERVAL_MS,
+      true,
+      `${debouncedSearch}|${page}|${selectedDate}`,
+    );
 
   function reloadAll() {
     reloadStock();
@@ -15754,16 +15732,9 @@ function DeptTotalsPanel({ addToast, hideHeader = false }) {
   const [selectedMonthTotal, setSelectedMonthTotal] = useState({});
   const isMobile = useIsMobile();
 
-  useEffect(() => {
-    const load = () =>
-      api
-        .deptStats()
-        .then(setIfChanged(setData))
-        .catch(() => {});
-    load();
-    const t = setInterval(load, POLL_INTERVAL_MS);
-    return () => clearInterval(t);
-  }, []);
+  usePolling(() =>
+    api.deptStats().then(setIfChanged(setData)).catch(() => {}),
+  );
 
   const rows = [
     { key: "PENDING_PRINT", label: "Pending", tag: "AWAITING PRINT" },
@@ -16314,8 +16285,9 @@ function AlbumTypeBreakdownPanel({ dept, accent = "var(--amber)" }) {
   useEffect(() => {
     reload();
   }, [reload]);
+
   useEffect(() => {
-    const t = setInterval(reload, POLL_INTERVAL_MS);
+    const t = setInterval(() => !document.hidden && reload(), 30000);
     return () => clearInterval(t);
   }, [reload]);
 
@@ -16721,166 +16693,7 @@ function AlbumTypeBreakdownPanel({ dept, accent = "var(--amber)" }) {
   );
 }
 
-function MachineStatsPanel() {
-  const [data, setData] = useState(null);
-  const isMobile = useIsMobile();
-  useEffect(() => {
-    const load = () =>
-      api
-        .deptStats()
-        .then(setIfChanged(setData))
-        .catch(() => {});
-    load();
-    const t = setInterval(load, POLL_INTERVAL_MS);
-    return () => clearInterval(t);
-  }, []);
 
-  const machines = data?.machines || { monthly: {}, daily: {} };
-  const rows = [
-    { key: "GREEN_2", label: "Green II", accent: "var(--text-pri)" },
-    { key: "GREEN_3", label: "Green III", accent: "var(--text-pri)" },
-    { key: "EPSON", label: "Epson", accent: "var(--text-pri)" },
-    { key: "GREEN_3_NEW", label: "Green IV", accent: "var(--text-pri)" },
-  ];
-
-  return (
-    <div
-      style={{
-        background: "var(--card-bg)",
-        border: "1px solid var(--border)",
-        borderRadius: 16,
-        padding: 20,
-        boxShadow: "0 8px 30px rgba(0,0,0,0.20)",
-      }}
-    >
-      {/* Header */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 18,
-        }}
-      >
-        <div>
-          <div
-            style={{
-              fontSize: 18,
-              fontWeight: 700,
-              color: "var(--text-pri)",
-              fontFamily: "var(--fd)",
-              letterSpacing: ".04em",
-              textShadow: "var(--title-shadow)",
-            }}
-          >
-            Printing Machines
-          </div>
-        </div>
-      </div>
-
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: 12,
-        }}
-      >
-        {rows.map((r) => (
-          <div
-            key={r.key}
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              background: "var(--surface-sunken)",
-              border: "1px solid var(--border-strong)",
-              borderLeft: `5px solid ${r.accent}`,
-              borderRadius: 12,
-              padding: isMobile ? "10px 12px" : "14px 18px",
-              transition: ".25s",
-            }}
-          >
-            {/* Machine Name */}
-            <div>
-              <div
-                style={{
-                  color: r.accent,
-                  fontWeight: 700,
-                  fontSize: 15,
-                  letterSpacing: ".05em",
-                }}
-              >
-                {r.label}
-              </div>
-            </div>
-
-            {/* Stats */}
-            <div
-              style={{
-                display: "flex",
-                gap: isMobile ? 14 : 28,
-              }}
-            >
-              <div style={{ textAlign: "right" }}>
-                <div
-                  style={{
-                    fontSize: 12,
-                    fontweight: 700,
-                    color: "var(--text-pri)",
-                    letterSpacing: ".2em",
-                  }}
-                >
-                  Today
-                </div>
-
-                <div
-                  style={{
-                    fontSize: 24,
-                    fontWeight: 700,
-                    color: "#3c24a5",
-                  }}
-                >
-                  {machines.daily[r.key] ?? 0}
-                </div>
-              </div>
-
-              <div
-                style={{
-                  width: 1,
-                  background: "var(--border-strong)",
-                }}
-              />
-
-              <div style={{ textAlign: "right" }}>
-                <div
-                  style={{
-                    fontSize: 12,
-                    fontweight: 700,
-                    color: "var(--text-pri)",
-                    // textTransform: "uppercase",
-                    letterSpacing: ".2em",
-                  }}
-                >
-                  Monthly
-                </div>
-
-                <div
-                  style={{
-                    fontSize: 24,
-                    fontWeight: 700,
-                    color: "#2ECC71",
-                  }}
-                >
-                  {machines.monthly[r.key] ?? 0}
-                </div>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 const PRINTING_MACHINES = [
   {
@@ -16939,7 +16752,7 @@ function PrintingMachineBreakdownPanel({ hideHeader = false, ym = null }) {
         .then(setIfChanged(setTycData))
         .catch(() => {});
     load();
-    const t = setInterval(load, POLL_INTERVAL_MS);
+        const t = setInterval(() => !document.hidden && load(), 30000);
     return () => clearInterval(t);
   }, [ym]);
 
@@ -16950,7 +16763,7 @@ function PrintingMachineBreakdownPanel({ hideHeader = false, ym = null }) {
         .then(setIfChanged(setData))
         .catch(() => {});
     load();
-    const t = setInterval(load, POLL_INTERVAL_MS);
+        const t = setInterval(() => !document.hidden && load(), 30000);
     return () => clearInterval(t);
   }, [ym]);
 
@@ -16961,7 +16774,7 @@ function PrintingMachineBreakdownPanel({ hideHeader = false, ym = null }) {
         .then(setIfChanged(setTycStats))
         .catch(() => {});
     load();
-    const t = setInterval(load, POLL_INTERVAL_MS);
+        const t = setInterval(() => !document.hidden && load(), 30000);
     return () => clearInterval(t);
   }, []);
 
@@ -18391,157 +18204,7 @@ function PrintingMachineBreakdownPanel({ hideHeader = false, ym = null }) {
   );
 }
 
-function PrintingSectionPanel() {
-  const [data, setData] = useState(null);
-  const isMobile = useIsMobile();
-  useEffect(() => {
-    const load = () =>
-      api
-        .printingSection()
-        .then(setIfChanged(setData))
-        .catch(() => {});
-    load();
-    const t = setInterval(load, POLL_INTERVAL_MS);
-    return () => clearInterval(t);
-  }, []);
 
-  const rows = [
-    { key: "normal", label: "Magazine Prints", accent: "var(--text-pri)" },
-    { key: "story", label: "Story Albums", accent: "var(--text-pri)" },
-    { key: "rebind", label: "Rebinds", accent: "var(--text-pri)" },
-  ];
-
-  const m = data?.monthly || {};
-  const d = data?.daily || {};
-
-  return (
-    <div
-      style={{
-        background: "var(--card-bg)",
-        border: "1px solid var(--border)",
-        borderRadius: 16,
-        padding: 20,
-        boxShadow: "0 8px 30px rgba(0,0,0,0.20)",
-      }}
-    >
-      {/* Header */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 18,
-        }}
-      >
-        <div
-          style={{
-            fontSize: 18,
-            fontWeight: 700,
-            color: "var(--text-pri)",
-            fontFamily: "var(--fd)",
-            letterSpacing: ".04em",
-            textShadow: "var(--title-shadow)",
-          }}
-        >
-          Printing Section
-        </div>
-      </div>
-
-      {!data ? (
-        <div
-          style={{
-            textAlign: "center",
-            padding: "24px 0",
-            color: "var(--text-pri)",
-            fontFamily: "var(--fd)",
-            fontSize: 13,
-            letterSpacing: ".08em",
-          }}
-        >
-          LOADING…
-        </div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {rows.map((r) => (
-            <div
-              key={r.key}
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                background: "var(--surface-sunken)",
-                border: "1px solid var(--border-strong)",
-                borderLeft: `5px solid ${r.accent}`,
-                borderRadius: 12,
-                padding: isMobile ? "10px 12px" : "14px 18px",
-                transition: ".25s",
-              }}
-            >
-              {/* Metric name */}
-              <div>
-                <div
-                  style={{
-                    color: r.accent,
-                    fontWeight: 700,
-                    fontSize: 15,
-                    letterSpacing: ".05em",
-                  }}
-                >
-                  {r.label}
-                </div>
-              </div>
-
-              {/* Stats */}
-              <div style={{ display: "flex", gap: isMobile ? 14 : 28 }}>
-                <div style={{ textAlign: "right" }}>
-                  <div
-                    style={{
-                      fontSize: 12,
-                      fontweight: 700,
-                      color: "var(--text-pri)",
-                      letterSpacing: isMobile ? ".08em" : ".2em",
-                    }}
-                  >
-                    Today
-                  </div>
-                  <div
-                    style={{
-                      fontSize: isMobile ? 18 : 24,
-                      fontWeight: 700,
-                      color: "#3c24a5",
-                    }}
-                  >
-                    {d[r.key] ?? 0}
-                  </div>
-                </div>
-
-                <div style={{ width: 1, background: "var(--border-strong)" }} />
-
-                <div style={{ textAlign: "right" }}>
-                  <div
-                    style={{
-                      fontSize: 12,
-                      fontweight: 700,
-                      color: "var(--text-pri)",
-                      letterSpacing: ".2em",
-                    }}
-                  >
-                    Monthly
-                  </div>
-                  <div
-                    style={{ fontSize: 24, fontWeight: 700, color: "#2ECC71" }}
-                  >
-                    {m[r.key] ?? 0}
-                  </div>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 function DamageSummaryPanel({ hideHeader = false }) {
   const [data, setData] = useState(null);
@@ -18554,7 +18217,7 @@ function DamageSummaryPanel({ hideHeader = false }) {
         .then(setIfChanged(setData))
         .catch(() => {});
     load();
-    const t = setInterval(load, POLL_INTERVAL_MS);
+      const t = setInterval(() => !document.hidden && load(), 30000);
     return () => clearInterval(t);
   }, []);
 
@@ -18951,7 +18614,7 @@ function PaperStockSummaryPanel({ hideHeader = false }) {
         .then(setIfChanged(setData))
         .catch(() => {});
     load();
-    const t = setInterval(load, POLL_INTERVAL_MS);
+      const t = setInterval(() => !document.hidden && load(), 30000);
     return () => clearInterval(t);
   }, []);
 
@@ -19102,7 +18765,7 @@ function PaperUsageBreakdownPanel({ hideHeader = false }) {
         .then(setIfChanged(setData))
         .catch(() => {});
     load();
-    const t = setInterval(load, POLL_INTERVAL_MS);
+      const t = setInterval(() => !document.hidden && load(), 30000);
     return () => clearInterval(t);
   }, []);
 
@@ -19584,11 +19247,7 @@ function DashboardPage() {
     } catch {}
   }, []);
 
-  useEffect(() => {
-    reload();
-    const t = setInterval(reload, POLL_INTERVAL_MS);
-    return () => clearInterval(t);
-  }, [reload]);
+  usePolling(reload);
 
   async function del(job) {
     if (!window.confirm(`Delete job #${job.job_no}? This cannot be undone.`))
@@ -20060,7 +19719,7 @@ function HistoryPage() {
   const { toasts, add } = useToast();
   const isMobile = useIsMobile();
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = slDateStr(new Date());
   const [selectedDate, setSelectedDate] = useState(today);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -20896,7 +20555,7 @@ function buildPrintHTML(job) {
     </div>
   </div>
   <div class="chips">${chips.map(([l, v]) => `<span class="chip"><span class="lbl">${l}</span><span class="val">${v}</span></span>`).join("")}</div>
-  ${job.special_note ? `<div class="note"><div class="note-title">${(<Speech size={14} />)}Special Instructions</div>${job.special_note}</div>` : ""}
+  ${job.special_note ? `<div class="note"><div class="note-title">Special Instructions</div>${job.special_note}</div>` : ""}
   <table>
     <thead><tr><th>Stage</th><th>Status</th></tr></thead>
     <tbody>${stageRows.map(([label, status]) => `<tr><td>${label}</td><td>${status || "-"}</td></tr>`).join("")}</tbody>
