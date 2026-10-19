@@ -14,6 +14,11 @@ if os.getenv("ENV") == "production":
 class Settings:
     ENV = os.getenv("ENV", "local")
     DATABASE_URL = os.getenv("DATABASE_URL")
+    CLERK_JWKS_URL = os.getenv("CLERK_JWKS_URL")
+    CLERK_ISSUER = os.getenv("CLERK_ISSUER")
+    CLERK_AUTHORIZED_PARTIES = [
+        x.strip() for x in os.getenv("CLERK_AUTHORIZED_PARTIES", "").split(",") if x.strip()
+    ]
 
 
 settings = Settings()

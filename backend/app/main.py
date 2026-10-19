@@ -51,11 +51,14 @@ from .schemas import (
     PaperUsageEntryOut, 
     ThankYouCardOut
 )
+from .auth import get_current_user, require_roles
+
 
 app = FastAPI(
     title="i Lab Gampaha – Production Tracker API",
     version="4.1.0",
     docs_url="/api/docs",
+    dependencies=[Depends(get_current_user)],
 )
 
 app.add_middleware(
@@ -343,7 +346,7 @@ class PaperPriceUpdate(BaseModel):
     unit_price: int
 
 
-@app.patch("/api/paper-prices/{price_id}", response_model=PaperPriceOut)
+@app.patch("/api/paper-prices/{price_id}", response_model=PaperPriceOut,dependencies=[Depends(require_roles("ADMIN"))])
 def update_paper_price(price_id: int, payload: PaperPriceUpdate, db: Session = Depends(get_db)):
     row = db.query(PaperPrice).filter(PaperPrice.id == price_id).first()
     if not row:
@@ -355,7 +358,9 @@ def update_paper_price(price_id: int, payload: PaperPriceUpdate, db: Session = D
     db.refresh(row)
     return row
 
-@app.post("/api/paper-stock/reset-all", response_model=List[PaperStockOut])
+@app.post("/api/paper-stock/reset-all", response_model=List[PaperStockOut],
+dependencies=[Depends(require_roles("ADMIN"))])
+
 def reset_all_paper_stock(db: Session = Depends(get_db)):
     """Admin-only: zero out every paper size's balance.
     Does NOT touch paper_usage_entries or paper_packet_logs —
@@ -565,7 +570,8 @@ def _shift_to_new_date(dt: datetime, new_date_str: str) -> datetime:
     return shifted_sl - SL_TZ_OFFSET
 
 
-@app.get("/api/admin/jobs/{job_id}/timeline")
+@app.get("/api/admin/jobs/{job_id}/timeline",dependencies=[Depends(require_roles("ADMIN"))])
+
 def admin_job_timeline(job_id: int, db: Session = Depends(get_db)):
     job = _job_or_404(job_id, db)
     logs = (
@@ -600,7 +606,7 @@ def admin_job_timeline(job_id: int, db: Session = Depends(get_db)):
     }
 
 
-@app.patch("/api/admin/jobs/{job_id}/date-correction", response_model=JobCardOut)
+@app.patch("/api/admin/jobs/{job_id}/date-correction", response_model=JobCardOut,dependencies=[Depends(require_roles("ADMIN"))])
 def admin_fix_date(job_id: int, payload: DateCorrectionRequest, db: Session = Depends(get_db)):
     job  = _job_or_404(job_id, db)
     dept = payload.department.upper()
@@ -666,7 +672,7 @@ class AdminJobFullUpdate(BaseModel):
     box_pouch_status: Optional[str] = None
 
 
-@app.patch("/api/admin/jobs/{job_id}/full-edit", response_model=JobCardOut)
+@app.patch("/api/admin/jobs/{job_id}/full-edit", response_model=JobCardOut,dependencies=[Depends(require_roles("ADMIN"))])
 def admin_full_edit_job(job_id: int, payload: AdminJobFullUpdate, db: Session = Depends(get_db)):
     """Admin-only: edit ANY field on a job card, bypassing the production
     lock and the 4-minute edit window that normally apply."""
@@ -718,7 +724,7 @@ def admin_full_edit_job(job_id: int, payload: AdminJobFullUpdate, db: Session = 
     return _out(job, db)
 
 
-@app.delete("/api/admin/jobs/{job_id}/full-delete", status_code=204)
+@app.delete("/api/admin/jobs/{job_id}/full-delete", status_code=204,dependencies=[Depends(require_roles("ADMIN"))])
 def admin_full_delete_job(job_id: int, db: Session = Depends(get_db)):
     """Admin-only: delete a job card at any point in its lifecycle,
     bypassing the production lock and edit window."""
@@ -754,9 +760,10 @@ def _check_damage_editable(entry: DamageEntry, admin_override: bool = False):
 
 
 @app.patch("/api/damages/{damage_id}", response_model=DamageEntryOut)
-def update_damage(damage_id: int, payload: DamageUpdate, db: Session = Depends(get_db)):
+def update_damage(damage_id: int, payload: DamageUpdate,
+                  db: Session = Depends(get_db), user=Depends(get_current_user)):
     entry = _damage_or_404(damage_id, db)
-    _check_damage_editable(entry, admin_override=bool(payload.admin_override))
+    _check_damage_editable(entry, admin_override=(user["role"] == "ADMIN"))
 
     if payload.paper_price_id is not None:
         price = db.query(PaperPrice).filter(PaperPrice.id == payload.paper_price_id).first()
@@ -809,9 +816,10 @@ def update_damage(damage_id: int, payload: DamageUpdate, db: Session = Depends(g
     return _damage_out(entry)
 
 @app.delete("/api/damages/{damage_id}", status_code=204)
-def delete_damage(damage_id: int, db: Session = Depends(get_db), admin_override: bool = Query(False)):
+def delete_damage(damage_id: int, db: Session = Depends(get_db),
+                  user=Depends(get_current_user)):
     entry = _damage_or_404(damage_id, db)
-    _check_damage_editable(entry, admin_override=admin_override)
+    _check_damage_editable(entry, admin_override=(user["role"] == "ADMIN"))
     db.delete(entry)
     db.commit()
 
@@ -933,8 +941,11 @@ def advance(
     job_id: int, department: str,
     body: StageAdvanceRequest,
     db: Session = Depends(get_db),
+    user=Depends(get_current_user),
 ):
     dept = department.upper()
+    if user["role"] not in ("ADMIN", dept):
+        raise HTTPException(403, "Not your department")
     if dept not in DEPT_FIELD:
         raise HTTPException(400, f"Unknown department: {department}")
 
@@ -1033,8 +1044,11 @@ def set_delay_reason(
     job_id: int, department: str,
     body: DelayReasonRequest,
     db: Session = Depends(get_db),
+    user=Depends(get_current_user),
 ):
     dept = department.upper()
+    if user["role"] not in ("ADMIN", dept):
+        raise HTTPException(403, "Not your department")
     if dept not in DEPT_FIELD:
         raise HTTPException(400, f"Unknown department: {department}")
     if not body.reason.strip():

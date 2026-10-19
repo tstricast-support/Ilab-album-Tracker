@@ -4,10 +4,22 @@ import { API_BASE, POLL_INTERVAL_MS } from "./config.js";
 import { usePolling } from "./usePolling.js";
 
 async function chatFetch(path, opts = {}) {
+  let token = null;
+  try {
+    token = await window.Clerk?.session?.getToken();
+  } catch {}
+
+  const { headers: extraHeaders, ...rest } = opts;
+
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: { "Content-Type": "application/json", ...opts.headers },
-    ...opts,
+    ...rest,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...extraHeaders,
+    },
   });
+
   if (!res.ok) {
     let msg = res.statusText;
     try {

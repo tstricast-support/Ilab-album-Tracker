@@ -52,10 +52,23 @@ import "./index.css";
 
 // ── API ───────────────────────────────────────────────────────────────────────
 async function apiFetch(path, opts = {}) {
+  // Get the Clerk session token (null if not signed in yet)
+  let token = null;
+  try {
+    token = await window.Clerk?.session?.getToken();
+  } catch {}
+
+  const { headers: extraHeaders, ...rest } = opts;
+
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: { "Content-Type": "application/json", ...opts.headers },
-    ...opts,
+    ...rest,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...extraHeaders,
+    },
   });
+
   if (!res.ok) {
     let msg = res.statusText;
     try {
@@ -4468,6 +4481,8 @@ function Shell({ title, accent = "var(--amber)", topRightPrimary, topRightMid, t
               {/* Primary action stays visible */}
               {topRightPrimary}
 
+              
+
               {/* Hamburger toggle */}
               <button
                 onClick={() => setMenuOpen((o) => !o)}
@@ -4763,6 +4778,7 @@ function Shell({ title, accent = "var(--amber)", topRightPrimary, topRightMid, t
               >
                 <Download size={14} />
               </button>
+
 
               {topRight}
             </>

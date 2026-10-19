@@ -8,6 +8,8 @@ from pydantic import BaseModel
 from sqlalchemy import or_, and_, func, desc
 from sqlalchemy.orm import Session
 
+from ..auth import get_current_user
+
 from ..models import JobCard, ChatMessage, ChatMessageItem, get_db
 from ..schemas import ChatMessageOut, ChatMessageItemOut
 
@@ -150,10 +152,13 @@ class ChatSendRequest(BaseModel):
 
 
 @router.post("/send", response_model=ChatMessageOut, status_code=201)
-def send_message(payload: ChatSendRequest, db: Session = Depends(get_db)):
+def send_message(payload: ChatSendRequest, db: Session = Depends(get_db),
+                 user=Depends(get_current_user)):
     if not payload.message_text.strip():
         raise HTTPException(400, "Message cannot be empty")
     sender = _dept(payload.sender_department)
+    if user["role"] != "ADMIN" and sender != user["role"]:
+        raise HTTPException(403, "You can only send as your own department")
     recipient = _dept(payload.recipient_department)
 
     msg = ChatMessage(
@@ -178,8 +183,11 @@ class AlbumListRequest(BaseModel):
 
 
 @router.post("/album-list-request", response_model=ChatMessageOut, status_code=201)
-def album_list_request(payload: AlbumListRequest, db: Session = Depends(get_db)):
+def album_list_request(payload: AlbumListRequest, db: Session = Depends(get_db),
+                       user=Depends(get_current_user)):
     sender = _dept(payload.sender_department)
+    if user["role"] != "ADMIN" and sender != user["role"]:
+        raise HTTPException(403, "You can only send as your own department")
     recipient = _dept(payload.recipient_department)
 
     if sender != "PRINTING" or recipient != "BINDING":
@@ -195,6 +203,7 @@ def album_list_request(payload: AlbumListRequest, db: Session = Depends(get_db))
         JobCard.delivery_type == "PRONTO",
         JobCard.created_at >= since,
     )
+
     if payload.album_type:
         at = payload.album_type.strip().upper()
         if at == "NORMAL":
@@ -279,8 +288,11 @@ class ReplyWithItemsRequest(BaseModel):
 
 
 @router.post("/reply-with-items", response_model=ChatMessageOut, status_code=201)
-def reply_with_items(payload: ReplyWithItemsRequest, db: Session = Depends(get_db)):
+def reply_with_items(payload: ReplyWithItemsRequest, db: Session = Depends(get_db),
+                     user=Depends(get_current_user)):
     sender = _dept(payload.sender_department)
+    if user["role"] != "ADMIN" and sender != user["role"]:
+        raise HTTPException(403, "You can only send as your own department")
     recipient = _dept(payload.recipient_department)
 
     source_items = (

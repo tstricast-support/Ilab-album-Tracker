@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
+from ..auth import get_current_user
 
 from ..models import JobCard, AlbumMovement, ChatMessage, get_db
 from ..schemas import AlbumMovementOut, _str
@@ -89,8 +90,11 @@ class ReturnSendRequest(BaseModel):
 
 
 @router.post("/send", response_model=AlbumMovementOut, status_code=201)
-def send_return(payload: ReturnSendRequest, db: Session = Depends(get_db)):
+def send_return(payload: ReturnSendRequest, db: Session = Depends(get_db),
+                user=Depends(get_current_user)):
     src = _dept(payload.from_department)
+    if user["role"] != "ADMIN" and src != user["role"]:
+        raise HTTPException(403, "You can only return albums from your own department")
     dst = _dept(payload.to_department)
 
     if not payload.reason.strip():
@@ -99,6 +103,7 @@ def send_return(payload: ReturnSendRequest, db: Session = Depends(get_db)):
         raise HTTPException(400, "Your name is required")
     if DEPT_RANK[dst] >= DEPT_RANK[src]:
         raise HTTPException(400, "An album can only be returned to an EARLIER department.")
+
 
     job = db.query(JobCard).filter(JobCard.id == payload.job_id).first()
     if not job:
