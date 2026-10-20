@@ -7152,6 +7152,7 @@ function JobCardFull({
 // ── Shared field sections (used in both create & edit forms) ────────
 function JobFields({ job }) {
   const [laserEnabled, setLaserEnabled] = useState(!!job?.laser_cover_type);
+  const [deliveryType, setDeliveryType] = useState(job?.delivery_type || "PRONTO");
   const laserInputRef = useRef(null);
 
   return (
@@ -7271,21 +7272,32 @@ function JobFields({ job }) {
         </Sec>
 
         {/* ───────────────── DELIVERY ───────────────── */}
-        <Sec title="Delivery Type" accent="#ff009d">
-          <div>
-            <label>Delivery Type</label>
-
-            <select
-              name="delivery_type"
-              defaultValue={job?.delivery_type || "PRONTO"}
-            >
-              <option value="PRONTO">PRONTO</option>
-              <option value="CUSTOMER">CUSTOMER</option>
-              <option value="PICKME">PICKME</option>
-              <option value="BUS">BUS</option>
-            </select>
-          </div>
-        </Sec>
+    <Sec title="Delivery Type" accent="#ff009d">
+      <div>
+        <label>Delivery Type</label>
+        <select
+          name="delivery_type"
+          value={deliveryType}
+          onChange={(e) => setDeliveryType(e.target.value)}
+        >
+          <option value="PRONTO">PRONTO</option>
+          <option value="CUSTOMER">CUSTOMER</option>
+          <option value="PICKME">PICKME</option>
+          <option value="BUS">BUS</option>
+        </select>
+      </div>
+      {deliveryType === "PRONTO" && (
+        <div style={{ marginTop: 10 }}>
+          <label>Pronto Address (name, address, phone)</label>
+          <textarea
+            name="pronto_address"
+            rows={5}
+            placeholder={"YASITH WIJESURIYA.\n305 / 2.\n IHALAYAGODA,\n IMBULGODA.\n0783498886"}
+            defaultValue={job?.pronto_address || ""}
+          />
+        </div>
+      )}
+   </Sec>
       </div>
 
       <Sec title="Special Instructions">
@@ -7556,6 +7568,10 @@ function EntryPage() {
         dele_date: new Date(dele_date).toISOString(),
         priority: fd.get("priority") || "NORMAL",
         delivery_type: fd.get("delivery_type") || "PRONTO",
+        pronto_address:
+          (fd.get("delivery_type") || "PRONTO") === "PRONTO"
+            ? (fd.get("pronto_address") || "").trim()
+            : "",
         special_note: fd.get("special_note") || "",
         print_size: fd.get("print_size") || "",
         print_pages: fd.get("print_pages") || "",
@@ -7615,6 +7631,10 @@ async function handleAlbumTypeConfirm(type) {
         dele_date: new Date(fd.get("dele_date")).toISOString(),
         priority: fd.get("priority"),
         delivery_type: fd.get("delivery_type"),
+        pronto_address:
+  fd.get("delivery_type") === "PRONTO"
+    ? (fd.get("pronto_address") || "").trim()
+    : "",
         special_note: fd.get("special_note") || "",
         print_size: fd.get("print_size") || "",
         print_pages: fd.get("print_pages") || "",
@@ -20815,6 +20835,50 @@ function buildAlbumCardHTML(job) {
   return wrapHTML(`Job Card - ${job.job_no}`, body);
 }
 
+const PRONTO_FROM_LINES = [
+  "ILAB GAMPAHA",
+  "NO : 06 SUDHARSHANA MAWATHA ,",
+  "GAMPAHA",
+  "SURESH - 07 1032 1032 / 033 22 39 000.",
+];
+
+function buildProntoLabelHTML(job) {
+  const toHTML = esc((job.pronto_address || "").trim()).replace(/\n/g, "<br>");
+  const fromHTML = PRONTO_FROM_LINES.map(esc).join("<br>");
+  const red = "#e53935";
+  const box = (inner) =>
+    `<svg width="64" height="64" viewBox="0 0 64 64" fill="none" stroke="${red}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="60" height="60"/>${inner}</svg>`;
+  const icons = [
+    // hands + box
+    box('<path d="M20 28l12-7 12 7v13l-12 7-12-7z"/><path d="M20 28l12 7 12-7M32 35v13"/><path d="M10 44c4 8 10 12 18 12M54 44c-4 8-10 12-18 12"/>'),
+    // this side up
+    box('<path d="M22 34V14M16 20l6-6 6 6M42 34V14M36 20l6-6 6 6"/><path d="M12 42h40M12 50h40"/>'),
+    // fragile glass
+    box('<path d="M16 12h32l-4 14c-2 6-8 8-12 8s-10-2-12-8z"/><path d="M32 34v16M22 52h20"/>'),
+    // keep dry
+    box('<path d="M10 32c0-12 10-20 22-20s22 8 22 20z"/><path d="M32 32v18c0 4-6 4-6 0"/>'),
+  ].join("");
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Pronto Label - ${esc(job.job_no)}</title>
+  <style>
+    @page { size: A5 landscape; margin: 10mm; }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; margin: 0; color: #000; }
+    .row { display: flex; gap: 14px; }
+    .tag { font-weight: 900; font-size: 20px; min-width: 70px; text-align: right; padding-top: 3px; }
+    .txt { font-weight: 900; font-size: 24px; line-height: 1.35; text-transform: uppercase; }
+    .from .tag { font-size: 18px; }
+    .from .txt { font-size: 17px; line-height: 1.4; }
+    .icons { display: flex; gap: 6px; justify-content: center; margin: 14px 0 0; }
+    .fragile { text-align: center; color: ${red}; font-weight: 900; font-size: 22px; letter-spacing: .04em; margin: 2px 0 14px; }
+  </style></head><body>
+    <div class="row"><div class="tag">TO :</div><div class="txt">${toHTML}</div></div>
+    <div class="icons">${icons}</div>
+    <div class="fragile">FRAGILE</div>
+    <div class="row from"><div class="tag">FROM :</div><div class="txt">${fromHTML}</div></div>
+  </body></html>`;
+}
+
 function buildBoxCardHTML(job) {
   const { name, size } = splitBox(job.box_type);
   const body = `
@@ -20866,6 +20930,8 @@ function PrintJobCardModal({ job, onClose }) {
   const isMobile = useIsMobile();
   const hasCover = !!(job.laser_cover_type || "").trim();
   const hasBox = !!(job.box_type || "").trim();
+  const hasProntoAddress =
+    job.delivery_type === "PRONTO" && !!(job.pronto_address || "").trim();
 
   const options = [
     {
@@ -20892,6 +20958,18 @@ function PrintJobCardModal({ job, onClose }) {
       enabled: hasCover,
       build: buildCoverCardHTML,
     },
+    {
+  key: "pronto",
+  label: "Pronto Address Label",
+  sub: hasProntoAddress
+    ? (job.pronto_address || "").split("\n")[0]
+    : job.delivery_type === "PRONTO"
+      ? "No address entered yet"
+      : "Delivery type is not PRONTO",
+  color: "#e53935",
+  enabled: hasProntoAddress,
+  build: buildProntoLabelHTML,
+},
   ];
 
   return (

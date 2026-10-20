@@ -89,6 +89,7 @@ class JobCardCreate(BaseModel):
     priority:         PriorityEnum     = PriorityEnum.NORMAL
     delivery_type:    DeliveryTypeEnum = DeliveryTypeEnum.PRONTO
     special_note:     Optional[str] = None
+    pronto_address: Optional[str] = None
     print_size:       Optional[str] = None
     print_pages:      Optional[str] = None
     laser_cover_type: Optional[str] = None
@@ -140,6 +141,7 @@ class JobCardUpdate(BaseModel):
     priority:         Optional[PriorityEnum] = None
     delivery_type:    Optional[DeliveryTypeEnum] = None
     special_note:     Optional[str] = None
+    pronto_address: Optional[str] = None
     print_size:       Optional[str] = None
     print_pages:      Optional[str] = None
     laser_cover_type: Optional[str] = None
@@ -164,6 +166,7 @@ EDIT_FIELD_LABELS = {
     "priority": "Priority", "delivery_type": "Delivery Type", "special_note": "Special Note",
     "print_size": "Print Size", "print_pages": "Pages", "laser_cover_type": "Laser Cover",
     "laminate_type": "Laminate", "bind_rexing_no": "Rexing", "box_type": "Box Type",
+    "pronto_address": "Pronto Address",
     "payment_by": "Payment By",
 }
 
@@ -254,8 +257,9 @@ def create_job(payload: JobCardCreate, db: Session = Depends(get_db)):
         laminate_type    = payload.laminate_type,
         bind_rexing_no   = payload.bind_rexing_no,
         box_type         = payload.box_type,
-        payment_by         = payment_name.title() if payment_name else None,   # ← NEW
-        payment_updated_at = datetime.utcnow() if payment_name else None,       # ← NEW
+        payment_by         = payment_name.title() if payment_name else None,   
+        payment_updated_at = datetime.utcnow() if payment_name else None,       
+        pronto_address   = (payload.pronto_address or "").strip() or None,
         status_printing      = StageStatusEnum.PENDING,
         status_laminating    = StageStatusEnum.PENDING,
         status_laser_cutting = laser_status,
@@ -717,6 +721,7 @@ class AdminJobFullUpdate(BaseModel):
     priority:         Optional[PriorityEnum] = None
     delivery_type:    Optional[DeliveryTypeEnum] = None
     special_note:     Optional[str] = None
+    pronto_address: Optional[str] = None
     print_size:       Optional[str] = None
     print_pages:      Optional[str] = None
     laser_cover_type: Optional[str] = None

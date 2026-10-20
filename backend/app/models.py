@@ -166,7 +166,9 @@ class JobCard(Base):
     laser_cover_type = Column(String(256), nullable=True)
     laminate_type    = Column(String(256), nullable=True)
     bind_rexing_no   = Column(String(128), nullable=True)
-    box_type         = Column(String(256), nullable=True)  
+    box_type         = Column(String(256), nullable=True)
+
+    pronto_address = Column(Text, nullable=True)  
 
     payment_by         = Column(String(128), nullable=True)
     payment_updated_at = Column(DateTime,    nullable=True)
@@ -497,6 +499,10 @@ def run_migration():
                 conn.execute(text("ALTER TABLE job_cards ADD COLUMN album_type VARCHAR(16)"))
                 conn.commit()
 
+            if "pronto_address" not in job_cols:
+                conn.execute(text("ALTER TABLE job_cards ADD COLUMN pronto_address TEXT"))
+                conn.commit()
+
         damage_cols = {c["name"] for c in inspector.get_columns("damage_entries")}
         with engine.connect() as conn:
             if "job_no" not in damage_cols:
@@ -508,6 +514,8 @@ def run_migration():
             if "other_item" not in damage_cols:                       
                 conn.execute(text("ALTER TABLE damage_entries ADD COLUMN other_item VARCHAR(256)"))
                 conn.commit()
+
+            
 
         tyc_cols = {c["name"] for c in inspector.get_columns("thankyou_cards")} if "thankyou_cards" in inspector.get_table_names() else set()
         if tyc_cols and "machine" not in tyc_cols:
@@ -567,6 +575,11 @@ def run_migration():
         conn.execute(text("""
             ALTER TABLE job_cards
             ADD COLUMN IF NOT EXISTS box_type VARCHAR(256);
+        """))
+
+        conn.execute(text("""
+            ALTER TABLE job_cards
+            ADD COLUMN IF NOT EXISTS pronto_address TEXT;
         """))
 
         conn.execute(text("""

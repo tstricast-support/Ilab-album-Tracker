@@ -88,6 +88,7 @@ class JobCardOut(BaseModel):
     laminate_type: Optional[str]
     bind_rexing_no: Optional[str]
     box_type: Optional[str]
+    pronto_address: Optional[str] = None
     payment_by: Optional[str] = None
     payment_updated_at: Optional[datetime] = None
     box_pouch_status: Optional[str] = None
