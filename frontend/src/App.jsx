@@ -5206,6 +5206,61 @@ function SpecialNote({ note }) {
   );
 }
 
+// ── Edit history (who changed what, and when) ─────────────────────────
+function EditHistoryBlock({ logs }) {
+  if (!logs || logs.length === 0) return null;
+  return (
+    <div
+      style={{
+        background: "var(--info-bg)",
+        border: "1px solid var(--info-border)",
+        borderLeft: "4px solid var(--cyan)",
+        borderRadius: 6,
+        overflow: "hidden",
+      }}
+    >
+      <div
+        style={{
+          padding: "6px 12px",
+          borderBottom: "1px solid var(--info-border)",
+          fontSize: 12,
+          fontWeight: 800,
+          textTransform: "uppercase",
+          letterSpacing: ".12em",
+          color: "var(--text-pri)",
+        }}
+      >
+        Edited After Entry ({logs.length})
+      </div>
+      <div style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
+        {[...logs].reverse().map((l) => (
+          <div key={l.id} style={{ fontSize: 12, color: "var(--text-pri)" }}>
+            <div style={{ fontWeight: 800 }}>
+              👤 {l.edited_by}
+              <span style={{ fontWeight: 600, color: "var(--text-dim)", marginLeft: 8 }}>
+                {parseUTC(l.edited_at).toLocaleString("en-GB", {
+                  day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
+                })}
+              </span>
+            </div>
+            <ul style={{ margin: "3px 0 0", paddingLeft: 18, lineHeight: 1.6 }}>
+              {l.changes.map((c, i) => (
+                <li key={i}>
+                  <b>{c.label}:</b>{" "}
+                  <span style={{ textDecoration: "line-through", color: "var(--red)" }}>
+                    {c.old || "empty"}
+                  </span>{" "}
+                  → <span style={{ color: "var(--green)", fontWeight: 700 }}>{c.new || "empty"}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Operator tag ──────────────────────────────────────────────────────────────
 function OperatorTag({ log, dept }) {
   if (!log?.operator_name && !log?.laminated_by) return null;
@@ -6813,6 +6868,24 @@ function JobCardFull({
                 </span>
               )}
               <AlbumTypeBadge type={job.album_type} />
+
+              {/* ── NEW: EDITED badge ── */}
+              {job.edit_logs?.length > 0 && (
+                <span
+                  style={{
+                    fontSize: 11,
+                    padding: "3px 9px",
+                    borderRadius: 4,
+                    fontWeight: 800,
+                    background: "var(--info-bg)",
+                    color: "var(--cyan)",
+                    border: "1px solid var(--cyan)",
+                  }}
+                >
+                EDITED
+                </span>
+              )}
+
               {delayed && (
                 <span
                   className="blink"
@@ -6948,6 +7021,7 @@ function JobCardFull({
         <BoxPouchField job={job} addToast={addToast} />
         <LocationChip movement={job.open_return} />
         <SpecialNote note={job.special_note} />
+        <EditHistoryBlock logs={job.edit_logs} />
         <StageRow job={job} />
         <DelayReasonsList logs={job.logs} />
 
@@ -7331,7 +7405,6 @@ function AlbumTypeModal({ job, onConfirm }) {
   );
 }
 
-// ── Entry page ────────────────────────────────────────────────────────────────
 function EntryPage() {
   const { toasts, add } = useToast();
   const [busy, setBusy] = useState(false);
@@ -7351,7 +7424,18 @@ function EntryPage() {
   const formRef = useRef(null);
   const editRef = useRef(null);
   const isMobile = useIsMobile();
-  const LOCK_MS = 240_000;
+
+  const EDIT_MS = 24 * 3600 * 1000; // edit window: 24 hours
+  const DELETE_MS = 240_000; // delete window: 4 minutes
+  const [editorName, setEditorName] = useState(
+    () => localStorage.getItem(`ilab-editor-name:${ROLE}`) || "",
+  );
+
+  function fmtLeft(ms) {
+    const h = Math.floor(ms / 3600000);
+    const m = Math.floor((ms % 3600000) / 60000);
+    return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  }
 
   // ── UTC-safe helper - SQLite omits "Z", JS then parses as LOCAL time ────────
   function parseCreated(job) {
@@ -7371,10 +7455,9 @@ function EntryPage() {
         return prev === next ? prev : next;
       });
     } catch {}
-    
   }, []);
 
- usePolling(reload);
+  usePolling(reload);
 
   const loadKnownPayments = useCallback(() => {
     api
@@ -7392,24 +7475,23 @@ function EntryPage() {
     return () => clearInterval(t);
   }, []);
 
-  // Auto-close edit modal if window expires while it is open
-  // FIX: was `job.created_at` (undefined variable) - now correctly uses `editJob`
+  // Auto-close edit modal if the 24h window expires while it is open
   useEffect(() => {
     if (!editJob) return;
     const elapsed = now - parseCreated(editJob);
-    if (elapsed >= LOCK_MS) {
+    if (elapsed >= EDIT_MS) {
       setEditJob(null);
-      add("Edit window expired. Job is now locked.", "error");
+      add("Edit window (24h) expired. Job is now locked.", "error");
     }
   }, [now, editJob]);
 
-  // Auto-close delete modal if window expires while it is open
+  // Auto-close delete modal if the 4-minute window expires while it is open
   useEffect(() => {
     if (!deleteJob) return;
     const elapsed = now - parseCreated(deleteJob);
-    if (elapsed >= LOCK_MS) {
+    if (elapsed >= DELETE_MS) {
       setDeleteJob(null);
-      add("Edit window expired. Job is now locked.", "error");
+      add("Delete window expired. Job can no longer be deleted.", "error");
     }
   }, [now, deleteJob]);
 
@@ -7424,9 +7506,14 @@ function EntryPage() {
     );
   }
 
+  // Editable for 24h, even if the job is already in production
   function isEditable(job) {
-    const elapsed = now - parseCreated(job);
-    return elapsed < LOCK_MS && !isInProduction(job);
+    return now - parseCreated(job) < EDIT_MS;
+  }
+
+  // Delete: only first 4 minutes AND not yet in production
+  function isDeletable(job) {
+    return now - parseCreated(job) < DELETE_MS && !isInProduction(job);
   }
 
   // ── Create ────────────────────────────────────────────────────────────
@@ -7443,7 +7530,6 @@ function EntryPage() {
     setBusy(true);
     try {
       const created = await api.createJob({
-        // ← capture the result
         job_no,
         customer,
         couple_name: fd.get("couple_name") || "",
@@ -7466,7 +7552,7 @@ function EntryPage() {
       setShowNewPayment(false);
       reload();
       loadKnownPayments();
-      setAlbumTypeJob(created); // ← ADD: triggers the modal
+      setAlbumTypeJob(created);
     } catch (err) {
       add(err.message, "error");
     } finally {
@@ -7493,14 +7579,19 @@ function EntryPage() {
   async function handleEditSave(e) {
     e.preventDefault();
     if (!isEditable(editJob)) {
-      add("Edit window expired. Job is now locked.", "error");
+      add("Edit window (24h) expired. Job is now locked.", "error");
       setEditJob(null);
+      return;
+    }
+    if (!editorName.trim()) {
+      add("Please enter your name before saving.", "error");
       return;
     }
     const fd = new FormData(e.currentTarget);
     setBusy(true);
     try {
       await api.updateJob(editJob.id, {
+        edited_by: editorName.trim(),
         couple_name: fd.get("couple_name") || "",
         order_no: fd.get("order_no") || "",
         dele_date: new Date(fd.get("dele_date")).toISOString(),
@@ -7514,6 +7605,9 @@ function EntryPage() {
         bind_rexing_no: fd.get("bind_rexing_no") || "",
         box_type: fd.get("box_type") || "",
       });
+      try {
+        localStorage.setItem(`ilab-editor-name:${ROLE}`, editorName.trim());
+      } catch {}
       add(`✓ Job #${editJob.job_no} updated.`, "success");
       setEditJob(null);
       reload();
@@ -7526,8 +7620,8 @@ function EntryPage() {
 
   // ── Delete ────────────────────────────────────────────────────────────
   async function handleDelete() {
-    if (!isEditable(deleteJob)) {
-      add("Edit window expired. Job is now locked.", "error");
+    if (!isDeletable(deleteJob)) {
+      add("Delete window expired. Job is now locked.", "error");
       setDeleteJob(null);
       return;
     }
@@ -7783,7 +7877,7 @@ function EntryPage() {
               width: "fit-content",
             }}
           >
-            RECENT JOB CARDS - EDIT / DELETE
+            RECENT JOB CARDS - EDIT (24h) / DELETE (4 min)
           </div>
 
           <SearchBar
@@ -7813,14 +7907,16 @@ function EntryPage() {
                     (new Date(job.dele_date) - new Date()) / 86400000,
                   );
                   const elapsed = now - parseCreated(job);
-                  const secs = Math.ceil(Math.max(0, LOCK_MS - elapsed) / 1000);
+                  const remaining = Math.max(0, EDIT_MS - elapsed);
+                  const urgent = remaining < 3600000; // last hour
+                  const canDelete = isDeletable(job);
 
                   return (
                     <div
                       key={job.id}
                       style={{
                         background: "var(--bg2)",
-                        border: `1px solid ${secs <= 15 ? "var(--red)" : "var(--border)"}`,
+                        border: `1px solid ${urgent ? "var(--red)" : "var(--border)"}`,
                         borderRadius: 8,
                         padding: "12px 14px",
                         display: "flex",
@@ -7895,6 +7991,21 @@ function EntryPage() {
                               💰{job.payment_by}
                             </span>
                           )}
+                          {job.edit_logs?.length > 0 && (
+                            <span
+                              style={{
+                                fontSize: 11,
+                                padding: "2px 7px",
+                                borderRadius: 4,
+                                fontWeight: 800,
+                                background: "var(--info-bg)",
+                                color: "var(--cyan)",
+                                border: "1px solid var(--cyan)",
+                              }}
+                            >
+                              ✎ {job.edit_logs.length}
+                            </span>
+                          )}
                         </div>
                         <div
                           style={{
@@ -7937,27 +8048,23 @@ function EntryPage() {
                           flexShrink: 0,
                         }}
                       >
-                        {/* Countdown badge */}
+                        {/* Edit-time-left badge */}
                         <div
+                          title="Time left to edit"
                           style={{
                             padding: "5px 10px",
                             borderRadius: 5,
-                            fontSize: 13,
+                            fontSize: 12,
                             fontWeight: 900,
                             fontFamily: "var(--fm)",
-                            minWidth: 48,
+                            minWidth: 60,
                             textAlign: "center",
-                            background:
-                              secs <= 15 ? "var(--danger-bg)" : "#1a1200",
-                            color: secs <= 15 ? "var(--red)" : "var(--amber)",
-                            border: `1px solid ${secs <= 15 ? "var(--red)" : "var(--warn-border)"}`,
-                            animation:
-                              secs <= 15
-                                ? "blink 1s step-start infinite"
-                                : "none",
+                            background: urgent ? "var(--danger-bg)" : "#1a1200",
+                            color: urgent ? "var(--red)" : "var(--amber)",
+                            border: `1px solid ${urgent ? "var(--red)" : "var(--warn-border)"}`,
                           }}
                         >
-                          {secs}s
+                          {fmtLeft(remaining)}
                         </div>
 
                         {/* Edit */}
@@ -7976,8 +8083,7 @@ function EntryPage() {
                           <Pen size={14} />
                         </button>
 
-                        {/* Print ← NEW */}
-                        {/* Print ← NEW */}
+                        {/* Print */}
                         <button
                           onClick={() => setPrintJob(job)}
                           style={{
@@ -7993,6 +8099,7 @@ function EntryPage() {
                           <Printer size={14} />
                         </button>
 
+                        {/* Payment */}
                         <button
                           onClick={() => setPaymentJob(job)}
                           style={{
@@ -8010,21 +8117,23 @@ function EntryPage() {
                           💰
                         </button>
 
-                        {/* Delete */}
-                        <button
-                          onClick={() => setDeleteJob(job)}
-                          style={{
-                            padding: "7px 14px",
-                            fontSize: 12,
-                            fontWeight: 700,
-                            borderRadius: 5,
-                            background: "var(--danger-bg)",
-                            color: "var(--red)",
-                            border: "1px solid var(--red)",
-                          }}
-                        >
-                          <Trash size={14} />
-                        </button>
+                        {/* Delete - only within first 4 min and not in production */}
+                        {canDelete && (
+                          <button
+                            onClick={() => setDeleteJob(job)}
+                            style={{
+                              padding: "7px 14px",
+                              fontSize: 12,
+                              fontWeight: 700,
+                              borderRadius: 5,
+                              background: "var(--danger-bg)",
+                              color: "var(--red)",
+                              border: "1px solid var(--red)",
+                            }}
+                          >
+                            <Trash size={14} />
+                          </button>
+                        )}
                       </div>
                     </div>
                   );
@@ -8062,7 +8171,7 @@ function EntryPage() {
               maxWidth: 860,
             }}
           >
-            {/* Modal header with live countdown */}
+            {/* Modal header with time-left */}
             <div
               style={{
                 display: "flex",
@@ -8098,10 +8207,10 @@ function EntryPage() {
                 </div>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                {/* Countdown inside modal */}
                 {(() => {
-                  const secs = Math.ceil(
-                    Math.max(0, LOCK_MS - (now - parseCreated(editJob))) / 1000,
+                  const remaining = Math.max(
+                    0,
+                    EDIT_MS - (now - parseCreated(editJob)),
                   );
                   return (
                     <div
@@ -8111,14 +8220,12 @@ function EntryPage() {
                         fontSize: 14,
                         fontWeight: 900,
                         fontFamily: "var(--fm)",
-                        background: secs <= 15 ? "var(--danger-bg)" : "#1a1200",
-                        color: secs <= 15 ? "var(--red)" : "var(--amber)",
-                        border: `1px solid ${secs <= 15 ? "var(--red)" : "var(--warn-border)"}`,
-                        animation:
-                          secs <= 15 ? "blink 1s step-start infinite" : "none",
+                        background: "#1a1200",
+                        color: "var(--amber)",
+                        border: "1px solid var(--warn-border)",
                       }}
                     >
-                      ⏱ {secs}s
+                      ⏱ {fmtLeft(remaining)} left
                     </div>
                   );
                 })()}
@@ -8214,6 +8321,31 @@ function EntryPage() {
               autoComplete="off"
               style={{ display: "flex", flexDirection: "column", gap: 14 }}
             >
+              {/* ── Mandatory editor name ── */}
+              <Sec title="Who is editing? *" accent="var(--cyan)">
+                <label>Your name *</label>
+                <input
+                  value={editorName}
+                  onChange={(e) =>
+                    setEditorName(
+                      e.target.value.replace(/\b\w/g, (c) => c.toUpperCase()),
+                    )
+                  }
+                  placeholder="Enter your name (will be shown on the job card)"
+                  required
+                />
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: "var(--text-dim)",
+                    marginTop: 6,
+                  }}
+                >
+                  ℹ Your name, the time, and every changed field will be
+                  recorded on this job card.
+                </div>
+              </Sec>
+
               <Sec title="Job Header">
                 <div className="r-grid-3" style={{ marginBottom: 14 }}>
                   <div>
@@ -8337,10 +8469,10 @@ function EntryPage() {
                 >
                   ⚠ Confirm Delete
                 </div>
-                {/* Countdown inside delete modal */}
+                {/* Countdown inside delete modal (seconds) */}
                 {(() => {
                   const secs = Math.ceil(
-                    Math.max(0, LOCK_MS - (now - parseCreated(deleteJob))) /
+                    Math.max(0, DELETE_MS - (now - parseCreated(deleteJob))) /
                       1000,
                   );
                   return (
@@ -8425,7 +8557,7 @@ function EntryPage() {
         </div>
       )}
 
-      {/* ── Print modal ← NEW ── */}
+      {/* ── Print modal ── */}
       {printJob && (
         <PrintJobCardModal job={printJob} onClose={() => setPrintJob(null)} />
       )}
@@ -8435,7 +8567,7 @@ function EntryPage() {
         <AlbumTypeModal job={albumTypeJob} onConfirm={handleAlbumTypeConfirm} />
       )}
 
-      {/* ── Payment modal ← NEW ── */}
+      {/* ── Payment modal ── */}
       {paymentJob && (
         <PaymentEditModal
           job={paymentJob}

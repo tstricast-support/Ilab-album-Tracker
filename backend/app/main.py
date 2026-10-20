@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import json
 import os
 import time
 from datetime import datetime, timedelta
@@ -34,7 +35,8 @@ from .models import (
     PaperUsageEntry,        
     PAPER_SIZES,              
     LOW_STOCK_THRESHOLD,
-    ThankYouCard
+    ThankYouCard,
+    JobEditLog
 )
 from .routers import history as history_router
 from .routers import chat as chat_router
@@ -131,6 +133,7 @@ class StatsOut(BaseModel):
 
 
 class JobCardUpdate(BaseModel):
+    edited_by:        Optional[str] = None
     couple_name:      Optional[str] = None
     order_no:         Optional[str] = None
     dele_date:        Optional[datetime] = None
@@ -153,6 +156,25 @@ DEPT_FIELD = {
     "BINDING":       "status_binding",
 }
 
+EDIT_WINDOW   = timedelta(hours=24)
+DELETE_WINDOW = timedelta(minutes=4)
+
+EDIT_FIELD_LABELS = {
+    "couple_name": "Couple Name", "order_no": "Order No", "dele_date": "Delivery Date",
+    "priority": "Priority", "delivery_type": "Delivery Type", "special_note": "Special Note",
+    "print_size": "Print Size", "print_pages": "Pages", "laser_cover_type": "Laser Cover",
+    "laminate_type": "Laminate", "bind_rexing_no": "Rexing", "box_type": "Box Type",
+    "payment_by": "Payment By",
+}
+
+def _norm_for_diff(v) -> str:
+    if v is None:
+        return ""
+    if hasattr(v, "value"):            # enum
+        return str(v.value)
+    if isinstance(v, datetime):        # compare by date only
+        return v.strftime("%Y-%m-%d")
+    return str(v).strip()
 
 def _24h_cutoff() -> datetime:
     return datetime.utcnow() - timedelta(hours=COMPLETED_VISIBLE_HOURS)
@@ -248,33 +270,67 @@ def create_job(payload: JobCardCreate, db: Session = Depends(get_db)):
 @app.patch("/api/jobs/{job_id}", response_model=JobCardOut)
 def update_job(job_id: int, payload: JobCardUpdate, db: Session = Depends(get_db)):
     job = _job_or_404(job_id, db)
-    in_production = any([
-        _str(job.status_printing)      != "PENDING",
-        _str(job.status_laminating)    != "PENDING",
-        _str(job.status_binding)       != "PENDING",
-        _str(job.status_laser_cutting) not in ("PENDING", "SKIPPED"),
-    ])
-    if in_production:
-        raise HTTPException(403, "Job is already in production and cannot be edited.")
 
-    if (datetime.utcnow() - job.created_at) > timedelta(minutes=4): #type:ignore 
-        raise HTTPException(403, "Edit window has expired. Job can no longer be edited.")
+    if (datetime.utcnow() - job.created_at) > EDIT_WINDOW:  # type:ignore
+        raise HTTPException(403, "Edit window (24h) has expired. Job can no longer be edited.")
 
     data = payload.model_dump(exclude_unset=True)
-    for field, value in data.items():
-        setattr(job, field, value)
+    editor = (data.pop("edited_by", None) or "").strip()
+    if not editor:
+        raise HTTPException(400, "Your name is required to edit a job card.")
 
-    # ── FIX: laser_cover_type වෙනස් උනොත්, status එක recompute කරන්න ──
-    if "laser_cover_type" in data:
+    # ── build the diff BEFORE applying ──
+    changes = []
+    for field, value in data.items():
+        old, new = _norm_for_diff(getattr(job, field)), _norm_for_diff(value)
+        if old != new:
+            changes.append({
+                "field": field,
+                "label": EDIT_FIELD_LABELS.get(field, field),
+                "old": old, "new": new,
+            })
+
+    if not changes:                      # nothing really changed → no log, no write
+        return _out(job, db)
+
+    changed_fields = {c["field"] for c in changes}
+
+    # ── NEW (improvement 2): laser safety guard ──
+    if "laser_cover_type" in changed_fields:
+        new_has_laser = bool((data["laser_cover_type"] or "").strip())
+        old_has_laser = bool((job.laser_cover_type or "").strip())
+        if new_has_laser != old_has_laser and (
+            job.is_fully_completed
+            or _str(job.status_laser_cutting) in ("IN_PROGRESS", "COMPLETED")
+        ):
+            raise HTTPException(
+                409,
+                "Laser Cutting has already started or the job is complete. "
+                "Laser cover cannot be added/removed now.",
+            )
+
+
+    for field in changed_fields:
+        setattr(job, field, data[field])
+
+    # Only recompute the laser stage if it hasn't started yet
+    if "laser_cover_type" in changed_fields and _str(job.status_laser_cutting) in ("PENDING", "SKIPPED"):
         has_laser = bool((job.laser_cover_type or "").strip())
         job.status_laser_cutting = (
             StageStatusEnum.PENDING if has_laser else StageStatusEnum.SKIPPED
         )
 
-    job.updated_at = datetime.utcnow() #type:ignore 
+    db.add(JobEditLog(
+        job_id=job.id,
+        edited_by=editor.title(),
+        changes=json.dumps(changes),
+    ))
+    job.updated_at = datetime.utcnow()  # type:ignore
     db.commit()
+    _bust_dept_stats_cache()
     db.refresh(job)
     return _out(job, db)
+
 
 @app.get("/api/jobs/search")
 def search_jobs(q: str = Query(..., min_length=1), db: Session = Depends(get_db)):
@@ -296,7 +352,7 @@ def search_jobs(q: str = Query(..., min_length=1), db: Session = Depends(get_db)
 def list_jobs(completed: bool = False, db: Session = Depends(get_db)):
     q = (
         db.query(JobCard)
-        .options(selectinload(JobCard.logs), selectinload(JobCard.movements))
+        .options(selectinload(JobCard.logs), selectinload(JobCard.movements),selectinload(JobCard.edit_logs))
         .filter(JobCard.is_fully_completed == completed)
     )
     if completed:
@@ -322,8 +378,8 @@ def delete_job(job_id: int, db: Session = Depends(get_db)):
     if in_production:
         raise HTTPException(403, "Job is already in production and cannot be deleted.")
 
-    if (datetime.utcnow() - job.created_at) > timedelta(minutes=4):#type: ignore 
-        raise HTTPException(403, "Edit window has expired. Job can no longer be deleted.")
+    if (datetime.utcnow() - job.created_at) > DELETE_WINDOW:  # type:ignore
+        raise HTTPException(403, "Delete window has expired. Job can no longer be deleted.")
 
     db.delete(job)
     db.commit()
@@ -675,7 +731,7 @@ class AdminJobFullUpdate(BaseModel):
 @app.patch("/api/admin/jobs/{job_id}/full-edit", response_model=JobCardOut,dependencies=[Depends(require_roles("ADMIN"))])
 def admin_full_edit_job(job_id: int, payload: AdminJobFullUpdate, db: Session = Depends(get_db)):
     """Admin-only: edit ANY field on a job card, bypassing the production
-    lock and the 4-minute edit window that normally apply."""
+    lock and the 24-hour edit window that normally apply."""
     job = _job_or_404(job_id, db)
     data = payload.model_dump(exclude_unset=True)
 
@@ -1097,7 +1153,7 @@ def station_queue(department: str, db: Session = Depends(get_db)):
 
     q = (
         db.query(JobCard)
-        .options(selectinload(JobCard.logs), selectinload(JobCard.movements))
+        .options(selectinload(JobCard.logs), selectinload(JobCard.movements),selectinload(JobCard.edit_logs))
         .filter(
             JobCard.is_fully_completed == False,  # noqa
             getattr(JobCard, field).in_(active),
@@ -1211,8 +1267,7 @@ def station_history(
 
     
     jobs = (
-        q.options(selectinload(JobCard.logs), selectinload(JobCard.movements))
-        .order_by(desc(order_col))
+        q.options(selectinload(JobCard.logs), selectinload(JobCard.movements), selectinload(JobCard.edit_logs))
         .offset((page - 1) * page_size)
         .limit(page_size)
         .all()

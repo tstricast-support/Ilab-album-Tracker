@@ -190,6 +190,10 @@ class JobCard(Base):
     movements = relationship(
         "AlbumMovement", back_populates="job", cascade="all, delete-orphan"
     )
+    edit_logs = relationship(
+        "JobEditLog", back_populates="job",
+        cascade="all, delete-orphan", order_by="JobEditLog.edited_at",
+    )
 
     @property
     def binding_unlocked(self) -> bool:
@@ -202,7 +206,18 @@ class JobCard(Base):
 
     def __repr__(self) -> str:
         return f"<JobCard id={self.id} job_no={self.job_no!r} priority={self.priority}>"
+        
+class JobEditLog(Base):
+    """One row per Entry-department edit of a job card."""
+    __tablename__ = "job_edit_logs"
 
+    id        = Column(Integer, primary_key=True, autoincrement=True)
+    job_id    = Column(Integer, ForeignKey("job_cards.id"), nullable=False, index=True)
+    edited_by = Column(String(128), nullable=False)
+    edited_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    changes   = Column(Text, nullable=False, default="[]")  # JSON: [{field,label,old,new}]
+
+    job = relationship("JobCard", back_populates="edit_logs")
 
 class DepartmentLog(Base):
     __tablename__ = "department_logs"

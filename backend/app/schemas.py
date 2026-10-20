@@ -1,7 +1,6 @@
-# backend/app/schemas.py
 
 from __future__ import annotations
-
+import json
 from datetime import datetime
 from typing import List, Optional
 
@@ -61,6 +60,15 @@ class AlbumMovementOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class JobEditLogOut(BaseModel):
+    id: int
+    job_id: int
+    edited_by: str
+    edited_at: datetime
+    changes: List[dict] = []
+
+    model_config = {"from_attributes": True}
+
 class JobCardOut(BaseModel):
     id: int
     job_no: str
@@ -72,6 +80,7 @@ class JobCardOut(BaseModel):
     dele_date: datetime
     delivery_type: str
     priority: str
+    edit_logs: List[JobEditLogOut] = []
     special_note: Optional[str]
     print_size: Optional[str]
     print_pages: Optional[str]
@@ -251,6 +260,16 @@ def _out(job: JobCard, db: Session) -> JobCardOut:
                 from_attributes=True
             )
             for lg in job.logs
+        ],
+        "edit_logs": [
+            {
+                "id": e.id,
+                "job_id": e.job_id,
+                "edited_by": e.edited_by,
+                "edited_at": e.edited_at,
+                "changes": json.loads(e.changes or "[]"),
+            }
+            for e in job.edit_logs
         ],
     })
 
