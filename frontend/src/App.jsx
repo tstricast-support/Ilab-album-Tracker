@@ -10954,6 +10954,7 @@ function StationPage({ deptKey }) {
   const [boxPouchPending, setBoxPouchPending] = useState(null);
   const [deptDailyCount, setDeptDailyCount] = useState(null);
   const [monthOpen, setMonthOpen] = useState(false);
+  const [totalsOpen, setTotalsOpen] = useState(false);
   const [selMonth, setSelMonth] = useState(null); // null = current month, else "YYYY-MM"
   const [selMonthTotal, setSelMonthTotal] = useState(null);
   const curYM = slDateStr(new Date()).slice(0, 7);
@@ -11346,6 +11347,56 @@ function StationPage({ deptKey }) {
         }
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+
+          {cfg.dept === "PRINTING" && (
+  <div>
+    <button
+      onClick={() => setTotalsOpen((o) => !o)}
+      style={{
+        width: isMobile ? "100%" : "auto",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 8,
+        padding: "10px 16px",
+        background: totalsOpen ? "var(--amber)" : "var(--bg3)",
+        color: totalsOpen ? "#000" : "var(--amber)",
+        border: "1px solid var(--amber)",
+        borderRadius: 8,
+        fontWeight: 800,
+        fontSize: 13,
+        cursor: "pointer",
+      }}
+    >
+      <Activity size={14} />
+      {totalsOpen ? "Hide Department Totals" : "Show Department Totals"}
+      <ChevronDown
+        size={14}
+        style={{
+          transition: "transform .2s ease",
+          transform: totalsOpen ? "rotate(180deg)" : "rotate(0deg)",
+        }}
+      />
+    </button>
+
+    {totalsOpen && (
+      <div
+        className="si"
+        style={{
+          marginTop: 10,
+          background: "var(--bg2)",
+          border: "1px solid var(--border)",
+          borderRadius: 10,
+          padding: 12,
+        }}
+      >
+        <DeptTotalsPanel addToast={add} hideHeader />
+      </div>
+    )}
+  </div>
+)}
+
+
           {monthOpen && (
             <div
               style={{
