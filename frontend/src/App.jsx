@@ -3451,6 +3451,7 @@ function CompactHistoryRow({ job, onView }) {
 
 function CompactJobPreviewModal({ job, onClose, onViewFull }) {
   const isMobile = useIsMobile();
+  const [printing, setPrinting] = useState(false);
   const delayed = job.logs?.some((l) => l.is_delayed && !l.exited_at);
   const days = Math.ceil((new Date(job.dele_date) - new Date()) / 86400000);
 
@@ -3678,6 +3679,24 @@ function CompactJobPreviewModal({ job, onClose, onViewFull }) {
             <Chip label="Payment" value={job.payment_by} accent="#16a34a" />
           )}
         </div>
+
+        {(ROLE === "ENTRY" || IS_ADMIN) && (
+  <button
+    onClick={() => setPrinting(true)}
+    style={{
+      padding: "11px 0",
+      background: "var(--bg3)",
+      color: "var(--cyan)",
+      border: "1px solid var(--cyan)",
+      borderRadius: 8,
+      fontWeight: 800,
+      fontSize: 14,
+    }}
+  >
+    🖨 Print Job Card
+  </button>
+)}
+{printing && <PrintJobCardModal job={job} onClose={() => setPrinting(false)} />}
 
         <button
           onClick={onViewFull}
@@ -7560,20 +7579,19 @@ function EntryPage() {
     }
   }
 
-  async function handleAlbumTypeConfirm(type) {
-    try {
-      await api.setAlbumType(albumTypeJob.id, type);
-      add(
-        `✓ Marked as ${ALBUM_TYPES.find((a) => a.value === type)?.label}`,
-        "success",
-      );
-    } catch (err) {
-      add(err.message, "error");
-    } finally {
-      setAlbumTypeJob(null);
-      reload();
-    }
+async function handleAlbumTypeConfirm(type) {
+  const job = albumTypeJob;
+  try {
+    await api.setAlbumType(job.id, type);
+    add(`✓ Marked as ${ALBUM_TYPES.find((a) => a.value === type)?.label}`, "success");
+    setPrintJob({ ...job, album_type: type });   // ← opens the print chooser
+  } catch (err) {
+    add(err.message, "error");
+  } finally {
+    setAlbumTypeJob(null);
+    reload();
   }
+}
 
   // ── Edit save ─────────────────────────────────────────────────────────
   async function handleEditSave(e) {
@@ -20695,87 +20713,186 @@ function buildDayPlanPrintHTML(jobs) {
 }
 
 // ── Print helpers ─────────────────────────────────────────────────────────────
-function buildPrintHTML(job) {
-  const fmtDate = (iso) =>
-    new Date(iso).toLocaleDateString("en-GB", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    });
-  const chips = [
-    ["Print Size", job.print_size],
-    ["Pages", job.print_pages],
-    ["Laminate", job.laminate_type],
-    ["Laser Cover", job.laser_cover_type],
-    ["Rexing", job.bind_rexing_no],
-    ["Box", job.box_type],
-    ["Delivery", job.delivery_type],
-  ].filter(([, v]) => v);
+// ── Job card printing (A5): Album / Box / Cover ──────────────────────
+const esc = (s) =>
+  String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 
-  const stageRows = [
-    ["Printing", job.status_printing],
-    ["Laser Cutting", job.status_laser_cutting],
-    ["Laminating", job.status_laminating],
-    ["Binding", job.status_binding],
-  ];
+const ALBUM_PRINT_STYLES = {
+  NORMAL: { title: "MAGAZINE ALBUM", color: "#15803d" },
+  STORY: { title: "STORY ALBUM", color: "#c0392b" },
+  REBIND: { title: "REBIND ALBUM", color: "#1d6fb8" },
+};
 
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Job Card - ${job.job_no}</title>
-  <style>
-    body{font-family:Arial,sans-serif;margin:0;padding:24px;color:#111;background:#fff}
-    .header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #000;padding-bottom:12px;margin-bottom:16px}
-    .job-no{font-size:28px;font-weight:900;letter-spacing:.04em}
-    .customer{font-size:18px;font-weight:700;margin-top:4px}
-    .couple{font-size:14px;color:#555;margin-top:2px}
-    .delivery{text-align:right;font-size:13px}
-    .delivery .date{font-size:20px;font-weight:800}
-    .chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px}
-    .chip{display:inline-flex;font-size:11px;border:1px solid #ccc;border-radius:4px;overflow:hidden}
-    .chip .lbl{padding:3px 7px;background:#eee;font-weight:600;text-transform:uppercase;font-size:10px}
-    .chip .val{padding:3px 9px;font-weight:700}
-    .note{background:#fffbe6;border:1px solid #e6c800;border-left:4px solid #e6a800;padding:10px 14px;border-radius:4px;font-size:13px;margin-bottom:16px}
-    .note-title{font-size:10px;text-transform:uppercase;letter-spacing:.1em;font-weight:800;color:#856600;margin-bottom:4px}
-    table{width:100%;border-collapse:collapse;font-size:13px}
-    th{background:#111;color:#fff;padding:7px 12px;text-align:left;font-size:11px;letter-spacing:.08em;text-transform:uppercase}
-    td{padding:7px 12px;border-bottom:1px solid #eee}
-    .urgent{display:inline-block;background:#c00;color:#fff;font-size:10px;padding:2px 8px;border-radius:3px;font-weight:800;margin-left:8px}
-    @media print{body{padding:0}button{display:none}}
-  </style></head><body>
-  <div class="header">
-    <div>
-     <div class="job-no">${job.job_no}${job.priority === "URGENT" ? '<span class="urgent">🔥 URGENT</span>' : ""}</div>
-      <div class="customer">${job.customer}</div>
-      ${job.couple_name ? `<div class="couple">${job.couple_name}</div>` : ""}
-      ${job.order_no ? `<div style="font-size:12px;color:#888;margin-top:2px">Order: ${job.order_no}</div>` : ""}
+function pDate(iso, utc = false) {
+  if (!iso) return "";
+  const d = utc ? parseUTC(iso) : new Date(iso);
+  return d.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    timeZone: "Asia/Colombo",
+  });
+}
+
+// "SF10 - 12x24" -> { name: "SF10", size: "12x24" }
+function splitBox(boxType) {
+  const parts = String(boxType || "").split(/\s+-\s+/);
+  return { name: parts[0] || "", size: parts.slice(1).join(" - ") };
+}
+
+function buildNoteHTML(job) {
+  const lines = [];
+  if (job.special_note) lines.push(esc(job.special_note));
+  lines.push(`DELEVERY DT - ${esc(pDate(job.dele_date)).replace(/\//g, " ")}`);
+  lines.push(`DELEVERY TY - ${esc(job.delivery_type)}`);
+  return `<div class="note"><span class="note-t">NOTE :</span>
+    <div class="note-b">${lines.join("<br>")}</div></div>`;
+}
+
+const PRINT_CSS = `
+  @page { size: A5 portrait; margin: 8mm; }
+  * { box-sizing: border-box; }
+  body { font-family: Arial, sans-serif; margin: 0; color: #222; }
+  .title { text-align: center; font-size: 22px; font-weight: 900; line-height: 1.15; }
+  .jobno { text-align: center; font-size: 20px; font-weight: 900; margin: 4px 0 8px; }
+  .who { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; margin-bottom: 8px; }
+  .who b { font-size: 11px; }
+  .urgent { display:inline-block; background:#c00; color:#fff; font-size:10px; padding:1px 7px; border-radius:3px; margin-left:6px; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 4px; }
+  td { border: 1.5px solid #222; padding: 6px 8px; font-size: 12px; font-weight: 700; height: 30px; }
+  td.l { background: #fff; font-size: 11px; width: 24%; }
+  .sec { font-size: 12px; font-weight: 900; margin: 8px 0 2px; }
+  .note { border: 1.5px solid #d9534f; border-radius: 2px; padding: 6px 10px; margin-top: 10px; min-height: 70px; }
+  .note-t { color: #d9534f; font-weight: 900; font-size: 12px; }
+  .note-b { color: #d9534f; font-weight: 900; font-size: 13px; text-align: center; line-height: 1.5; text-transform: uppercase; }
+  .big td { height: 60px; font-size: 20px; text-align: center; }
+  .big td.l { font-size: 20px; }
+  .printed { margin-top: 6px; font-size: 8px; color: #aaa; text-align: right; }
+`;
+
+function wrapHTML(title, body) {
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(title)}</title>
+  <style>${PRINT_CSS}</style></head><body>${body}
+  <div class="printed">Printed ${new Date().toLocaleString("en-GB")}</div></body></html>`;
+}
+
+function headerHTML(job, title, color) {
+  return `<div class="title" style="color:${color}">${esc(title)}</div>
+    <div class="jobno">JOB NO : ${esc(job.job_no)}${job.priority === "URGENT" ? '<span class="urgent">URGENT</span>' : ""}</div>`;
+}
+
+function buildAlbumCardHTML(job) {
+  const st = ALBUM_PRINT_STYLES[job.album_type] || ALBUM_PRINT_STYLES.NORMAL;
+  const isNormal = !job.album_type || job.album_type === "NORMAL";
+  const orderNo =
+    job.order_no ||
+    (job.print_pages ? `${job.job_no}-${job.print_pages}` : job.job_no);
+
+  const row = (a, av, b, bv) =>
+    `<tr><td class="l">${a}</td><td>${esc(av)}</td><td class="l">${b}</td><td>${esc(bv)}</td></tr>`;
+  const sec = (n, label, rows) =>
+    `<div class="sec">${n} - ${label}</div><table>${rows}</table>`;
+
+  const body = `
+    ${headerHTML(job, `JOB CARD - ${st.title}`, st.color)}
+    <div class="who">
+      <div><b>CUSTOMER :</b><br>${esc(job.customer)}</div>
+      <div style="text-align:right"><b>COUPLE NAME :</b><br>${esc(job.couple_name)}</div>
     </div>
-    <div class="delivery">
-      <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.06em">Delivery</div>
-      <div class="date">${fmtDate(job.dele_date)}</div>
-      <div style="font-size:12px;color:#555;margin-top:2px">${job.delivery_type || ""}</div>
+    <table>${row("ORDER DATE", pDate(job.order_date, true), "DELE DATE", pDate(job.dele_date))}</table>
+    ${sec(1, "PRINTING",
+      row("SIZE", job.print_size, "PAGES", job.print_pages) +
+      row("PRINTING BY", "", "ORDER NO", orderNo))}
+    ${sec(2, isNormal ? "ACCU BIND" : "BINDING",
+      row(isNormal ? "ACCU mm" : "mm", "", isNormal ? "ACCU BY" : "BIND BY", ""))}
+    ${sec(3, "LAMINATING", row("LAMINATING", job.laminate_type, "LAMINATIN Q", ""))}
+    ${sec(4, "BIND", row("COVER :", job.laser_cover_type, "REXING NO", job.bind_rexing_no))}
+    ${sec(5, "FINISHING", row("BOX :", job.box_type, "FINISHING BY", ""))}
+    ${buildNoteHTML(job)}`;
+  return wrapHTML(`Job Card - ${job.job_no}`, body);
+}
+
+function buildBoxCardHTML(job) {
+  const { name, size } = splitBox(job.box_type);
+  const body = `
+    ${headerHTML(job, "BOX JOB CARD", "#2f6db5")}
+    <div class="who" style="flex-direction:column;gap:2px">
+      <div><b>DATE :</b> ${esc(pDate(job.order_date, true))}</div>
+      <div><b>CUSTOMER :</b> ${esc(job.customer)}</div>
+      <div><b>COUPLE NAME :</b> ${esc(job.couple_name)}</div>
     </div>
-  </div>
-  <div class="chips">${chips.map(([l, v]) => `<span class="chip"><span class="lbl">${l}</span><span class="val">${v}</span></span>`).join("")}</div>
-  ${job.special_note ? `<div class="note"><div class="note-title">Special Instructions</div>${job.special_note}</div>` : ""}
-  <table>
-    <thead><tr><th>Stage</th><th>Status</th></tr></thead>
-    <tbody>${stageRows.map(([label, status]) => `<tr><td>${label}</td><td>${status || "-"}</td></tr>`).join("")}</tbody>
-  </table>
-  <div style="margin-top:24px;font-size:11px;color:#aaa;text-align:right">Printed ${new Date().toLocaleString("en-GB")}</div>
-  </body></html>`;
+    <table class="big">
+      <tr><td class="l">BOX :</td><td>${esc(name)}</td></tr>
+      <tr><td class="l">SIZE</td><td>${esc(size || job.print_size)}</td></tr>
+    </table>
+    <table><tr><td class="l" style="font-size:14px">FINISHING BY</td><td></td></tr></table>
+    ${buildNoteHTML(job)}`;
+  return wrapHTML(`Box Job Card - ${job.job_no}`, body);
+}
+
+function buildCoverCardHTML(job) {
+  const body = `
+    ${headerHTML(job, "COVER JOB CARD", "#d9534f")}
+    <div class="who" style="flex-direction:column;gap:2px">
+      <div><b>DATE :</b> ${esc(pDate(job.order_date, true))}</div>
+      <div><b>CUSTOMER :</b> ${esc(job.customer)}</div>
+      <div><b>COUPLE NAME :</b> ${esc(job.couple_name)}</div>
+    </div>
+    <table class="big">
+      <tr><td class="l">COVER :</td><td>${esc(job.laser_cover_type)}</td></tr>
+      <tr><td class="l">SIZE</td><td>${esc(job.print_size)}</td></tr>
+    </table>
+    <table><tr><td class="l" style="font-size:14px">FINISHING BY</td><td></td></tr></table>
+    ${buildNoteHTML(job)}`;
+  return wrapHTML(`Cover Job Card - ${job.job_no}`, body);
+}
+
+function openPrintWindow(html) {
+  const win = window.open("", "_blank", "width=800,height=900");
+  if (!win) {
+    window.alert("Please allow pop-ups to print.");
+    return;
+  }
+  win.document.write(html);
+  win.document.close();
+  win.focus();
+  setTimeout(() => win.print(), 400);
 }
 
 function PrintJobCardModal({ job, onClose }) {
   const isMobile = useIsMobile();
-  function doPrint() {
-    const win = window.open("", "_blank", "width=800,height=600");
-    win.document.write(buildPrintHTML(job));
-    win.document.close();
-    win.focus();
-    setTimeout(() => {
-      win.print();
-    }, 400);
-  }
+  const hasCover = !!(job.laser_cover_type || "").trim();
+  const hasBox = !!(job.box_type || "").trim();
 
-  const days = Math.ceil((new Date(job.dele_date) - new Date()) / 86400000);
+  const options = [
+    {
+      key: "album",
+      label: "Album Job Card",
+      sub: (ALBUM_PRINT_STYLES[job.album_type] || ALBUM_PRINT_STYLES.NORMAL).title,
+      color: (ALBUM_PRINT_STYLES[job.album_type] || ALBUM_PRINT_STYLES.NORMAL).color,
+      enabled: true,
+      build: buildAlbumCardHTML,
+    },
+    {
+      key: "box",
+      label: "Box Job Card",
+      sub: hasBox ? job.box_type : "No box on this job",
+      color: "#2f6db5",
+      enabled: hasBox,
+      build: buildBoxCardHTML,
+    },
+    {
+      key: "cover",
+      label: "Cover Job Card",
+      sub: hasCover ? job.laser_cover_type : "No cover on this job",
+      color: "#d9534f",
+      enabled: hasCover,
+      build: buildCoverCardHTML,
+    },
+  ];
 
   return (
     <div
@@ -20786,7 +20903,7 @@ function PrintJobCardModal({ job, onClose }) {
         display: "flex",
         alignItems: isMobile ? "flex-end" : "center",
         justifyContent: "center",
-        zIndex: 9000,
+        zIndex: 9800,
       }}
       onClick={onClose}
     >
@@ -20798,86 +20915,68 @@ function PrintJobCardModal({ job, onClose }) {
           borderRadius: isMobile ? "16px 16px 0 0" : 12,
           padding: 24,
           width: "100%",
-          maxWidth: 520,
-          maxHeight: isMobile ? "92dvh" : "90vh",
-          overflowY: "auto",
+          maxWidth: 420,
           display: "flex",
           flexDirection: "column",
-          gap: 16,
+          gap: 14,
         }}
       >
         <div>
-          <div
-            style={{
-              fontSize: 11,
-              color: "var(--text-dim)",
-              textTransform: "uppercase",
-              letterSpacing: ".1em",
-              marginBottom: 6,
-            }}
-          >
-            Print Job Card
+          <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".1em" }}>
+            Print Job Card (A5)
           </div>
-          <div
-            style={{
-              fontSize: 22,
-              fontWeight: 800,
-              color: "var(--amber)",
-              fontFamily: "var(--fm)",
-            }}
-          >
+          <div style={{ fontSize: 22, fontWeight: 800, color: "var(--amber)", fontFamily: "var(--fm)" }}>
             {job.job_no}
           </div>
-          <div
-            style={{ fontSize: 16, fontWeight: 700, color: "var(--text-pri)" }}
-          >
+          <div style={{ fontSize: 14, color: "var(--text-sec)" }}>
             {job.customer}
+            {job.couple_name ? ` / ${job.couple_name}` : ""}
           </div>
-          {job.couple_name && (
-            <div style={{ fontSize: 13, color: "var(--text-sec)" }}>
-              {job.couple_name}
+        </div>
+
+        <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text-pri)" }}>
+          Which job card do you want to print?
+        </div>
+
+        {options.map((o) => (
+          <button
+            key={o.key}
+            disabled={!o.enabled}
+            onClick={() => {
+              openPrintWindow(o.build(job));
+              onClose();
+            }}
+            style={{
+              textAlign: "left",
+              padding: "12px 14px",
+              borderRadius: 8,
+              background: "var(--bg2)",
+              border: `1px solid ${o.enabled ? o.color : "var(--border)"}`,
+              borderLeft: `5px solid ${o.enabled ? o.color : "var(--border)"}`,
+              opacity: o.enabled ? 1 : 0.45,
+              cursor: o.enabled ? "pointer" : "not-allowed",
+            }}
+          >
+            <div style={{ fontSize: 15, fontWeight: 800, color: o.enabled ? o.color : "var(--text-dim)" }}>
+              🖨 {o.label}
             </div>
-          )}
-        </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-          <Chip label="Size" value={job.print_size} accent="#3b82f6" />
-          <Chip label="Pages" value={job.print_pages} accent="#3b82f6" />
-          <Chip label="Lam" value={job.laminate_type} accent="#06b6d4" />
-          <Chip label="Laser" value={job.laser_cover_type} accent="#a855f7" />
-          <Chip label="Rexing" value={job.bind_rexing_no} accent="#22c55e" />
-          <Chip label="Box" value={job.box_type} accent="#f59e0b" />
-          <Chip label="Deliver" value={job.delivery_type} accent="#888" />
-        </div>
-        {job.special_note && <SpecialNote note={job.special_note} />}
-        <div style={{ display: "flex", gap: 8 }}>
-          <button
-            onClick={doPrint}
-            style={{
-              flex: 1,
-              padding: "12px 0",
-              background: "var(--amber)",
-              color: "#000",
-              borderRadius: 8,
-              fontWeight: 800,
-              fontSize: 15,
-            }}
-          >
-            🖨 Open Print Dialog
+            <div style={{ fontSize: 12, color: "var(--text-sec)", marginTop: 2 }}>{o.sub}</div>
           </button>
-          <button
-            onClick={onClose}
-            style={{
-              padding: "12px 18px",
-              background: "var(--bg3)",
-              color: "var(--text-sec)",
-              border: "1px solid var(--border)",
-              borderRadius: 8,
-              fontWeight: 700,
-            }}
-          >
-            Cancel
-          </button>
-        </div>
+        ))}
+
+        <button
+          onClick={onClose}
+          style={{
+            padding: "11px 0",
+            background: "var(--bg3)",
+            color: "var(--text-sec)",
+            border: "1px solid var(--border)",
+            borderRadius: 8,
+            fontWeight: 700,
+          }}
+        >
+          Cancel
+        </button>
       </div>
     </div>
   );
