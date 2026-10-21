@@ -2870,7 +2870,7 @@ def health():
     return {"status": "ok", "service": "i Lab Gampaha", "time": datetime.utcnow().isoformat()}
 
 
-SUGGEST_FIELDS = ["customer", "print_size", "laminate_type", "bind_rexing_no", "box_type"]
+SUGGEST_FIELDS = ["customer", "print_size", "laminate_type", "bind_rexing_no", "box_type", "laser_cover_type"]
 
 @app.get("/api/suggestions/job-fields")
 def job_field_suggestions(db: Session = Depends(get_db)):

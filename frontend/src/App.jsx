@@ -7278,7 +7278,7 @@ function JobFields({ job, suggestions = {} }) {
   const [deliveryType, setDeliveryType] = useState(
     job?.delivery_type || "PRONTO",
   );
-  const laserInputRef = useRef(null);
+  
 
   return (
     <>
@@ -7315,51 +7315,37 @@ function JobFields({ job, suggestions = {} }) {
         </Sec>
 
         {/* ───────────────── LASER CUTTING ───────────────── */}
-        <Sec title="2 – Laser Cutting" accent="var(--purple)">
+        <Sec title="2 – COVERS" accent="var(--purple)">
           <div style={{ marginBottom: 12 }}>
-            <label>Laser Cutting Required?</label>
-
+            <label>Covers Required?</label>
             <select
               value={laserEnabled ? "YES" : "NO"}
-              onChange={(e) => {
-                const enabled = e.target.value === "YES";
-                setLaserEnabled(enabled);
-
-                if (!enabled && laserInputRef.current) {
-                  laserInputRef.current.value = "";
-                }
-              }}
+              onChange={(e) => setLaserEnabled(e.target.value === "YES")}
             >
               <option value="NO">No</option>
               <option value="YES">Yes</option>
             </select>
           </div>
 
-          <div
-            style={{
-              display: laserEnabled ? "block" : "none",
-            }}
-          >
+          {laserEnabled && (
             <div>
-              <label>Cover Type / Description</label>
-              <input
-                ref={laserInputRef}
-                name="laser_cover_type"
-                placeholder="LC 129 / Acrylic"
-                defaultValue={job?.laser_cover_type || ""}
-              />
-            </div>
+              <div>
+                <label>Cover Type / Description</label>
+                <AutocompleteInput
+                  name="laser_cover_type"
+                  placeholder="LC 129 / Acrylic"
+                  defaultValue={job?.laser_cover_type || ""}
+                  suggestions={suggestions.laser_cover_type}
+                />
+              </div>
 
-            <div
-              style={{
-                fontSize: 11,
-                color: "var(--text-dim)",
-                marginTop: 7,
-              }}
-            >
-              ℹ Filling this activates the Laser track.
+              <div
+                style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 7 }}
+              >
+                ℹ Filling this activates the Laser track.
+              </div>
             </div>
-          </div>
+          )}
         </Sec>
 
         {/* ───────────────── LAMINATING ───────────────── */}
