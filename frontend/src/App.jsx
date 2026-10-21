@@ -93,7 +93,7 @@ const api = {
   deleteJob: (id) => apiFetch(`/api/jobs/${id}`, { method: "DELETE" }),
   getJob: (id) => apiFetch(`/api/jobs/${id}`),
   queue: (dept) => apiFetch(`/api/station/${dept}/queue`),
-  // FIXED
+  jobFieldSuggestions: () => apiFetch(`/api/suggestions/job-fields`),
   advance: (id, dept, action, extra = {}) =>
     apiFetch(`/api/jobs/${id}/advance/${dept}`, {
       method: "POST",
@@ -7149,10 +7149,135 @@ function JobCardFull({
   );
 }
 
+function AutocompleteInput({
+  name,
+  placeholder,
+  defaultValue = "",
+  suggestions,
+}) {
+  const list = Array.isArray(suggestions) ? suggestions : [];
+  const inputRef = useRef(null);
+  const [query, setQuery] = useState(defaultValue);
+  const [open, setOpen] = useState(false);
+  const [hi, setHi] = useState(-1);
+
+  // clear our query state when the parent <form> is reset after saving
+  useEffect(() => {
+    const form = inputRef.current?.form;
+    if (!form) return;
+    const onReset = () => {
+      setQuery("");
+      setOpen(false);
+      setHi(-1);
+    };
+    form.addEventListener("reset", onReset);
+    return () => form.removeEventListener("reset", onReset);
+  }, []);
+
+  const q = query.trim().toLowerCase();
+  const matches = (() => {
+    if (!q) return list.slice(0, 8);
+    const starts = [];
+    const contains = [];
+    for (const s of list) {
+      const l = s.toLowerCase();
+      if (l === q) continue; // exact match already typed
+      if (l.startsWith(q)) starts.push(s);
+      else if (l.includes(q)) contains.push(s);
+    }
+    return [...starts, ...contains].slice(0, 8);
+  })();
+
+  function pick(value) {
+    if (inputRef.current) inputRef.current.value = value;
+    setQuery(value);
+    setOpen(false);
+    setHi(-1);
+  }
+
+  function onKeyDown(e) {
+    if (!open || matches.length === 0) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHi((h) => (h + 1) % matches.length);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHi((h) => (h <= 0 ? matches.length - 1 : h - 1));
+    } else if (e.key === "Enter" && hi >= 0) {
+      e.preventDefault();
+      pick(matches[hi]);
+    } else if (e.key === "Escape") {
+      setOpen(false);
+    }
+  }
+
+  return (
+    <div style={{ position: "relative" }}>
+      <input
+        ref={inputRef}
+        name={name}
+        placeholder={placeholder}
+        defaultValue={defaultValue}
+        autoComplete="off"
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setOpen(true);
+          setHi(-1);
+        }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 120)}
+        onKeyDown={onKeyDown}
+      />
+      {open && matches.length > 0 && (
+        <div
+          style={{
+            position: "absolute",
+            top: "100%",
+            left: 0,
+            right: 0,
+            zIndex: 50,
+            marginTop: -8,
+            background: "var(--bg1)",
+            border: "1px solid var(--amber)",
+            borderRadius: 8,
+            boxShadow: "0 8px 24px rgba(0,0,0,.5)",
+            maxHeight: 220,
+            overflowY: "auto",
+            padding: 4,
+          }}
+        >
+          {matches.map((s, i) => (
+            <div
+              key={s}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                pick(s);
+              }}
+              onMouseEnter={() => setHi(i)}
+              style={{
+                padding: "8px 10px",
+                borderRadius: 6,
+                fontSize: 13,
+                cursor: "pointer",
+                background: i === hi ? "var(--bg3)" : "transparent",
+                color: "var(--text-pri)",
+              }}
+            >
+              {s}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Shared field sections (used in both create & edit forms) ────────
-function JobFields({ job }) {
+function JobFields({ job, suggestions = {} }) {
   const [laserEnabled, setLaserEnabled] = useState(!!job?.laser_cover_type);
-  const [deliveryType, setDeliveryType] = useState(job?.delivery_type || "PRONTO");
+  const [deliveryType, setDeliveryType] = useState(
+    job?.delivery_type || "PRONTO",
+  );
   const laserInputRef = useRef(null);
 
   return (
@@ -7169,10 +7294,12 @@ function JobFields({ job }) {
           >
             <div>
               <label>Print Size</label>
-              <input
+              {/* Print Size */}
+              <AutocompleteInput
                 name="print_size"
                 placeholder="12×30"
                 defaultValue={job?.print_size || ""}
+                suggestions={suggestions.print_size}
               />
             </div>
 
@@ -7239,10 +7366,12 @@ function JobFields({ job }) {
         <Sec title="3 – Laminating" accent="var(--cyan)">
           <div>
             <label>Laminate Type</label>
-            <input
+            {/* Laminate Type */}
+            <AutocompleteInput
               name="laminate_type"
               placeholder="Silky / Gloss / Matt"
               defaultValue={job?.laminate_type || ""}
+              suggestions={suggestions.laminate_type}
             />
           </div>
         </Sec>
@@ -7251,10 +7380,12 @@ function JobFields({ job }) {
         <Sec title="4 – Binding" accent="var(--green)">
           <div>
             <label>Rexing No / Type</label>
-            <input
+            {/* Rexing */}
+            <AutocompleteInput
               name="bind_rexing_no"
               placeholder="SF10"
               defaultValue={job?.bind_rexing_no || ""}
+              suggestions={suggestions.bind_rexing_no}
             />
           </div>
         </Sec>
@@ -7263,41 +7394,45 @@ function JobFields({ job }) {
         <Sec title="5 – Box" accent="#f59e0b">
           <div>
             <label>Box Type</label>
-            <input
+            {/* Box Type */}
+            <AutocompleteInput
               name="box_type"
               placeholder="SF10 - 12x24"
               defaultValue={job?.box_type || ""}
+              suggestions={suggestions.box_type}
             />
           </div>
         </Sec>
 
         {/* ───────────────── DELIVERY ───────────────── */}
-    <Sec title="Delivery Type" accent="#ff009d">
-      <div>
-        <label>Delivery Type</label>
-        <select
-          name="delivery_type"
-          value={deliveryType}
-          onChange={(e) => setDeliveryType(e.target.value)}
-        >
-          <option value="PRONTO">PRONTO</option>
-          <option value="CUSTOMER">CUSTOMER</option>
-          <option value="PICKME">PICKME</option>
-          <option value="BUS">BUS</option>
-        </select>
-      </div>
-      {deliveryType === "PRONTO" && (
-        <div style={{ marginTop: 10 }}>
-          <label>Pronto Address (name, address, phone)</label>
-          <textarea
-            name="pronto_address"
-            rows={5}
-            placeholder={"YASITH WIJESURIYA.\n305 / 2.\n IHALAYAGODA,\n IMBULGODA.\n0783498886"}
-            defaultValue={job?.pronto_address || ""}
-          />
-        </div>
-      )}
-   </Sec>
+        <Sec title="Delivery Type" accent="#ff009d">
+          <div>
+            <label>Delivery Type</label>
+            <select
+              name="delivery_type"
+              value={deliveryType}
+              onChange={(e) => setDeliveryType(e.target.value)}
+            >
+              <option value="PRONTO">PRONTO</option>
+              <option value="CUSTOMER">CUSTOMER</option>
+              <option value="PICKME">PICKME</option>
+              <option value="BUS">BUS</option>
+            </select>
+          </div>
+          {deliveryType === "PRONTO" && (
+            <div style={{ marginTop: 10 }}>
+              <label>Pronto Address (name, address, phone)</label>
+              <textarea
+                name="pronto_address"
+                rows={5}
+                placeholder={
+                  "YASITH WIJESURIYA.\n305 / 2.\n IHALAYAGODA,\n IMBULGODA.\n0783498886"
+                }
+                defaultValue={job?.pronto_address || ""}
+              />
+            </div>
+          )}
+        </Sec>
       </div>
 
       <Sec title="Special Instructions">
@@ -7444,6 +7579,9 @@ function EntryPage() {
   const [deleteJob, setDeleteJob] = useState(null);
   const [printJob, setPrintJob] = useState(null);
   const [albumTypeJob, setAlbumTypeJob] = useState(null);
+
+  const [suggestions, setSuggestions] = useState({});
+
   const [paymentJob, setPaymentJob] = useState(null);
   const [todayCount, setTodayCount] = useState(null);
   const [paymentBy, setPaymentBy] = useState("");
@@ -7475,30 +7613,40 @@ function EntryPage() {
   }
 
   const reload = useCallback(async () => {
-    try {
-      const jobList = await api.jobs(false);
-      setIfChanged(setJobs)(jobList);
-    } catch {}
-    try {
-      const ds = await api.deptStats();
-      setTodayCount((prev) => {
-        const next = ds?.daily?.ENTRY ?? 0;
-        return prev === next ? prev : next;
-      });
-    } catch {}
-  }, []);
+  try {
+    const jobList = await api.jobs(false);
+    setIfChanged(setJobs)(jobList);
+  } catch {}
+  try {
+    const ds = await api.deptStats();
+    setTodayCount((prev) => {
+      const next = ds?.daily?.ENTRY ?? 0;
+      return prev === next ? prev : next;
+    });
+  } catch {}
+}, []);
 
-  usePolling(reload);
+usePolling(reload);
 
-  const loadKnownPayments = useCallback(() => {
-    api
-      .knownPaymentNames()
-      .then((pn) => setIfChanged(setKnownPayments)(pn?.names || []))
-      .catch(() => {});
-  }, []);
-  useEffect(() => {
-    loadKnownPayments();
-  }, [loadKnownPayments]);
+const loadKnownPayments = useCallback(() => {
+  api
+    .knownPaymentNames()
+    .then((pn) => setIfChanged(setKnownPayments)(pn?.names || []))
+    .catch(() => {});
+}, []);
+
+const loadSuggestions = useCallback(() => {
+  api
+    .jobFieldSuggestions()
+    .then((d) => setIfChanged(setSuggestions)(d || {}))
+    .catch(() => {});
+}, []);
+
+// initial load of both lists (loadSuggestions is defined above, so this is safe)
+useEffect(() => {
+  loadKnownPayments();
+  loadSuggestions();
+}, [loadKnownPayments, loadSuggestions]);
 
   // Tick every second to drive countdown + auto-hide
   useEffect(() => {
@@ -7525,6 +7673,8 @@ function EntryPage() {
       add("Delete window expired. Job can no longer be deleted.", "error");
     }
   }, [now, deleteJob]);
+
+
 
   // ── Helpers ──────────────────────────────────────────────────────────
   function isInProduction(job) {
@@ -7587,6 +7737,7 @@ function EntryPage() {
       setShowNewPayment(false);
       reload();
       loadKnownPayments();
+      loadSuggestions(); // ← NEW: new studio/size/etc. appear next time
       setAlbumTypeJob(created);
     } catch (err) {
       add(err.message, "error");
@@ -7610,51 +7761,52 @@ async function handleAlbumTypeConfirm(type) {
 }
 
   // ── Edit save ─────────────────────────────────────────────────────────
-  async function handleEditSave(e) {
-    e.preventDefault();
-    if (!isEditable(editJob)) {
-      add("Edit window (24h) expired. Job is now locked.", "error");
-      setEditJob(null);
-      return;
-    }
-    if (!editorName.trim()) {
-      add("Please enter your name before saving.", "error");
-      return;
-    }
-    const fd = new FormData(e.currentTarget);
-    setBusy(true);
-    try {
-      await api.updateJob(editJob.id, {
-        edited_by: editorName.trim(),
-        couple_name: fd.get("couple_name") || "",
-        order_no: fd.get("order_no") || "",
-        dele_date: new Date(fd.get("dele_date")).toISOString(),
-        priority: fd.get("priority"),
-        delivery_type: fd.get("delivery_type"),
-        pronto_address:
-  fd.get("delivery_type") === "PRONTO"
-    ? (fd.get("pronto_address") || "").trim()
-    : "",
-        special_note: fd.get("special_note") || "",
-        print_size: fd.get("print_size") || "",
-        print_pages: fd.get("print_pages") || "",
-        laser_cover_type: fd.get("laser_cover_type") || "",
-        laminate_type: fd.get("laminate_type") || "",
-        bind_rexing_no: fd.get("bind_rexing_no") || "",
-        box_type: fd.get("box_type") || "",
-      });
-      try {
-        localStorage.setItem(`ilab-editor-name:${ROLE}`, editorName.trim());
-      } catch {}
-      add(`✓ Job #${editJob.job_no} updated.`, "success");
-      setEditJob(null);
-      reload();
-    } catch (err) {
-      add(err.message, "error");
-    } finally {
-      setBusy(false);
-    }
+async function handleEditSave(e) {
+  e.preventDefault();
+  if (!isEditable(editJob)) {
+    add("Edit window (24h) expired. Job is now locked.", "error");
+    setEditJob(null);
+    return;
   }
+  if (!editorName.trim()) {
+    add("Please enter your name before saving.", "error");
+    return;
+  }
+  const fd = new FormData(e.currentTarget);
+  setBusy(true);
+  try {
+    await api.updateJob(editJob.id, {
+      edited_by: editorName.trim(),
+      couple_name: fd.get("couple_name") || "",
+      order_no: fd.get("order_no") || "",
+      dele_date: new Date(fd.get("dele_date")).toISOString(),
+      priority: fd.get("priority"),
+      delivery_type: fd.get("delivery_type"),
+      pronto_address:
+        fd.get("delivery_type") === "PRONTO"
+          ? (fd.get("pronto_address") || "").trim()
+          : "",
+      special_note: fd.get("special_note") || "",
+      print_size: fd.get("print_size") || "",
+      print_pages: fd.get("print_pages") || "",
+      laser_cover_type: fd.get("laser_cover_type") || "",
+      laminate_type: fd.get("laminate_type") || "",
+      bind_rexing_no: fd.get("bind_rexing_no") || "",
+      box_type: fd.get("box_type") || "",
+    });
+    try {
+      localStorage.setItem(`ilab-editor-name:${ROLE}`, editorName.trim());
+    } catch {}
+    add(`✓ Job #${editJob.job_no} updated.`, "success");
+    setEditJob(null);
+    reload();
+    loadSuggestions(); // ← NEW
+  } catch (err) {
+    add(err.message, "error");
+  } finally {
+    setBusy(false);
+  }
+}
 
   // ── Delete ────────────────────────────────────────────────────────────
   async function handleDelete() {
@@ -7788,7 +7940,11 @@ async function handleAlbumTypeConfirm(type) {
               </div>
               <div>
                 <label>Photographer / Studio *</label>
-                <input name="customer" placeholder="Studio name" />
+                <AutocompleteInput
+                  name="customer"
+                  placeholder="Studio name"
+                  suggestions={suggestions.customer}
+                />
               </div>
               <div>
                 <label>Couple Name</label>
@@ -7813,7 +7969,7 @@ async function handleAlbumTypeConfirm(type) {
               </div>
             </div>
           </Sec>
-          <JobFields job={null} />
+          <JobFields job={null} suggestions={suggestions} />
 
           <Sec title="Payment (Optional)" accent="#16a34a">
             <div>
@@ -8354,6 +8510,7 @@ async function handleAlbumTypeConfirm(type) {
             </div>
 
             <form
+              key={editJob.id}
               ref={editRef}
               onSubmit={handleEditSave}
               autoComplete="off"
@@ -8423,7 +8580,7 @@ async function handleAlbumTypeConfirm(type) {
                   </div>
                 </div>
               </Sec>
-              <JobFields job={editJob} />
+              <JobFields job={editJob} suggestions={suggestions} />
               <div style={{ display: "flex", gap: 8 }}>
                 <button
                   type="submit"

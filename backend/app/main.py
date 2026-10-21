@@ -2870,6 +2870,34 @@ def health():
     return {"status": "ok", "service": "i Lab Gampaha", "time": datetime.utcnow().isoformat()}
 
 
+SUGGEST_FIELDS = ["customer", "print_size", "laminate_type", "bind_rexing_no", "box_type"]
+
+@app.get("/api/suggestions/job-fields")
+def job_field_suggestions(db: Session = Depends(get_db)):
+    """Distinct previously-used values per field, most used first."""
+    result = {}
+    for name in SUGGEST_FIELDS:
+        col = getattr(JobCard, name)
+        trimmed = func.trim(col)
+        cnt = func.count(JobCard.id)
+        rows = (
+            db.query(trimmed, cnt)
+            .filter(col.isnot(None), trimmed != "")
+            .group_by(trimmed)
+            .order_by(desc(cnt))
+            .limit(300)
+            .all()
+        )
+        seen, values = set(), []
+        for value, _ in rows:
+            key = value.lower()
+            if key in seen:  # drop case-only duplicates
+                continue
+            seen.add(key)
+            values.append(value)
+        result[name] = values
+    return result
+
 # ── Static SPA ────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DIST_DIR = os.path.join(BASE_DIR, "frontend", "dist")
