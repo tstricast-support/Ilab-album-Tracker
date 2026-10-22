@@ -82,6 +82,17 @@ async function apiFetch(path, opts = {}) {
 }
 
 const api = {
+  boxJobs: (date = "", search = "", page = 1) =>
+    apiFetch(
+      `/api/box-jobs?${date ? `date=${date}&` : ""}search=${encodeURIComponent(search)}&page=${page}&page_size=30`,
+    ),
+  boxJobDates: (year, month) =>
+    apiFetch(`/api/box-jobs/dates-with-entries?year=${year}&month=${month}`),
+  boxJobDone: (id, done, done_by) =>
+    apiFetch(`/api/box-jobs/${id}/done`, {
+      method: "PATCH",
+      body: JSON.stringify({ done, done_by }),
+    }),
   jobs: (done = false) => apiFetch(`/api/jobs?completed=${done}`),
   createJob: (body) =>
     apiFetch("/api/jobs", { method: "POST", body: JSON.stringify(body) }),
@@ -361,6 +372,7 @@ const IS_ADMIN = ROLE === "ADMIN";
 
 function getDeptHomePath() {
   if (ROLE === "ENTRY") return "/entry";
+  if (ROLE === "BOXMAKE") return "/boxmaker";
   if (["PRINTING", "LAMINATING", "LASER_CUTTING", "BINDING"].includes(ROLE))
     return `/station/${ROLE.toLowerCase()}`;
   return "/";
@@ -373,6 +385,7 @@ function getDeptLabel() {
     LASER_CUTTING: "Laser Cutting",
     BINDING: "Binding",
     ENTRY: "Entry",
+    BOXMAKE: "Box Maker",
   };
   return map[ROLE] || "Station";
 }
@@ -2348,6 +2361,7 @@ function getPage() {
   if (p === "/admin/date-fix") return { page: "date-fix" };
   if (p === "/admin/fix-jobcard") return { page: "fix-jobcard" };
   if (p === "/admin/chat") return { page: "admin-chat" };
+  if (p === "/boxmaker") return { page: "boxmaker" };
   const md = p.match(/^\/station\/([\w]+)\/damages$/);
   if (md) return { page: "damages", dept: md[1] };
   const m = p.match(/^\/station\/([\w]+)$/);
@@ -2368,6 +2382,7 @@ const NAV_ITEMS = [
   { label: "Laminating", path: "/station/laminating", accent: "#06b6d4" },
   { label: "Laser Cut", path: "/station/laser_cutting", accent: "#a855f7" },
   { label: "Binding", path: "/station/binding", accent: "#22c55e" },
+  { label: "Box List", path: "/boxmaker", accent: "#f59e0b" },
   { label: "Damages", path: "/damages", accent: "var(--red)" },
   { label: "Papers", path: "/papers", accent: "#3b82f6" },
   { label: "Fix Dates", path: "/admin/date-fix", accent: "var(--red)" },
@@ -4364,9 +4379,10 @@ function Shell({ title, accent = "var(--amber)", topRightPrimary, topRightMid, t
     path === "/damages" || /^\/station\/[\w]+\/damages$/.test(path);
   const onPapers = path === "/papers";
   const onEntry = path === "/entry";
+  const onBox = path === "/boxmaker";
   const lowStock = useLowStockBlink();
 
-  const onSubPage = onHistory || onDamages || onPapers || onEntry;
+  const onSubPage = onHistory || onDamages || onPapers || onEntry || onBox;
   const isAtOwnHome = !IS_ADMIN && path === getDeptHomePath();
 
   // Close the mobile menu whenever the route changes
@@ -4499,8 +4515,6 @@ function Shell({ title, accent = "var(--amber)", topRightPrimary, topRightMid, t
 
               {/* Primary action stays visible */}
               {topRightPrimary}
-
-              
 
               {/* Hamburger toggle */}
               <button
@@ -4797,7 +4811,6 @@ function Shell({ title, accent = "var(--amber)", topRightPrimary, topRightMid, t
               >
                 <Download size={14} />
               </button>
-
 
               {topRight}
             </>
@@ -21461,6 +21474,405 @@ function useIsMobile() {
   return mobile;
 }
 
+function BoxMakerPage() {
+  const { toasts, add } = useToast();
+  const isMobile = useIsMobile();
+  const [selectedDate, setSelectedDate] = useState(() => slDateStr(new Date()));
+  const [calYear, setCalYear] = useState(new Date().getFullYear());
+  const [calMonth, setCalMonth] = useState(new Date().getMonth() + 1);
+  const [dotDays, setDotDays] = useState({});
+  const [showCal, setShowCal] = useState(!isMobile);
+  const [search, setSearch] = useState("");
+  const [debounced, setDebounced] = useState("");
+  const [page, setPage] = useState(1);
+  const [data, setData] = useState(null);
+  const [busyId, setBusyId] = useState(null);
+  const [myName, setMyName] = useState(
+    () => localStorage.getItem("ilab-box-name") || "",
+  );
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebounced(search);
+      setPage(1);
+    }, 350);
+    return () => clearTimeout(t);
+  }, [search]);
+  useEffect(() => {
+    setPage(1);
+  }, [selectedDate]);
+  useEffect(() => {
+    api
+      .boxJobDates(calYear, calMonth)
+      .then(setDotDays)
+      .catch(() => setDotDays({}));
+  }, [calYear, calMonth]);
+
+  const reload = useCallback(async () => {
+    try {
+      setIfChanged(setData)(await api.boxJobs(selectedDate, debounced, page));
+    } catch (err) {
+      add(err.message, "error");
+    }
+  }, [selectedDate, debounced, page]);
+  usePolling(
+    reload,
+    POLL_INTERVAL_MS,
+    true,
+    `${selectedDate}|${debounced}|${page}`,
+  );
+
+  async function toggleDone(j) {
+    const markDone = !j.is_done;
+    if (markDone && !myName.trim()) {
+      add("Please enter your name first.", "error");
+      return;
+    }
+    if (!markDone && !window.confirm(`Undo "done" for ${j.job_no}?`)) return;
+    setBusyId(j.id);
+    try {
+      await api.boxJobDone(j.id, markDone, myName.trim());
+      if (markDone) localStorage.setItem("ilab-box-name", myName.trim());
+      add(
+        markDone
+          ? `✓ Box ${j.job_no} marked done.`
+          : `Box ${j.job_no} set back to pending.`,
+        markDone ? "success" : "info",
+      );
+      await reload();
+    } catch (err) {
+      add(err.message, "error");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  const accent = "#f59e0b";
+  return (
+    <>
+      <Shell title="BOX MAKER - DAILY LIST" accent={accent}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: isMobile ? "1fr" : "240px 1fr",
+            gap: 16,
+            alignItems: "start",
+          }}
+        >
+          {/* ── Left column ── */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div>
+              <label>Your name *</label>
+              <input
+                value={myName}
+                onChange={(e) =>
+                  setMyName(
+                    e.target.value.replace(/\b\w/g, (c) => c.toUpperCase()),
+                  )
+                }
+                placeholder="Enter your name"
+              />
+            </div>
+
+            {isMobile && (
+              <button
+                onClick={() => setShowCal((p) => !p)}
+                style={{
+                  padding: "8px 12px",
+                  background: "var(--bg3)",
+                  color: "var(--text-sec)",
+                  border: `1px solid ${accent}`,
+                  borderRadius: 6,
+                  fontWeight: 700,
+                }}
+              >
+                <Calendar size={14} /> {selectedDate}
+              </button>
+            )}
+            {showCal && (
+              <EntryCalendar
+                year={calYear}
+                month={calMonth}
+                onYearMonth={(y, m) => {
+                  setCalYear(y);
+                  setCalMonth(m);
+                }}
+                dotDays={dotDays}
+                selectedDate={selectedDate}
+                onSelect={setSelectedDate}
+                onAfterSelect={() => isMobile && setShowCal(false)}
+                accent={accent}
+              />
+            )}
+            <SearchBar
+              value={search}
+              onChange={setSearch}
+              placeholder="Job No / Studio / Couple…"
+            />
+            {data && (
+              <div
+                style={{
+                  background: "var(--bg2)",
+                  border: `1px solid ${accent}55`,
+                  borderTop: `3px solid ${accent}`,
+                  borderRadius: 8,
+                  padding: "12px 14px",
+                  display: "flex",
+                  gap: 16,
+                }}
+              >
+                <div>
+                  <div
+                    style={{
+                      fontSize: 10,
+                      color: "var(--text-dim)",
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    Total
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: "var(--fd)",
+                      fontSize: 28,
+                      fontWeight: 900,
+                      color: accent,
+                    }}
+                  >
+                    {data.total}
+                  </div>
+                </div>
+                <div>
+                  <div
+                    style={{
+                      fontSize: 10,
+                      color: "var(--text-dim)",
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    Done
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: "var(--fd)",
+                      fontSize: 28,
+                      fontWeight: 900,
+                      color: "var(--green)",
+                    }}
+                  >
+                    {data.done_count}
+                  </div>
+                </div>
+                <div>
+                  <div
+                    style={{
+                      fontSize: 10,
+                      color: "var(--text-dim)",
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    Pending
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: "var(--fd)",
+                      fontSize: 28,
+                      fontWeight: 900,
+                      color: "var(--red)",
+                    }}
+                  >
+                    {data.pending_count}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ── Job list ── */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {data?.jobs?.length === 0 && (
+              <div
+                style={{
+                  textAlign: "center",
+                  padding: "40px 0",
+                  color: "var(--text-dim)",
+                }}
+              >
+                NO BOX JOBS ON THIS DAY
+              </div>
+            )}
+            {data?.jobs?.map((j) => {
+              const barColor = j.is_done
+                ? "var(--green)"
+                : j.priority === "URGENT"
+                  ? "var(--red)"
+                  : accent;
+              return (
+                <div
+                  key={j.id}
+                  style={{
+                    background: j.is_done ? "var(--success-bg)" : "var(--bg2)",
+                    border: "1px solid var(--border)",
+                    borderLeft: `4px solid ${barColor}`,
+                    borderRadius: 8,
+                    padding: "12px 14px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                    opacity: j.is_done ? 0.85 : 1,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 8,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontFamily: "var(--fm)",
+                        fontSize: 18,
+                        fontWeight: 800,
+                        color: "var(--amber)",
+                      }}
+                    >
+                      {j.job_no}
+                      {j.priority === "URGENT" && (
+                        <span
+                          style={{
+                            marginLeft: 8,
+                            fontSize: 11,
+                            color: "var(--red)",
+                          }}
+                        >
+                          URGENT
+                        </span>
+                      )}
+                    </span>
+                    <span style={{ fontSize: 12, color: "var(--text-dim)" }}>
+                      Delivery{" "}
+                      {new Date(j.dele_date).toLocaleDateString("en-GB", {
+                        day: "2-digit",
+                        month: "short",
+                      })}
+                    </span>
+                  </div>
+
+                  <div
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 700,
+                      color: "var(--text-pri)",
+                    }}
+                  >
+                    {j.customer}
+                    {j.couple_name ? ` / ${j.couple_name}` : ""}
+                  </div>
+
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <Chip label="Box Type" value={j.box_name} accent={accent} />
+                    <Chip
+                      label="Box Size"
+                      value={j.box_size}
+                      accent="#3b82f6"
+                    />
+                  </div>
+
+                  {j.is_done ? (
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        gap: 8,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 800,
+                          color: "var(--green)",
+                        }}
+                      >
+                        ✓ DONE by {j.done_by} at{" "}
+                        {parseUTC(j.done_at).toLocaleTimeString([], {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </span>
+                      <button
+                        onClick={() => toggleDone(j)}
+                        disabled={busyId === j.id}
+                        style={{
+                          padding: "5px 12px",
+                          fontSize: 11,
+                          fontWeight: 700,
+                          borderRadius: 5,
+                          background: "var(--bg3)",
+                          color: "var(--text-sec)",
+                          border: "1px solid var(--border)",
+                        }}
+                      >
+                        ↺ Undo
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => toggleDone(j)}
+                      disabled={busyId === j.id}
+                      style={{
+                        padding: "11px 0",
+                        background: busyId === j.id ? "var(--bg3)" : "#16a34a",
+                        color: busyId === j.id ? "var(--text-dim)" : "#fff",
+                        borderRadius: 8,
+                        fontWeight: 800,
+                        fontSize: 14,
+                      }}
+                    >
+                      {busyId === j.id ? "Saving…" : "✓ MARK BOX DONE"}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+
+            {data && data.pages > 1 && (
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "center",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                <button
+                  disabled={page === 1}
+                  onClick={() => setPage((p) => p - 1)}
+                >
+                  ◀ Prev
+                </button>
+                <span style={{ color: "var(--text-dim)" }}>
+                  {page} / {data.pages}
+                </span>
+                <button
+                  disabled={page === data.pages}
+                  onClick={() => setPage((p) => p + 1)}
+                >
+                  Next ▶
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </Shell>
+      <ToastStack toasts={toasts} />
+    </>
+  );
+}
+
 // ── App root ──────────────────────────────────────────────────────────────────
 export default function App() {
   const [route, setRoute] = useState(getPage());
@@ -21479,6 +21891,8 @@ export default function App() {
       <GlobalResponsiveStyles />
       {page === "entry" ? (
         <EntryPage />
+      ) : page === "boxmaker" ? ( 
+        <BoxMakerPage />
       ) : page === "station" ? (
         <StationPage deptKey={dept} />
       ) : page === "damages" ? (

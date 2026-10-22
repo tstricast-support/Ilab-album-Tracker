@@ -174,6 +174,9 @@ class JobCard(Base):
     payment_updated_at = Column(DateTime,    nullable=True)
     box_pouch_status    = Column(String(32),  nullable=True)
 
+    box_done_at         = Column(DateTime,    nullable=True)   
+    box_done_by         = Column(String(128), nullable=True)   
+
     status_printing      = Column(Enum(StageStatusEnum), nullable=False, default=StageStatusEnum.PENDING)
     status_laminating    = Column(Enum(StageStatusEnum), nullable=False, default=StageStatusEnum.PENDING)
     status_laser_cutting = Column(Enum(StageStatusEnum), nullable=False, default=StageStatusEnum.PENDING)
@@ -503,6 +506,14 @@ def run_migration():
                 conn.execute(text("ALTER TABLE job_cards ADD COLUMN pronto_address TEXT"))
                 conn.commit()
 
+            if "box_done_at" not in job_cols:
+                conn.execute(text("ALTER TABLE job_cards ADD COLUMN box_done_at DATETIME"))
+                conn.commit()
+
+            if "box_done_by" not in job_cols:
+                conn.execute(text("ALTER TABLE job_cards ADD COLUMN box_done_by VARCHAR(128)"))
+                conn.commit()
+
         damage_cols = {c["name"] for c in inspector.get_columns("damage_entries")}
         with engine.connect() as conn:
             if "job_no" not in damage_cols:
@@ -646,6 +657,15 @@ def run_migration():
         conn.execute(text("""
             ALTER TABLE chat_messages
             ADD COLUMN IF NOT EXISTS is_read BOOLEAN DEFAULT FALSE;
+        """))
+
+        conn.execute(text("""
+            ALTER TABLE job_cards
+            ADD COLUMN IF NOT EXISTS box_done_at TIMESTAMP;
+        """))
+        conn.execute(text("""
+            ALTER TABLE job_cards
+            ADD COLUMN IF NOT EXISTS box_done_by VARCHAR(128);
         """))
 
         conn.commit()

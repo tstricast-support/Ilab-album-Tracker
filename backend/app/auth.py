@@ -3,7 +3,7 @@ from jwt import PyJWKClient
 from fastapi import Depends, HTTPException, Request
 from .config import settings
 
-VALID_ROLES = {"ENTRY","PRINTING","LAMINATING","LASER_CUTTING","BINDING","ADMIN"}
+VALID_ROLES = {"ENTRY","PRINTING","LAMINATING","LASER_CUTTING","BINDING","ADMIN","BOXMAKE"}
 PUBLIC_PREFIXES = ("/api/track/", "/api/health")
 
 _jwks = PyJWKClient(settings.CLERK_JWKS_URL, cache_keys=True) if settings.CLERK_JWKS_URL else None

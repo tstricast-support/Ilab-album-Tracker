@@ -2898,6 +2898,133 @@ def job_field_suggestions(db: Session = Depends(get_db)):
         result[name] = values
     return result
 
+def _split_box(box_type: str, fallback_size: str = ""):
+    parts = (box_type or "").split(" - ", 1)
+    name = parts[0].strip()
+    size = parts[1].strip() if len(parts) > 1 else (fallback_size or "")
+    return name, size
+
+
+@app.get("/api/box-jobs", dependencies=[Depends(require_roles("BOXMAKE", "ADMIN"))])
+def box_jobs(
+    db: Session = Depends(get_db),
+    date: Optional[str] = Query(None, description="YYYY-MM-DD, Sri Lanka day. Omit for today."),
+    search: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(30, ge=1, le=100),
+):
+    if date:
+        try:
+            day_start = datetime.strptime(date, "%Y-%m-%d") - SL_TZ_OFFSET
+        except ValueError:
+            raise HTTPException(400, "Invalid date format. Use YYYY-MM-DD.")
+    else:
+        sl_now = datetime.utcnow() + SL_TZ_OFFSET
+        day_start = datetime(sl_now.year, sl_now.month, sl_now.day) - SL_TZ_OFFSET
+    day_end = day_start + timedelta(days=1)
+
+    q = db.query(JobCard).filter(
+        JobCard.box_type.isnot(None),
+        func.trim(JobCard.box_type) != "",
+        JobCard.created_at >= day_start,
+        JobCard.created_at < day_end,
+    )
+    if search and search.strip():
+        term = f"%{search.strip()}%"
+        q = q.filter(or_(
+            JobCard.job_no.ilike(term),
+            JobCard.customer.ilike(term),
+            JobCard.couple_name.ilike(term),
+        ))
+
+    total = q.count()
+    done_count = q.filter(JobCard.box_done_at.isnot(None)).count()
+
+    rows = (
+        q.order_by(
+            case((JobCard.box_done_at.is_(None), 0), else_=1),   # pending first
+            _urgent_first(),
+            JobCard.created_at.asc(),
+        )
+         .offset((page - 1) * page_size).limit(page_size).all()
+    )
+    jobs = []
+    for j in rows:
+        name, size = _split_box(j.box_type, j.print_size)
+        jobs.append({
+            "id": j.id,
+            "job_no": j.job_no,
+            "customer": j.customer,
+            "couple_name": j.couple_name,
+            "box_type": j.box_type,
+            "box_name": name,
+            "box_size": size,
+            "priority": _str(j.priority),
+            "dele_date": j.dele_date,
+            "created_at": j.created_at,
+            "is_done": j.box_done_at is not None,
+            "done_at": j.box_done_at,
+            "done_by": j.box_done_by,
+        })
+    return {
+        "total": total,
+        "done_count": done_count,
+        "pending_count": total - done_count,
+        "page": page, "page_size": page_size,
+        "pages": max(1, -(-total // page_size)),
+        "jobs": jobs,
+    }
+
+
+class BoxDoneRequest(BaseModel):
+    done: bool = True
+    done_by: Optional[str] = None
+
+
+@app.patch("/api/box-jobs/{job_id}/done",
+           dependencies=[Depends(require_roles("BOXMAKE", "ADMIN"))])
+def box_job_done(job_id: int, payload: BoxDoneRequest, db: Session = Depends(get_db)):
+    job = _job_or_404(job_id, db)
+    if not (job.box_type or "").strip():
+        raise HTTPException(400, "This job has no box.")
+
+    if payload.done:
+        name = (payload.done_by or "").strip()
+        if not name:
+            raise HTTPException(400, "Your name is required.")
+        values = {"box_done_at": datetime.utcnow(), "box_done_by": name.title()}
+    else:
+        values = {"box_done_at": None, "box_done_by": None}   # undo
+
+    # keep updated_at unchanged so History calendars aren't affected
+    values["updated_at"] = JobCard.updated_at
+    db.query(JobCard).filter(JobCard.id == job_id).update(values, synchronize_session=False)
+    db.commit()
+    db.refresh(job)
+    return {
+        "id": job.id,
+        "is_done": job.box_done_at is not None,
+        "done_at": job.box_done_at,
+        "done_by": job.box_done_by,
+    }
+
+@app.get("/api/box-jobs/dates-with-entries",
+         dependencies=[Depends(require_roles("BOXMAKE", "ADMIN"))])
+def box_jobs_dates(year: int = Query(...), month: int = Query(...),
+                   db: Session = Depends(get_db)):
+    start, end = _month_window(year, month)   # defined lower in the file; fine at runtime
+    rows = (
+        db.query(JobCard.created_at)
+        .filter(JobCard.box_type.isnot(None), func.trim(JobCard.box_type) != "",
+                JobCard.created_at >= start, JobCard.created_at < end)
+        .all()
+    )
+    day_counts: dict[str, int] = {}
+    for (dt,) in rows:
+        k = str((dt + SL_TZ_OFFSET).day)
+        day_counts[k] = day_counts.get(k, 0) + 1
+    return day_counts
+
 # ── Static SPA ────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DIST_DIR = os.path.join(BASE_DIR, "frontend", "dist")

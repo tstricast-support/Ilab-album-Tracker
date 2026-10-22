@@ -92,6 +92,8 @@ class JobCardOut(BaseModel):
     payment_by: Optional[str] = None
     payment_updated_at: Optional[datetime] = None
     box_pouch_status: Optional[str] = None
+    box_done_at: Optional[datetime] = None
+    box_done_by: Optional[str] = None
 
     status_printing: str
     status_laminating: str

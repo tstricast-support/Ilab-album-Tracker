@@ -15,7 +15,7 @@ from ..schemas import ChatMessageOut, ChatMessageItemOut
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
-VALID_DEPTS = {"ENTRY", "PRINTING", "LAMINATING", "LASER_CUTTING", "BINDING", "ADMIN"}
+VALID_DEPTS = {"ENTRY", "PRINTING", "LAMINATING", "LASER_CUTTING", "BINDING", "ADMIN","BOXMAKE"}
 RETENTION_HOURS = 24
 
 # ── Name-tag quick template removed per requirements ──
