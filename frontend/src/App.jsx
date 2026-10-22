@@ -273,6 +273,7 @@ const api = {
   thankYouCardStats: () => apiFetch(`/api/stats/thankyou-cards`),
   knownThankYouNames: () => apiFetch(`/api/thankyou-cards/known-names`),
   paperStockStats: () => apiFetch(`/api/stats/paper-stock`),
+  paperShortages: () => apiFetch(`/api/paper-stock/shortages`),
   damageDates: (year, month, department) =>
     apiFetch(
       `/api/damages/dates-with-entries?year=${year}&month=${month}${department ? `&department=${department}` : ""}`,
@@ -4029,9 +4030,13 @@ function useLowStockBlink() {
   const enabled = ROLE === "PRINTING" || IS_ADMIN;
   usePolling(
     () =>
-      api
-        .paperStockStats()
-        .then((d) => setLow((d.low_stock_sizes || []).length > 0))
+      Promise.all([api.paperStockStats(), api.paperShortages()])
+        .then(([d, sh]) =>
+          setLow(
+            (d.low_stock_sizes || []).length > 0 ||
+              (ROLE === "PRINTING" && (sh.shortages || []).length > 0),
+          ),
+        )
         .catch(() => {}),
     30000,
     enabled,
@@ -11135,6 +11140,202 @@ function ymLabel(ym) {
     .toUpperCase();
 }
 
+function PaperShortageAlert({ addToast }) {
+  const KEY = "ilab-shortage-seen";
+  const [shortages, setShortages] = useState([]);
+  const [show, setShow] = useState(false);
+  const [queue, setQueue] = useState([]); // sizes waiting for the "add packet?" question
+  const [busy, setBusy] = useState(false);
+  const isMobile = useIsMobile();
+  const sig = (s) => s.map((x) => `${x.size}:${x.need}`).join("|");
+
+  const check = useCallback(
+    () =>
+      api
+        .paperShortages()
+        .then((d) => {
+          const list = d.shortages || [];
+          setShortages(list);
+          const sg = sig(list);
+          if (!sg) localStorage.removeItem(KEY);
+          else if (localStorage.getItem(KEY) !== sg) setShow(true);
+        })
+        .catch(() => {}),
+    [],
+  );
+
+  usePolling(check, 15000);
+
+  // Step 1 → OK pressed: remember it, then ask about each short size
+  function ok() {
+    localStorage.setItem(KEY, sig(shortages));
+    setShow(false);
+    setQueue(shortages.map((s) => s.size));
+  }
+
+  const nextQuestion = () => setQueue((q) => q.slice(1));
+
+  // Step 2 → Yes: add one packet
+  async function addPacket(size) {
+    setBusy(true);
+    try {
+      await api.addPaperPacket(size);
+      addToast?.(`✓ New ${size} packet added (+100 sheets)`, "success");
+      await check();
+    } catch (err) {
+      addToast?.(err.message, "error");
+    } finally {
+      setBusy(false);
+      nextQuestion();
+    }
+  }
+
+  const overlay = {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(0,0,0,.75)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 99999,
+    padding: 16,
+  };
+  const box = {
+    background: "var(--bg1)",
+    border: "2px solid var(--red)",
+    borderRadius: 14,
+    padding: isMobile ? 22 : 30,
+    width: "100%",
+    maxWidth: 440,
+    display: "flex",
+    flexDirection: "column",
+    gap: 14,
+  };
+
+  // ── Step 2: "Do you want to add a 12x16 paper packet?" ──
+  if (!show && queue.length > 0) {
+    const size = queue[0];
+    const info = shortages.find((s) => s.size === size);
+    return (
+      <div style={overlay}>
+        <div style={{ ...box, border: "2px solid var(--amber)", textAlign: "center" }}>
+          <div
+            style={{
+              fontSize: 11,
+              color: "var(--amber)",
+              fontWeight: 800,
+              textTransform: "uppercase",
+              letterSpacing: ".12em",
+            }}
+          >
+            Add Paper Packet
+          </div>
+          <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text-pri)", lineHeight: 1.5 }}>
+            Do you want to add a{" "}
+            <span style={{ color: "var(--amber)" }}>{size}</span> paper packet?
+          </div>
+          <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
+            +100 sheets
+            {info ? ` · currently need ${info.need}, have ${info.have}` : ""}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              onClick={() => addPacket(size)}
+              disabled={busy}
+              style={{
+                flex: 1,
+                padding: "13px 0",
+                background: busy ? "var(--bg3)" : "var(--green)",
+                color: busy ? "var(--text-dim)" : "#000",
+                borderRadius: 8,
+                fontWeight: 800,
+                fontSize: 15,
+              }}
+            >
+              {busy ? "Adding…" : "Yes, Add Packet"}
+            </button>
+            <button
+              onClick={nextQuestion}
+              disabled={busy}
+              style={{
+                padding: "13px 18px",
+                background: "var(--bg3)",
+                color: "var(--text-sec)",
+                border: "1px solid var(--border)",
+                borderRadius: 8,
+                fontWeight: 700,
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Step 1: "Paper stock not enough" ──
+  if (!show || shortages.length === 0) return null;
+
+  return (
+    <div style={overlay}>
+      <div style={box}>
+        <div
+          style={{
+            fontSize: 11,
+            color: "var(--red)",
+            fontWeight: 800,
+            textTransform: "uppercase",
+            letterSpacing: ".12em",
+            textAlign: "center",
+          }}
+        >
+          ⚠ Paper Stock Not Enough
+        </div>
+        {shortages.map((s) => (
+          <div
+            key={s.size}
+            style={{
+              background: "var(--bg2)",
+              border: "1px solid var(--red)",
+              borderRadius: 8,
+              padding: "10px 14px",
+            }}
+          >
+            <div style={{ fontWeight: 800, color: "var(--text-pri)" }}>
+              Your {s.size} paper stock is not enough
+              <span style={{ color: "var(--red)" }}>
+                {" "}(need {s.need}, have {s.have})
+              </span>
+              .
+            </div>
+            <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 4 }}>
+              Waiting: {s.items.map((i) => `${i.job_no} (${i.sheets})`).join(", ")}
+            </div>
+          </div>
+        ))}
+        <div style={{ fontSize: 13, color: "var(--text-sec)", textAlign: "center" }}>
+          Please fill the paper stock. Waiting deductions will be applied
+          automatically.
+        </div>
+        <button
+          onClick={ok}
+          style={{
+            padding: "13px 0",
+            background: "var(--amber)",
+            color: "#000",
+            borderRadius: 8,
+            fontWeight: 800,
+            fontSize: 15,
+          }}
+        >
+          OK
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function StationPage({ deptKey }) {
   const cfg = STATION_CFG[deptKey];
   const { toasts, add } = useToast();
@@ -11541,55 +11742,55 @@ function StationPage({ deptKey }) {
         }
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-
           {cfg.dept === "PRINTING" && (
-  <div>
-    <button
-      onClick={() => setTotalsOpen((o) => !o)}
-      style={{
-        width: isMobile ? "100%" : "auto",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 8,
-        padding: "10px 16px",
-        background: totalsOpen ? "var(--amber)" : "var(--bg3)",
-        color: totalsOpen ? "#000" : "var(--amber)",
-        border: "1px solid var(--amber)",
-        borderRadius: 8,
-        fontWeight: 800,
-        fontSize: 13,
-        cursor: "pointer",
-      }}
-    >
-      <Activity size={14} />
-      {totalsOpen ? "Hide Department Totals" : "Show Department Totals"}
-      <ChevronDown
-        size={14}
-        style={{
-          transition: "transform .2s ease",
-          transform: totalsOpen ? "rotate(180deg)" : "rotate(0deg)",
-        }}
-      />
-    </button>
+            <div>
+              <button
+                onClick={() => setTotalsOpen((o) => !o)}
+                style={{
+                  width: isMobile ? "100%" : "auto",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 8,
+                  padding: "10px 16px",
+                  background: totalsOpen ? "var(--amber)" : "var(--bg3)",
+                  color: totalsOpen ? "#000" : "var(--amber)",
+                  border: "1px solid var(--amber)",
+                  borderRadius: 8,
+                  fontWeight: 800,
+                  fontSize: 13,
+                  cursor: "pointer",
+                }}
+              >
+                <Activity size={14} />
+                {totalsOpen
+                  ? "Hide Department Totals"
+                  : "Show Department Totals"}
+                <ChevronDown
+                  size={14}
+                  style={{
+                    transition: "transform .2s ease",
+                    transform: totalsOpen ? "rotate(180deg)" : "rotate(0deg)",
+                  }}
+                />
+              </button>
 
-    {totalsOpen && (
-      <div
-        className="si"
-        style={{
-          marginTop: 10,
-          background: "var(--bg2)",
-          border: "1px solid var(--border)",
-          borderRadius: 10,
-          padding: 12,
-        }}
-      >
-        <DeptTotalsPanel addToast={add} hideHeader />
-      </div>
-    )}
-  </div>
-)}
-
+              {totalsOpen && (
+                <div
+                  className="si"
+                  style={{
+                    marginTop: 10,
+                    background: "var(--bg2)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 10,
+                    padding: 12,
+                  }}
+                >
+                  <DeptTotalsPanel addToast={add} hideHeader />
+                </div>
+              )}
+            </div>
+          )}
 
           {monthOpen && (
             <div
@@ -11736,7 +11937,9 @@ function StationPage({ deptKey }) {
                       onAddReason={setReasonJob}
                       reasonDept={cfg.dept}
                       onReturn={setReturnJob}
-                      returnDept={cfg.dept === "PRINTING" ? undefined : cfg.dept}
+                      returnDept={
+                        cfg.dept === "PRINTING" ? undefined : cfg.dept
+                      }
                       addToast={add}
                     />
                   </div>
@@ -11793,6 +11996,7 @@ function StationPage({ deptKey }) {
         />
       )}
       <DamageTimeAlertModal />
+      {cfg.dept === "PRINTING" && <PaperShortageAlert addToast={add} />}
       <ChatWidget myDept={cfg.dept} addToast={add} />
       <ToastStack toasts={toasts} />
     </>
@@ -14262,9 +14466,21 @@ function PaperUsageCard({ entry, onChanged, addToast }) {
             >
               {entry.paper_size}
             </span>
-          </div>
-          <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 4 }}>
-            👤 {entry.operator_name}
+            {entry.source && (
+              <span
+                style={{
+                  fontSize: 10,
+                  padding: "2px 7px",
+                  borderRadius: 4,
+                  fontWeight: 800,
+                  background: "var(--info-bg)",
+                  color: "var(--cyan)",
+                  border: "1px solid var(--cyan)",
+                }}
+              >
+                AUTO · {entry.source === "AUTO_JOB" ? "Printed job" : "Damage"}
+              </span>
+            )}
           </div>
           <div
             style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}
@@ -14369,6 +14585,7 @@ function PapersPage() {
   const { toasts, add } = useToast();
   const isMobile = useIsMobile();
   const [stock, setStock] = useState([]);
+  const [shortages, setShortages] = useState([]);
   const [data, setData] = useState(null);
   const [search, setSearch] = useState("");
   const [showReset, setShowReset] = useState(false);
@@ -14389,12 +14606,16 @@ function PapersPage() {
     return () => clearTimeout(t);
   }, [search]);
 
-  const reloadStock = useCallback(() => {
-    api
-      .paperStock()
-      .then(setIfChanged(setStock))
-      .catch(() => {});
-  }, []);
+    const reloadStock = useCallback(() => {
+      api
+        .paperStock()
+        .then(setIfChanged(setStock))
+        .catch(() => {});
+      api
+        .paperShortages()
+        .then((d) => setIfChanged(setShortages)(d.shortages || []))
+        .catch(() => {});
+    }, []);
 
   const reloadUsage = useCallback(async () => {
     try {
@@ -14435,6 +14656,25 @@ function PapersPage() {
     <>
       <Shell title="PAPER STOCK" accent="var(--blue)">
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {ROLE === "PRINTING" &&
+            shortages.map((s) => (
+              <div
+                key={s.size}
+                className="blink"
+                style={{
+                  background: "var(--danger-bg)",
+                  border: "1px solid var(--red)",
+                  borderRadius: 8,
+                  padding: "10px 14px",
+                  color: "var(--red)",
+                  fontWeight: 800,
+                  fontSize: 13,
+                }}
+              >
+                ⚠ {s.size}: need {s.need}, have {s.have}. Add a packet and the
+                waiting deductions ({s.items.length}) will apply automatically.
+              </div>
+            ))}
           <div
             style={{
               display: "flex",

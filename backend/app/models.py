@@ -358,6 +358,8 @@ class PaperUsageEntry(Base):
     job_no        = Column(String(64),  nullable=False)
     operator_name = Column(String(128), nullable=False)
     paper_size    = Column(String(16),  nullable=False)
+    source    = Column(String(16), nullable=True)
+    source_id = Column(Integer, nullable=True)
     ok_pages      = Column(Integer, nullable=False, default=0)
     print_damage  = Column(Integer, nullable=False, default=0)
     accu_rp       = Column(Integer, nullable=False, default=0)
@@ -484,6 +486,21 @@ class AlbumMovement(Base):
     def __repr__(self) -> str:
         return f"<AlbumMovement job={self.job_id} {self.from_department}->{self.to_department} {self.status}>"
 
+
+class PaperPending(Base):
+    __tablename__ = "paper_pending"
+    id            = Column(Integer, primary_key=True, autoincrement=True)
+    source        = Column(String(16), nullable=False)
+    source_id     = Column(Integer, nullable=True, index=True)
+    job_no        = Column(String(64), nullable=True)
+    operator_name = Column(String(128), nullable=True)
+    paper_size    = Column(String(16), nullable=False)
+    sheets        = Column(Integer, nullable=False)
+    ok_pages      = Column(Integer, nullable=False, default=0)
+    accu_rp       = Column(Integer, nullable=False, default=0)
+    bind_rp       = Column(Integer, nullable=False, default=0)
+    created_at    = Column(DateTime, nullable=False, default=datetime.utcnow)
+
 def init_db():
     Base.metadata.create_all(bind=engine)
     seed_paper_prices()
@@ -525,6 +542,14 @@ def run_migration():
             if "other_item" not in damage_cols:                       
                 conn.execute(text("ALTER TABLE damage_entries ADD COLUMN other_item VARCHAR(256)"))
                 conn.commit()
+
+        pu_cols = {c["name"] for c in inspector.get_columns("paper_usage_entries")}
+        with engine.connect() as conn:
+            if "source" not in pu_cols:
+                conn.execute(text("ALTER TABLE paper_usage_entries ADD COLUMN source VARCHAR(16)"))
+            if "source_id" not in pu_cols:
+                conn.execute(text("ALTER TABLE paper_usage_entries ADD COLUMN source_id INTEGER"))
+            conn.commit()
 
             
 
@@ -667,6 +692,9 @@ def run_migration():
             ALTER TABLE job_cards
             ADD COLUMN IF NOT EXISTS box_done_by VARCHAR(128);
         """))
+        conn.execute(text("ALTER TABLE paper_usage_entries ADD COLUMN IF NOT EXISTS source VARCHAR(16);"))
+        
+        conn.execute(text("ALTER TABLE paper_usage_entries ADD COLUMN IF NOT EXISTS source_id INTEGER;"))
 
         conn.commit()
 

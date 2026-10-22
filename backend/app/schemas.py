@@ -171,6 +171,8 @@ class PaperUsageEntryOut(BaseModel):
     paper_size: str
     ok_pages: int
     print_damage: int
+    source: Optional[str] = None
+    source_id: Optional[int] = None
     accu_rp: int
     bind_rp: int
     total_used: int

@@ -27,7 +27,8 @@ from .models import (
     get_db,
     init_db,
     run_migration,
-    PaperPrice,          
+    PaperPrice,
+    PaperPending,          
     DamageEntry,          
     DamageDeptEnum,
     PaperStock,          
@@ -53,6 +54,8 @@ from .schemas import (
     PaperUsageEntryOut, 
     ThankYouCardOut
 )
+from .paper_auto import (auto_deduct_job, auto_deduct_damage,
+                         release_source, apply_pending, shortage_alerts)
 from .auth import get_current_user, require_roles
 
 
@@ -385,6 +388,7 @@ def delete_job(job_id: int, db: Session = Depends(get_db)):
     if (datetime.utcnow() - job.created_at) > DELETE_WINDOW:  # type:ignore
         raise HTTPException(403, "Delete window has expired. Job can no longer be deleted.")
 
+    release_source(db, "AUTO_JOB", job.id)
     db.delete(job)
     db.commit()
     _bust_dept_stats_cache()
@@ -529,6 +533,8 @@ def create_damage(payload: DamageCreate, db: Session = Depends(get_db)):
     )
 
     db.add(entry)
+    db.flush()                      
+    auto_deduct_damage(db, entry)
     db.commit()
     db.refresh(entry)
     return _damage_out(entry)
@@ -872,6 +878,8 @@ def update_damage(damage_id: int, payload: DamageUpdate,
 
     entry.total_value = entry.unit_price_snapshot * entry.quantity
     entry.updated_at = datetime.utcnow()
+    release_source(db, "AUTO_DAMAGE", entry.id)   # refund old deduction
+    auto_deduct_damage(db, entry)                 # apply the new one
     db.commit()                # ← the actual bug fix
     db.refresh(entry)
     return _damage_out(entry)
@@ -881,6 +889,7 @@ def delete_damage(damage_id: int, db: Session = Depends(get_db),
                   user=Depends(get_current_user)):
     entry = _damage_or_404(damage_id, db)
     _check_damage_editable(entry, admin_override=(user["role"] == "ADMIN"))
+    release_source(db, "AUTO_DAMAGE", entry.id)
     db.delete(entry)
     db.commit()
 
@@ -1089,6 +1098,8 @@ def advance(
 
         setattr(job, field, StageStatusEnum.COMPLETED)
         _close_log(job, dept_enum, db)
+        if dept == "PRINTING":
+            auto_deduct_job(db, job)
         _check_full_completion(job, db)
     else:
         raise HTTPException(400, "action must be 'start' or 'complete'")
@@ -2143,6 +2154,7 @@ def add_paper_packet(payload: AddPacketRequest, db: Session = Depends(get_db)):
 
     log = PaperPacketLog(size=size, sheets_added=100)
     db.add(log)
+    apply_pending(db, size) 
     db.commit()
     db.refresh(stock)
     db.refresh(log)
@@ -2175,6 +2187,10 @@ def undo_paper_packet(log_id: int, db: Session = Depends(get_db)):
     stock.updated_at = datetime.utcnow()  #type:ignore
     db.delete(log)
     db.commit()
+
+@app.get("/api/paper-stock/shortages")
+def paper_shortages(db: Session = Depends(get_db)):
+    return shortage_alerts(db)
 
 @app.get("/api/paper-packet-logs", response_model=dict)
 def list_packet_logs(
