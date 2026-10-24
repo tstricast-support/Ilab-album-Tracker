@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy import or_, and_, func, desc
 from sqlalchemy.orm import Session
 
-from ..auth import get_current_user
+from ..auth import get_current_user,require_roles
 
 from ..models import JobCard, ChatMessage, ChatMessageItem, get_db
 from ..schemas import ChatMessageOut, ChatMessageItemOut
@@ -323,7 +323,8 @@ def reply_with_items(payload: ReplyWithItemsRequest, db: Session = Depends(get_d
 
 
 # ── Admin master view — sees everything, read-only ────────────────────
-@router.get("/admin/all", response_model=List[ChatMessageOut])
+@router.get("/admin/all", response_model=List[ChatMessageOut],
+            dependencies=[Depends(require_roles("ADMIN"))])
 def admin_all_messages(
     department: Optional[str] = Query(None),
     db: Session = Depends(get_db),

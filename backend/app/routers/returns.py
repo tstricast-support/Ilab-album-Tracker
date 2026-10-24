@@ -93,7 +93,7 @@ class ReturnSendRequest(BaseModel):
 def send_return(payload: ReturnSendRequest, db: Session = Depends(get_db),
                 user=Depends(get_current_user)):
     src = _dept(payload.from_department)
-    if user["role"] != "ADMIN" and src != user["role"]:
+    if user["role"] not in ("ADMIN", "SUPERVISOR") and src != user["role"]:
         raise HTTPException(403, "You can only return albums from your own department")
     dst = _dept(payload.to_department)
 

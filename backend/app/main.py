@@ -373,7 +373,10 @@ def get_job(job_id: int, db: Session = Depends(get_db)):
 
 
 @app.delete("/api/jobs/{job_id}", status_code=204)
-def delete_job(job_id: int, db: Session = Depends(get_db)):
+def delete_job(job_id: int, db: Session = Depends(get_db),
+               user=Depends(get_current_user)):
+    if user and user["role"] == "SUPERVISOR":
+        raise HTTPException(403, "Supervisor cannot delete jobs.")
     job = _job_or_404(job_id, db)
 
     in_production = any([
@@ -1014,7 +1017,7 @@ def advance(
     user=Depends(get_current_user),
 ):
     dept = department.upper()
-    if user["role"] not in ("ADMIN", dept):
+    if user["role"] not in ("ADMIN", "SUPERVISOR", dept):
         raise HTTPException(403, "Not your department")
     if dept not in DEPT_FIELD:
         raise HTTPException(400, f"Unknown department: {department}")
@@ -1119,7 +1122,7 @@ def set_delay_reason(
     user=Depends(get_current_user),
 ):
     dept = department.upper()
-    if user["role"] not in ("ADMIN", dept):
+    if user["role"] not in ("ADMIN", "SUPERVISOR", dept):
         raise HTTPException(403, "Not your department")
     if dept not in DEPT_FIELD:
         raise HTTPException(400, f"Unknown department: {department}")
@@ -2921,7 +2924,7 @@ def _split_box(box_type: str, fallback_size: str = ""):
     return name, size
 
 
-@app.get("/api/box-jobs", dependencies=[Depends(require_roles("BOXMAKE", "ADMIN"))])
+@app.get("/api/box-jobs", dependencies=[Depends(require_roles("BOXMAKE", "ADMIN", "SUPERVISOR"))])
 def box_jobs(
     db: Session = Depends(get_db),
     date: Optional[str] = Query(None, description="YYYY-MM-DD, Sri Lanka day. Omit for today."),
@@ -3025,7 +3028,7 @@ def box_job_done(job_id: int, payload: BoxDoneRequest, db: Session = Depends(get
     }
 
 @app.get("/api/box-jobs/dates-with-entries",
-         dependencies=[Depends(require_roles("BOXMAKE", "ADMIN"))])
+         dependencies=[Depends(require_roles("BOXMAKE", "ADMIN", "SUPERVISOR"))])
 def box_jobs_dates(year: int = Query(...), month: int = Query(...),
                    db: Session = Depends(get_db)):
     start, end = _month_window(year, month)   # defined lower in the file; fine at runtime

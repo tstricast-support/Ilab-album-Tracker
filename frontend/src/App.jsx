@@ -370,6 +370,8 @@ function initRole() {
 
 const ROLE = initRole();
 const IS_ADMIN = ROLE === "ADMIN";
+const IS_SUPERVISOR = ROLE === "SUPERVISOR";
+const IS_PRIVILEGED = IS_ADMIN || IS_SUPERVISOR;
 
 function getDeptHomePath() {
   if (ROLE === "ENTRY") return "/entry";
@@ -387,6 +389,7 @@ function getDeptLabel() {
     BINDING: "Binding",
     ENTRY: "Entry",
     BOXMAKE: "Box Maker",
+    SUPERVISOR: "Supervisor",
   };
   return map[ROLE] || "Station";
 }
@@ -2391,6 +2394,15 @@ const NAV_ITEMS = [
   { label: "Chat", path: "/admin/chat", accent: "var(--purple)" },
 ];
 
+const SUPERVISOR_HIDDEN = [
+  "/admin/date-fix",
+  "/admin/fix-jobcard",
+  "/admin/chat",
+];
+const VISIBLE_NAV_ITEMS = IS_SUPERVISOR
+  ? NAV_ITEMS.filter((i) => !SUPERVISOR_HIDDEN.includes(i.path))
+  : NAV_ITEMS;
+
 // ── Toast ─────────────────────────────────────────────────────────────────────
 function useToast() {
   const [toasts, setToasts] = useState([]);
@@ -4367,6 +4379,7 @@ function TrackPage() {
 
 // ── Shell ─────────────────────────────────────────────────────────────────────
 function Shell({ title, accent = "var(--amber)", topRightPrimary, topRightMid, topRight, children }) {
+  const IS_ADMIN = IS_PRIVILEGED; // supervisor gets the admin header (back button, history, etc.)
   const [, forceUpdate] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
   const isMobile = useIsMobile();
@@ -8316,7 +8329,7 @@ async function handleEditSave(e) {
                         </button>
 
                         {/* Delete - only within first 4 min and not in production */}
-                        {canDelete && (
+                        {canDelete && !IS_SUPERVISOR && (
                           <button
                             onClick={() => setDeleteJob(job)}
                             style={{
@@ -8779,7 +8792,7 @@ async function handleEditSave(e) {
           addToast={add}
         />
       )}
-      <ChatWidget myDept="ENTRY" addToast={add} />
+      {!IS_SUPERVISOR && <ChatWidget myDept="ENTRY" addToast={add} />}
       <ToastStack toasts={toasts} />
     </>
   );
@@ -11996,8 +12009,10 @@ function StationPage({ deptKey }) {
         />
       )}
       <DamageTimeAlertModal />
-      {cfg.dept === "PRINTING" && <PaperShortageAlert addToast={add} />}
-      <ChatWidget myDept={cfg.dept} addToast={add} />
+      {cfg.dept === "PRINTING" && !IS_SUPERVISOR && (
+        <PaperShortageAlert addToast={add} />
+      )}
+      {!IS_SUPERVISOR && <ChatWidget myDept={cfg.dept} addToast={add} />}
       <ToastStack toasts={toasts} />
     </>
   );
@@ -12909,7 +12924,7 @@ function DamageEntryCard({ entry, onChanged, addToast }) {
   const WINDOW_MS = 24 * 3600 * 1000;
   const remaining = WINDOW_MS - (now - createdMs());
   const withinWindow = remaining > 0;
-  const canEdit = withinWindow || IS_ADMIN;
+  const canEdit = (withinWindow || IS_ADMIN) && !IS_SUPERVISOR;
 
   async function del() {
     if (
@@ -13404,7 +13419,7 @@ function DamagesPage({ deptKey }) {
         }
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          {!isAdminView && (
+          {!isAdminView && !IS_SUPERVISOR && (
             <Sec title="Record New Damage" accent={accent}>
               <DamageEntryForm
                 dept={dept}
@@ -14394,7 +14409,7 @@ function PaperUsageCard({ entry, onChanged, addToast }) {
   }
   const WINDOW_MS = 24 * 3600 * 1000;
   const remaining = WINDOW_MS - (now - createdMs());
-  const withinWindow = remaining > 0;
+  const withinWindow = remaining > 0 && !IS_SUPERVISOR;
 
   async function del() {
     if (!window.confirm(`Delete this usage entry for #${entry.job_no}?`))
@@ -14706,13 +14721,17 @@ function PapersPage() {
             )}
           </div>
 
-          <Sec title="Add New Packet" accent="var(--blue)">
-            <AddPacketControl onAdded={reloadAll} addToast={add} />
-          </Sec>
+          {!IS_SUPERVISOR && (
+            <>
+              <Sec title="Add New Packet" accent="var(--blue)">
+                <AddPacketControl onAdded={reloadAll} addToast={add} />
+              </Sec>
 
-          <Sec title="Record Paper Usage" accent="var(--blue)">
-            <PaperUsageForm onCreated={reloadAll} addToast={add} />
-          </Sec>
+              <Sec title="Record Paper Usage" accent="var(--blue)">
+                <PaperUsageForm onCreated={reloadAll} addToast={add} />
+              </Sec>
+            </>
+          )}
 
           <Sec title="Daily / Monthly Usage by Paper Size" accent="var(--blue)">
             <PaperUsageBreakdownPanel hideHeader />
@@ -16373,7 +16392,7 @@ function DeptTotalsPanel({ addToast, hideHeader = false }) {
     { key: "PENDING_PRINT", label: "Pending", tag: "AWAITING PRINT" },
     { key: "PRINTING", label: "Printing", tag: null },
     { key: "LAMINATING", label: "Accubinding", tag: null },
-    { key: "LASER_CUTTING", label: "Laser cut cover", tag: null },
+    { key: "LASER_CUTTING", label: "Covers", tag: null },
     { key: "BINDING", label: "Binding", tag: "COMPLETE" },
   ];
 
@@ -19968,7 +19987,7 @@ function DashboardPage() {
             WebkitOverflowScrolling: "touch",
           }}
         >
-          {NAV_ITEMS.map((item) => {
+          {VISIBLE_NAV_ITEMS.map((item) => {
             const isActive =
               item.path === "/"
                 ? window.location.pathname === "/"
@@ -20030,12 +20049,20 @@ function DashboardPage() {
             <PrintingMachineBreakdownPanel hideHeader />
           </FoldableSection>
 
-         <FoldableSection
+          <FoldableSection
             title="Returned Albums"
             accent="var(--red)"
             defaultOpen
           >
             <ReturnedAlbumsPanel />
+          </FoldableSection>
+
+          <FoldableSection
+            title="Throughput - Today"
+            accent="var(--text-pri)"
+            defaultOpen
+          >
+            <ThroughputTicker done={done} hideHeader />
           </FoldableSection>
 
           <FoldableSection title="Operator Activity" accent="var(--text-pri)">
@@ -20123,10 +20150,6 @@ function DashboardPage() {
             <DailyGoalRing active={active} done={done} hideHeader />
           </FoldableSection>
 
-          <FoldableSection title="Throughput - Today" accent="var(--text-pri)">
-            <ThroughputTicker done={done} hideHeader />
-          </FoldableSection>
-
           <FoldableSection
             title="Priority Watch - Urgent & Overdue"
             accent="var(--text-pri)"
@@ -20207,30 +20230,32 @@ function DashboardPage() {
                   showExpiry={tab === "done"}
                   addToast={add}
                 />
-                <button
-                  onClick={() => del(job)}
-                  title="Delete"
-                  style={{
-                    position: "absolute",
-                    top: 12,
-                    right: 12,
-                    background: "var(--overlay)",
-                    color: "var(--red)",
-                    fontSize: 13,
-                    padding: "4px 9px",
-                    borderRadius: 4,
-                    border: "1px solid var(--border)",
-                    minHeight: "unset",
-                  }}
-                >
-                  <SquareX size={13} />
-                </button>
+                {!IS_SUPERVISOR && (
+                  <button
+                    onClick={() => del(job)}
+                    title="Delete"
+                    style={{
+                      position: "absolute",
+                      top: 12,
+                      right: 12,
+                      background: "var(--overlay)",
+                      color: "var(--red)",
+                      fontSize: 13,
+                      padding: "4px 9px",
+                      borderRadius: 4,
+                      border: "1px solid var(--border)",
+                      minHeight: "unset",
+                    }}
+                  >
+                    <SquareX size={13} />
+                  </button>
+                )}
               </div>
             ))
           )}
         </div>
       </Shell>
-      <ChatWidget myDept="ADMIN" addToast={add} />
+      {!IS_SUPERVISOR && <ChatWidget myDept="ADMIN" addToast={add} />}
       <ToastStack toasts={toasts} />
     </>
   );
@@ -21763,6 +21788,10 @@ function BoxMakerPage() {
   );
 
   async function toggleDone(j) {
+        if (IS_SUPERVISOR) {
+          add("Supervisor is view-only.", "error");
+          return;
+        }
     const markDone = !j.is_done;
     if (markDone && !myName.trim()) {
       add("Please enter your name first.", "error");

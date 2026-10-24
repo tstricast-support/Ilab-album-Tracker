@@ -3,7 +3,7 @@ from jwt import PyJWKClient
 from fastapi import Depends, HTTPException, Request
 from .config import settings
 
-VALID_ROLES = {"ENTRY","PRINTING","LAMINATING","LASER_CUTTING","BINDING","ADMIN","BOXMAKE"}
+VALID_ROLES = {"ENTRY","PRINTING","LAMINATING","LASER_CUTTING","BINDING","ADMIN","BOXMAKE","SUPERVISOR"}
 PUBLIC_PREFIXES = ("/api/track/", "/api/health")
 
 _jwks = PyJWKClient(settings.CLERK_JWKS_URL, cache_keys=True) if settings.CLERK_JWKS_URL else None
@@ -42,6 +42,9 @@ def get_current_user(request: Request):
     role = str(claims.get("role") or "").upper()
     if role not in VALID_ROLES:
         raise HTTPException(403, "No department role assigned")
+
+    if role == "SUPERVISOR" and request.method not in ("GET", "HEAD", "OPTIONS"):
+        raise HTTPException(403, "Supervisor is view-only.")
 
     return {"id": claims["sub"], "role": role}
 

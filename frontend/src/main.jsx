@@ -18,11 +18,13 @@ const VALID_ROLES = [
   "LASER_CUTTING",
   "BINDING",
   "ADMIN",
-  "BOXMAKE"
+  "BOXMAKE",
+  "SUPERVISOR",
 ];
 
 function homeFor(role) {
   if (role === "ADMIN") return "/";
+  if (role === "SUPERVISOR") return "/";
   if (role === "ENTRY") return "/entry";
   if (role === "BOXMAKE") return "/boxmaker";
   return `/station/${role.toLowerCase()}`;
@@ -77,18 +79,23 @@ function RoleLoader() {
   const stationMatch = p.match(/^\/station\/(\w+)/);
   const wrongStation = stationMatch && stationMatch[1].toUpperCase() !== role;
   const wrongEntry = p === "/entry" && role !== "ENTRY";
-  const wrongBox = p === "/boxmaker" && role !== "BOXMAKE" && role !== "ADMIN";
-  if (
-    role !== "ADMIN" &&
-    (p === "/" ||
-      p.startsWith("/admin") ||
-      p === "/analytics" ||
-      wrongStation ||
-      wrongEntry ||
-      wrongBox)
-  ) {
-    window.history.replaceState({}, "", homeFor(role));
-  }
+  const wrongBox =
+      p === "/boxmaker" &&
+      role !== "BOXMAKE" &&
+      role !== "ADMIN" &&
+      role !== "SUPERVISOR";
+    const isPrivileged = role === "ADMIN" || role === "SUPERVISOR";
+    if (
+      (role !== "ADMIN" && (p.startsWith("/admin") || p === "/analytics")) ||
+      (!isPrivileged && (p === "/" || wrongStation)) ||
+      (role !== "ENTRY" &&
+        role !== "ADMIN" &&
+        role !== "SUPERVISOR" &&
+        p === "/entry") ||
+      wrongBox
+    ) {
+      window.history.replaceState({}, "", homeFor(role));
+    }
 
   return (
     <Suspense fallback={<Center>Loading…</Center>}>
