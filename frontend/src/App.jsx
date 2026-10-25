@@ -16806,36 +16806,124 @@ function DeptTotalsPanel({ addToast, hideHeader = false }) {
                               overflowY: "auto",
                             }}
                           >
-                            {result.jobs.map((j) => (
-                              <button
-                                key={j.id}
-                                onClick={() => setViewJob(j)}
-                                style={{
-                                  display: "flex",
-                                  justifyContent: "space-between",
-                                  alignItems: "center",
-                                  background: "#fff",
-                                  border: "1px solid #ddd",
-                                  borderRadius: 4,
-                                  padding: "8px 10px",
-                                  textAlign: "left",
-                                  cursor: "pointer",
-                                }}
-                              >
-                                <span
+                            {result.jobs.map((j) => {
+                              const dash = (v) =>
+                                v !== null &&
+                                v !== undefined &&
+                                String(v).trim() !== ""
+                                  ? v
+                                  : "-";
+
+                              // desktop columns: [value, width]
+                              const cols = [
+                                [j.job_no, "70px"],
+                                [dash(j.customer), "1.5fr"],
+                                [dash(j.couple_name), "1.5fr"],
+                                [dash(j.print_size), "80px"],
+                                [dash(j.print_pages), "55px"],
+                                [dash(j.laser_cover_type), "1fr"],
+                                [dash(j.box_type), "1.3fr"],
+                                [dash(j.delivery_type), "90px"],
+                              ];
+
+                              return (
+                                <button
+                                  key={j.id}
+                                  onClick={() => setViewJob(j)}
                                   style={{
-                                    fontSize: 12,
-                                    fontWeight: 700,
-                                    color: "#111",
+                                    display: "flex",
+                                    justifyContent: "space-between",
+                                    alignItems: "center",
+                                    gap: 8,
+                                    width: "100%",
+                                    background: "#fff",
+                                    border: "1px solid #ddd",
+                                    borderRadius: 4,
+                                    padding: "8px 10px",
+                                    textAlign: "left",
+                                    cursor: "pointer",
                                   }}
                                 >
-                                  {j.job_no}
-                                </span>
-                                <span style={{ fontSize: 12, color: "#333" }}>
-                                  {j.customer}
-                                </span>
-                              </button>
-                            ))}
+                                  {isMobile ? (
+                                    <>
+                                      {/* mobile: unchanged */}
+                                      <span
+                                        style={{
+                                          fontSize: 12,
+                                          fontWeight: 700,
+                                          color: "#111",
+                                        }}
+                                      >
+                                        {j.job_no}
+                                      </span>
+                                      <span
+                                        style={{ fontSize: 12, color: "#333" }}
+                                      >
+                                        {j.customer}
+                                      </span>
+                                    </>
+                                  ) : (
+                                    /* desktop: full-width grid, fixed columns separated by | */
+                                    <div
+                                      style={{
+                                        display: "grid",
+                                        gridTemplateColumns: cols
+                                          .map((c) => c[1])
+                                          .join(" "),
+                                        columnGap: 0,
+                                        alignItems: "center",
+                                        width: "100%",
+                                        fontSize: 12,
+                                        color: "#333",
+                                      }}
+                                    >
+                                      {cols.map(([val], i) => (
+                                        <div
+                                          key={i}
+                                          style={{
+                                            display: "flex",
+                                            alignItems: "center",
+                                            gap: 10,
+                                            minWidth: 0,
+                                            paddingRight: 10,
+                                          }}
+                                        >
+                                          {i > 0 && (
+                                            <span
+                                              style={{
+                                                color: "#999",
+                                                flexShrink: 0,
+                                              }}
+                                            >
+                                              |
+                                            </span>
+                                          )}
+                                          <span
+                                            title={String(val)}
+                                            style={{
+                                              fontWeight: i === 0 ? 800 : 500,
+                                              color:
+                                                i === 0
+                                                  ? "#111"
+                                                  : val === "-"
+                                                    ? "#999"
+                                                    : "#333",
+                                              textTransform:
+                                                i === 0 ? "none" : "uppercase",
+                                              overflow: "hidden",
+                                              textOverflow: "ellipsis",
+                                              whiteSpace: "nowrap",
+                                            }}
+                                          >
+                                            {val}
+                                          </span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </button>
+                              );
+                            })}
                           </div>
                         )}
                         {result.pages > 1 && (
