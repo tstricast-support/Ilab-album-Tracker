@@ -22343,7 +22343,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
 function PhotographerCreateModal({ photographer, onClose, onSaved, addToast }) {
   const isMobile = useIsMobile();
-  const isEdit = !!photographer;
+  const isEdit = !!photographer; // ← must exist
   const [name, setName] = useState(photographer?.name || "");
   const [address, setAddress] = useState(photographer?.pronto_address || "");
   const [email, setEmail] = useState(photographer?.email || "");
@@ -22365,29 +22365,29 @@ function PhotographerCreateModal({ photographer, onClose, onSaved, addToast }) {
       return;
     }
     setSaving(true);
-        try {
-          if (isEdit) {
-            await api.updatePhotographer(photographer.id, {
-              name: name.trim(),
-              pronto_address: address.trim(),
-              email: emailTrim,
-            });
-            addToast?.(`✓ ${name.trim()} updated.`, "success");
-          } else {
-            await api.createPhotographer({
-              name: name.trim(),
-              pronto_address: address.trim() || undefined,
-              email: emailTrim || undefined,
-            });
-            addToast?.(`✓ ${name.trim()} added.`, "success");
-          }
-          onSaved?.();
-          onClose();
-        } catch (err) {
-          setError(err.message);
-        } finally {
-          setSaving(false);
-        }
+    try {
+      if (isEdit) {
+        await api.updatePhotographer(photographer.id, {
+          name: name.trim(),
+          pronto_address: address.trim(),
+          email: emailTrim,
+        });
+        addToast?.(`✓ ${name.trim()} updated.`, "success");
+      } else {
+        await api.createPhotographer({
+          name: name.trim(),
+          pronto_address: address.trim() || undefined,
+          email: emailTrim || undefined,
+        });
+        addToast?.(`✓ ${name.trim()} added.`, "success");
+      }
+      onSaved?.();
+      onClose();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -22803,6 +22803,14 @@ function ManagePage() {
           </div>
         )}
       </Shell>
+
+      {showCreate && (
+        <PhotographerCreateModal
+          onClose={() => setShowCreate(false)}
+          onSaved={reload}
+          addToast={add}
+        />
+      )}
 
       {editing && (
         <PhotographerCreateModal
