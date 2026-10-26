@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import re
 import math
 import json
 import os
 import time
 from datetime import datetime, timedelta
 from typing import List, Optional
-from fastapi import Depends, FastAPI, HTTPException,Query
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -37,7 +38,8 @@ from .models import (
     PAPER_SIZES,              
     LOW_STOCK_THRESHOLD,
     ThankYouCard,
-    JobEditLog
+    JobEditLog,
+    Photographer,
 )
 from .routers import history as history_router
 from .routers import chat as chat_router
@@ -52,11 +54,13 @@ from .schemas import (
     PaperStockOut,          
     PaperPacketLogOut,         
     PaperUsageEntryOut, 
-    ThankYouCardOut
+    ThankYouCardOut,
+    PhotographerOut
 )
 from .paper_auto import (auto_deduct_job, auto_deduct_damage,
                          release_source, apply_pending, shortage_alerts)
 from .auth import get_current_user, require_roles
+from .emailer import notify_album_finished, send_email, email_configured
 
 
 app = FastAPI(
@@ -1013,6 +1017,7 @@ def update_album_type(job_id: int, payload: AlbumTypeUpdate, db: Session = Depen
 def advance(
     job_id: int, department: str,
     body: StageAdvanceRequest,
+    background_tasks:BackgroundTasks,
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
@@ -1111,6 +1116,10 @@ def advance(
     db.commit()
     _bust_dept_stats_cache()
     db.refresh(job)
+
+    if action == "complete" and dept == "BINDING" and job.is_fully_completed:
+        background_tasks.add_task(notify_album_finished, job.id)
+
     return _out(job, db)
 
 
@@ -3043,6 +3052,130 @@ def box_jobs_dates(year: int = Query(...), month: int = Query(...),
         k = str((dt + SL_TZ_OFFSET).day)
         day_counts[k] = day_counts.get(k, 0) + 1
     return day_counts
+
+# ── Photographers (Manage page) ───────────────────────────────────────
+EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]{2,}$")
+
+
+class PhotographerCreate(BaseModel):
+    name: str
+    pronto_address: Optional[str] = None
+    email: Optional[str] = None
+
+
+@app.get("/api/photographers", response_model=List[PhotographerOut],
+         dependencies=[Depends(require_roles("ENTRY", "ADMIN", "SUPERVISOR"))])
+def list_photographers(db: Session = Depends(get_db)):
+    return db.query(Photographer).order_by(Photographer.name).all()
+
+
+@app.post("/api/photographers", response_model=PhotographerOut, status_code=201,
+          dependencies=[Depends(require_roles("ENTRY", "ADMIN"))])
+def create_photographer(payload: PhotographerCreate, db: Session = Depends(get_db)):
+    name = " ".join(payload.name.split())
+    if not name:
+        raise HTTPException(400, "Photographer name is required")
+
+    email = (payload.email or "").strip().lower() or None
+    if email and not EMAIL_RE.match(email):
+        raise HTTPException(400, "Please enter a valid email address")
+
+    dup = db.query(Photographer).filter(
+        func.lower(Photographer.name) == name.lower()
+    ).first()
+    if dup:
+        raise HTTPException(409, f"Photographer '{name}' already exists")
+
+    row = Photographer(
+        name=name,
+        pronto_address=(payload.pronto_address or "").strip() or None,
+        email=email,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+class PhotographerUpdate(BaseModel):
+    name: Optional[str] = None
+    pronto_address: Optional[str] = None
+    email: Optional[str] = None
+
+
+@app.patch("/api/photographers/{pid}", response_model=PhotographerOut,
+           dependencies=[Depends(require_roles("ENTRY", "ADMIN"))])
+def update_photographer(pid: int, payload: PhotographerUpdate, db: Session = Depends(get_db)):
+    row = db.query(Photographer).filter(Photographer.id == pid).first()
+    if not row:
+        raise HTTPException(404, "Photographer not found")
+
+    data = payload.model_dump(exclude_unset=True)
+
+    if "name" in data:
+        name = " ".join((data["name"] or "").split())   # collapse extra spaces
+        if not name:
+            raise HTTPException(400, "Photographer name is required")
+        dup = db.query(Photographer).filter(
+            func.lower(Photographer.name) == name.lower(),
+            Photographer.id != pid,
+        ).first()
+        if dup:
+            raise HTTPException(409, f"Photographer '{name}' already exists")
+        row.name = name
+
+    if "email" in data:
+        e = (data["email"] or "").strip().lower() or None
+        if e and not EMAIL_RE.match(e):
+            raise HTTPException(400, "Please enter a valid email address")
+        row.email = e
+
+    if "pronto_address" in data:
+        row.pronto_address = (data["pronto_address"] or "").strip() or None
+
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+@app.delete("/api/photographers/{pid}", status_code=204,
+            dependencies=[Depends(require_roles("ENTRY", "ADMIN"))])
+def delete_photographer(pid: int, db: Session = Depends(get_db)):
+    row = db.query(Photographer).filter(Photographer.id == pid).first()
+    if not row:
+        raise HTTPException(404, "Photographer not found")
+    db.delete(row)
+    db.commit()
+
+class EmailTestRequest(BaseModel):
+    to: str
+
+
+@app.post("/api/admin/email-test", dependencies=[Depends(require_roles("ADMIN"))])
+def admin_email_test(payload: EmailTestRequest):
+    if not email_configured():
+        raise HTTPException(400, "Email is not configured (check Railway variables).")
+    to = payload.to.strip().lower()
+    if not EMAIL_RE.match(to):
+        raise HTTPException(400, "Invalid email address")
+    try:
+        send_email(
+            to,
+            "i Lab test email",
+            "This is a test email from the i Lab production tracker.",
+            "<p>This is a <b>test email</b> from the i Lab production tracker.</p>",
+        )
+    except Exception as e:
+        raise HTTPException(502, f"Gmail send failed: {e}")
+    return {"ok": True}
+
+
+@app.post("/api/admin/jobs/{job_id}/resend-email",
+          dependencies=[Depends(require_roles("ADMIN"))])
+def admin_resend_email(job_id: int, db: Session = Depends(get_db)):
+    job = _job_or_404(job_id, db)
+    if not job.is_fully_completed:
+        raise HTTPException(409, "Job is not finished yet.")
+    return {"result": notify_album_finished(job.id, force=True)}
 
 # ── Static SPA ────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

@@ -20,5 +20,11 @@ class Settings:
         x.strip() for x in os.getenv("CLERK_AUTHORIZED_PARTIES", "").split(",") if x.strip()
     ]
 
+    GMAIL_CLIENT_ID = os.getenv("GMAIL_CLIENT_ID")
+    GMAIL_CLIENT_SECRET = os.getenv("GMAIL_CLIENT_SECRET")
+    GMAIL_REFRESH_TOKEN = os.getenv("GMAIL_REFRESH_TOKEN")
+    GMAIL_SENDER = os.getenv("GMAIL_SENDER", "ilabalbum@gmail.com")
+    EMAIL_ENABLED = os.getenv("EMAIL_ENABLED", "true").lower() == "true"
+
 
 settings = Settings()

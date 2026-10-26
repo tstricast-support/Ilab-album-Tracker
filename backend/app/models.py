@@ -175,7 +175,9 @@ class JobCard(Base):
     box_pouch_status    = Column(String(32),  nullable=True)
 
     box_done_at         = Column(DateTime,    nullable=True)   
-    box_done_by         = Column(String(128), nullable=True)   
+    box_done_by         = Column(String(128), nullable=True)  
+
+    email_sent_at       = Column(DateTime,    nullable=True)
 
     status_printing      = Column(Enum(StageStatusEnum), nullable=False, default=StageStatusEnum.PENDING)
     status_laminating    = Column(Enum(StageStatusEnum), nullable=False, default=StageStatusEnum.PENDING)
@@ -393,6 +395,19 @@ class ThankYouCard(Base):
     def __repr__(self) -> str:
         return f"<ThankYouCard id={self.id} customer={self.customer!r} machine={self.machine} qty={self.quantity}>"
 
+class Photographer(Base):
+    __tablename__ = "photographers"
+
+    id             = Column(Integer, primary_key=True, autoincrement=True)
+    name           = Column(String(256), nullable=False, unique=True, index=True)
+    pronto_address = Column(Text, nullable=True)
+    email          = Column(String(256), nullable=True)
+    created_at     = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at     = Column(DateTime, nullable=False, default=datetime.utcnow,
+                            onupdate=datetime.utcnow)
+
+    def __repr__(self) -> str:
+        return f"<Photographer id={self.id} name={self.name!r}>"
 
 def seed_paper_stock():
     db = SessionLocal()
@@ -529,6 +544,10 @@ def run_migration():
 
             if "box_done_by" not in job_cols:
                 conn.execute(text("ALTER TABLE job_cards ADD COLUMN box_done_by VARCHAR(128)"))
+                conn.commit()
+
+            if "email_sent_at" not in job_cols:
+                conn.execute(text("ALTER TABLE job_cards ADD COLUMN email_sent_at DATETIME"))
                 conn.commit()
 
         damage_cols = {c["name"] for c in inspector.get_columns("damage_entries")}
@@ -695,6 +714,11 @@ def run_migration():
         conn.execute(text("ALTER TABLE paper_usage_entries ADD COLUMN IF NOT EXISTS source VARCHAR(16);"))
         
         conn.execute(text("ALTER TABLE paper_usage_entries ADD COLUMN IF NOT EXISTS source_id INTEGER;"))
+
+        conn.execute(text("""
+            ALTER TABLE job_cards
+            ADD COLUMN IF NOT EXISTS email_sent_at TIMESTAMP;
+        """))
 
         conn.commit()
 

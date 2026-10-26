@@ -195,7 +195,16 @@ class ThankYouCardOut(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
-# ── Helpers ─────────────────────────────────────────
+
+class PhotographerOut(BaseModel):
+    id: int
+    name: str
+    pronto_address: Optional[str] = None
+    email: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
 
 def _str(val) -> str:
     return val.value if hasattr(val, "value") else str(val)

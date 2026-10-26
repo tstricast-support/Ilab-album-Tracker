@@ -78,24 +78,29 @@ function RoleLoader() {
   const p = window.location.pathname;
   const stationMatch = p.match(/^\/station\/(\w+)/);
   const wrongStation = stationMatch && stationMatch[1].toUpperCase() !== role;
-  const wrongEntry = p === "/entry" && role !== "ENTRY";
+  const isPrivileged = role === "ADMIN" || role === "SUPERVISOR";
+
   const wrongBox =
-      p === "/boxmaker" &&
-      role !== "BOXMAKE" &&
+    p === "/boxmaker" &&
+    role !== "BOXMAKE" &&
+    role !== "ADMIN" &&
+    role !== "SUPERVISOR";
+
+  const wrongManage =
+    p === "/manage" && !["ENTRY", "ADMIN", "SUPERVISOR"].includes(role);
+
+  if (
+    (role !== "ADMIN" && (p.startsWith("/admin") || p === "/analytics")) ||
+    (!isPrivileged && (p === "/" || wrongStation)) ||
+    (role !== "ENTRY" &&
       role !== "ADMIN" &&
-      role !== "SUPERVISOR";
-    const isPrivileged = role === "ADMIN" || role === "SUPERVISOR";
-    if (
-      (role !== "ADMIN" && (p.startsWith("/admin") || p === "/analytics")) ||
-      (!isPrivileged && (p === "/" || wrongStation)) ||
-      (role !== "ENTRY" &&
-        role !== "ADMIN" &&
-        role !== "SUPERVISOR" &&
-        p === "/entry") ||
-      wrongBox
-    ) {
-      window.history.replaceState({}, "", homeFor(role));
-    }
+      role !== "SUPERVISOR" &&
+      p === "/entry") ||
+    wrongBox ||
+    wrongManage
+  ) {
+    window.history.replaceState({}, "", homeFor(role));
+  }
 
   return (
     <Suspense fallback={<Center>Loading…</Center>}>
@@ -137,4 +142,3 @@ createRoot(document.getElementById("root")).render(
     <Root />
   </StrictMode>,
 );
-

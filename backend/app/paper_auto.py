@@ -21,13 +21,20 @@ from .models import (
     DepartmentLog, DepartmentEnum, PAPER_SIZES,
 )
 
-# album size  ->  stock paper size
+# stock paper size -> album sizes that are printed on it
+STOCK_TO_ALBUMS = {
+    "9x13":  ["10x15", "10x16", "8x24", "8x20", "8x16", "12x16", "12x17", "8x22"],
+    "10x16": ["10x20", "10x30", "10x24", "12x18", "10x28", "10x26"],
+    "12x16": ["12x24", "12x28", "14x22", "12x30", "15x20", "12x20", "15x22"],
+    "13x16": ["15x24"],
+    "13x19": ["12x34", "17x24", "12x32", "16x24", "18x24", "12x36"],
+}
+
+# album size -> stock paper size (built automatically, used by album_to_paper)
 SIZE_MAP = {
-    "8x24": "9x13",  "12x16": "9x13",
-    "12x24": "12x16", "12x30": "12x16",
-    "10x24": "10x16", "10x20": "10x16",
-    "16x24": "13x16",
-    "17x24": "13x19", "18x24": "13x19", "12x36": "13x19",
+    album: stock
+    for stock, albums in STOCK_TO_ALBUMS.items()
+    for album in albums
 }
 
 

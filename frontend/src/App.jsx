@@ -44,7 +44,10 @@ import {
   Gift,
   FileUp,
   Menu,
-  X,  
+  X,
+  Users,
+  MoreVertical,
+  Pencil,
 } from "lucide-react";
 import logo from "./assets/logo.jpg";
 import trackQR from "./assets/track-qr.png";
@@ -272,6 +275,20 @@ const api = {
   },
   thankYouCardStats: () => apiFetch(`/api/stats/thankyou-cards`),
   knownThankYouNames: () => apiFetch(`/api/thankyou-cards/known-names`),
+  photographers: () => apiFetch(`/api/photographers`),
+  createPhotographer: (body) =>
+    apiFetch(`/api/photographers`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  updatePhotographer: (id, body) =>
+    apiFetch(`/api/photographers/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  deletePhotographer: (id) =>
+    apiFetch(`/api/photographers/${id}`, { method: "DELETE" }),
   paperStockStats: () => apiFetch(`/api/stats/paper-stock`),
   paperShortages: () => apiFetch(`/api/paper-stock/shortages`),
   damageDates: (year, month, department) =>
@@ -2366,6 +2383,7 @@ function getPage() {
   if (p === "/admin/fix-jobcard") return { page: "fix-jobcard" };
   if (p === "/admin/chat") return { page: "admin-chat" };
   if (p === "/boxmaker") return { page: "boxmaker" };
+  if (p === "/manage") return { page: "manage" };
   const md = p.match(/^\/station\/([\w]+)\/damages$/);
   if (md) return { page: "damages", dept: md[1] };
   const m = p.match(/^\/station\/([\w]+)$/);
@@ -4398,9 +4416,11 @@ function Shell({ title, accent = "var(--amber)", topRightPrimary, topRightMid, t
   const onPapers = path === "/papers";
   const onEntry = path === "/entry";
   const onBox = path === "/boxmaker";
+  const onManage = path === "/manage";
   const lowStock = useLowStockBlink();
 
-  const onSubPage = onHistory || onDamages || onPapers || onEntry || onBox;
+  const onSubPage =
+    onHistory || onDamages || onPapers || onEntry || onBox || onManage;
   const isAtOwnHome = !IS_ADMIN && path === getDeptHomePath();
 
   // Close the mobile menu whenever the route changes
@@ -7185,6 +7205,7 @@ function AutocompleteInput({
   placeholder,
   defaultValue = "",
   suggestions,
+  onValueChange,
 }) {
   const list = Array.isArray(suggestions) ? suggestions : [];
   const inputRef = useRef(null);
@@ -7224,6 +7245,7 @@ function AutocompleteInput({
     setQuery(value);
     setOpen(false);
     setHi(-1);
+    onValueChange?.(value);
   }
 
   function onKeyDown(e) {
@@ -7254,6 +7276,7 @@ function AutocompleteInput({
           setQuery(e.target.value);
           setOpen(true);
           setHi(-1);
+          onValueChange?.(e.target.value);
         }}
         onFocus={() => setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 120)}
@@ -7304,12 +7327,17 @@ function AutocompleteInput({
 }
 
 // ── Shared field sections (used in both create & edit forms) ────────
-function JobFields({ job, suggestions = {} }) {
+function JobFields({
+  job,
+  suggestions = {},
+  prontoValue,
+  onProntoChange,
+  prontoHint = false,
+}) {
   const [laserEnabled, setLaserEnabled] = useState(!!job?.laser_cover_type);
   const [deliveryType, setDeliveryType] = useState(
     job?.delivery_type || "PRONTO",
   );
-  
 
   return (
     <>
@@ -7436,19 +7464,31 @@ function JobFields({ job, suggestions = {} }) {
               <option value="BUS">BUS</option>
             </select>
           </div>
-          {deliveryType === "PRONTO" && (
-            <div style={{ marginTop: 10 }}>
-              <label>Pronto Address (name, address, phone)</label>
-              <textarea
+                        <textarea
                 name="pronto_address"
                 rows={5}
                 placeholder={
                   "YASITH WIJESURIYA.\n305 / 2.\n IHALAYAGODA,\n IMBULGODA.\n0783498886"
                 }
-                defaultValue={job?.pronto_address || ""}
+                {...(onProntoChange
+                  ? {
+                      value: prontoValue ?? "",
+                      onChange: (e) => onProntoChange(e.target.value),
+                    }
+                  : { defaultValue: job?.pronto_address || "" })}
               />
-            </div>
-          )}
+              {prontoHint && (
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: "var(--green)",
+                    marginTop: 4,
+                    fontWeight: 700,
+                  }}
+                >
+                  ✓ Address filled from Manage - you can still edit it.
+                </div>
+              )}
         </Sec>
       </div>
 
@@ -7599,6 +7639,10 @@ function EntryPage() {
 
   const [suggestions, setSuggestions] = useState({});
 
+  const [photographers, setPhotographers] = useState([]);
+  const [prontoAddr, setProntoAddr] = useState("");
+  const [prontoAuto, setProntoAuto] = useState(false);
+
   const [paymentJob, setPaymentJob] = useState(null);
   const [todayCount, setTodayCount] = useState(null);
   const [paymentBy, setPaymentBy] = useState("");
@@ -7659,11 +7703,19 @@ const loadSuggestions = useCallback(() => {
     .catch(() => {});
 }, []);
 
+const loadPhotographers = useCallback(() => {
+  api
+    .photographers()
+    .then((d) => setIfChanged(setPhotographers)(d || []))
+    .catch(() => {});
+}, []);
+
 // initial load of both lists (loadSuggestions is defined above, so this is safe)
 useEffect(() => {
   loadKnownPayments();
   loadSuggestions();
-}, [loadKnownPayments, loadSuggestions]);
+  loadPhotographers();
+}, [loadKnownPayments, loadSuggestions, loadPhotographers]);
 
   // Tick every second to drive countdown + auto-hide
   useEffect(() => {
@@ -7750,11 +7802,13 @@ useEffect(() => {
       });
       add(`✓ Job #${job_no} created.`, "success");
       formRef.current?.reset();
+      setProntoAddr("");
+      setProntoAuto(false);
       setPaymentBy("");
       setShowNewPayment(false);
       reload();
       loadKnownPayments();
-      loadSuggestions(); // ← NEW: new studio/size/etc. appear next time
+      loadSuggestions(); // new studio/size/etc. appear next time
       setAlbumTypeJob(created);
     } catch (err) {
       add(err.message, "error");
@@ -7817,7 +7871,7 @@ async function handleEditSave(e) {
     add(`✓ Job #${editJob.job_no} updated.`, "success");
     setEditJob(null);
     reload();
-    loadSuggestions(); // ← NEW
+    loadSuggestions(); 
   } catch (err) {
     add(err.message, "error");
   } finally {
@@ -7842,6 +7896,29 @@ async function handleEditSave(e) {
     }
   }
 
+    // Studio name typed/picked -> fill Pronto address from the Manage list
+  function handleCustomerChange(value) {
+    const key = value.trim().toLowerCase();
+    const match = key
+      ? photographers.find((p) => p.name.trim().toLowerCase() === key)
+      : null;
+    if (match?.pronto_address) {
+      setProntoAddr(match.pronto_address);
+      setProntoAuto(true);
+    } else if (prontoAuto) {
+      setProntoAddr("");
+      setProntoAuto(false);
+    }
+  }
+
+  // Manage names first, then previously used studio names
+  const customerSuggestions = [
+    ...new Set([
+      ...photographers.map((p) => p.name),
+      ...(suggestions.customer || []),
+    ]),
+  ];
+
   // ── Editable jobs (filtered list - re-evaluated every second via `now`) ──────
   const editableJobs = jobs.filter(isEditable);
 
@@ -7851,25 +7928,46 @@ async function handleEditSave(e) {
         title="JOB ENTRY"
         accent="var(--amber)"
         topRightPrimary={
-          <button
-            onClick={() => setShowDayPlan(true)}
-            style={{
-              padding: isMobile ? "6px 10px" : "8px 14px",
-              background: "var(--bg3)",
-              color: "var(--text-pri)",
-              border: "1px solid var(--border)",
-              borderRadius: 6,
-              fontWeight: 800,
-              cursor: "pointer",
-              fontSize: isMobile ? 11 : 13,
-              display: "flex",
-              alignItems: "center",
-              gap: 5,
-              whiteSpace: "nowrap",
-            }}
-          >
-            <Calendar size={14} /> {isMobile ? "Day Plan" : "Create Day Plan"}
-          </button>
+          <>
+            <button
+              onClick={() => navigate("/manage")}
+              style={{
+                padding: isMobile ? "6px 10px" : "8px 14px",
+                background: "var(--bg3)",
+                color: "var(--cyan)",
+                border: "1px solid var(--cyan)",
+                borderRadius: 6,
+                fontWeight: 800,
+                cursor: "pointer",
+                fontSize: isMobile ? 11 : 13,
+                display: "flex",
+                alignItems: "center",
+                gap: 5,
+                whiteSpace: "nowrap",
+              }}
+            >
+              <Users size={14} /> Manage
+            </button>
+            <button
+              onClick={() => setShowDayPlan(true)}
+              style={{
+                padding: isMobile ? "6px 10px" : "8px 14px",
+                background: "var(--bg3)",
+                color: "var(--text-pri)",
+                border: "1px solid var(--border)",
+                borderRadius: 6,
+                fontWeight: 800,
+                cursor: "pointer",
+                fontSize: isMobile ? 11 : 13,
+                display: "flex",
+                alignItems: "center",
+                gap: 5,
+                whiteSpace: "nowrap",
+              }}
+            >
+              <Calendar size={14} /> {isMobile ? "Day Plan" : "Create Day Plan"}
+            </button>
+          </>
         }
         topRight={
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -7960,7 +8058,8 @@ async function handleEditSave(e) {
                 <AutocompleteInput
                   name="customer"
                   placeholder="Studio name"
-                  suggestions={suggestions.customer}
+                  suggestions={customerSuggestions}
+                  onValueChange={handleCustomerChange}
                 />
               </div>
               <div>
@@ -7986,7 +8085,16 @@ async function handleEditSave(e) {
               </div>
             </div>
           </Sec>
-          <JobFields job={null} suggestions={suggestions} />
+          <JobFields
+            job={null}
+            suggestions={suggestions}
+            prontoValue={prontoAddr}
+            prontoHint={prontoAuto}
+            onProntoChange={(v) => {
+              setProntoAddr(v);
+              setProntoAuto(false);
+            }}
+          />
 
           <Sec title="Payment (Optional)" accent="#16a34a">
             <div>
@@ -22230,6 +22338,485 @@ function BoxMakerPage() {
   );
 }
 
+// ── Manage: photographers (email notifications) ──────────────────────
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+function PhotographerCreateModal({ photographer, onClose, onSaved, addToast }) {
+  const isMobile = useIsMobile();
+  const isEdit = !!photographer;
+  const [name, setName] = useState(photographer?.name || "");
+  const [address, setAddress] = useState(photographer?.pronto_address || "");
+  const [email, setEmail] = useState(photographer?.email || "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const emailTrim = email.trim();
+  const emailBad = emailTrim !== "" && !EMAIL_RE.test(emailTrim);
+
+  async function submit(e) {
+    e.preventDefault();
+    setError("");
+    if (!name.trim()) {
+      setError("Photographer name is required.");
+      return;
+    }
+    if (emailBad) {
+      setError("Please enter a valid email address.");
+      return;
+    }
+    setSaving(true);
+        try {
+          if (isEdit) {
+            await api.updatePhotographer(photographer.id, {
+              name: name.trim(),
+              pronto_address: address.trim(),
+              email: emailTrim,
+            });
+            addToast?.(`✓ ${name.trim()} updated.`, "success");
+          } else {
+            await api.createPhotographer({
+              name: name.trim(),
+              pronto_address: address.trim() || undefined,
+              email: emailTrim || undefined,
+            });
+            addToast?.(`✓ ${name.trim()} added.`, "success");
+          }
+          onSaved?.();
+          onClose();
+        } catch (err) {
+          setError(err.message);
+        } finally {
+          setSaving(false);
+        }
+  }
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "var(--overlay)",
+        display: "flex",
+        alignItems: isMobile ? "flex-end" : "center",
+        justifyContent: "center",
+        zIndex: 9300,
+      }}
+      onClick={onClose}
+    >
+      <form
+        onSubmit={submit}
+        onClick={(e) => e.stopPropagation()}
+        autoComplete="off"
+        style={{
+          background: "var(--bg1)",
+          border: "1px solid var(--border)",
+          borderRadius: isMobile ? "16px 16px 0 0" : 12,
+          padding: 24,
+          width: "100%",
+          maxWidth: 460,
+          maxHeight: isMobile ? "92dvh" : "90vh",
+          overflowY: "auto",
+          display: "flex",
+          flexDirection: "column",
+          gap: 14,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <div>
+            <div
+              style={{
+                fontSize: 11,
+                color: "var(--text-dim)",
+                textTransform: "uppercase",
+                letterSpacing: ".1em",
+              }}
+            >
+              Manage
+            </div>
+            <div
+              style={{ fontSize: 18, fontWeight: 800, color: "var(--amber)" }}
+            >
+              {isEdit ? "Edit Photographer" : "New Photographer"}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              padding: "8px 12px",
+              background: "var(--bg3)",
+              color: "var(--text-sec)",
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+              fontWeight: 700,
+            }}
+          >
+            ✕
+          </button>
+        </div>
+
+        <div>
+          <label>Photographer / Studio Name *</label>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Studio name"
+            autoFocus
+          />
+        </div>
+
+        <div>
+          <label>
+            Pronto Address{" "}
+            <span style={{ color: "var(--text-dim)", fontWeight: 400 }}>
+              (optional)
+            </span>
+          </label>
+          <textarea
+            value={address}
+            onChange={(e) => setAddress(e.target.value)}
+            rows={4}
+            placeholder={"Name,\nAddress,\nPhone"}
+          />
+        </div>
+
+        <div>
+          <label>
+            Email{" "}
+            <span style={{ color: "var(--text-dim)", fontWeight: 400 }}>
+              (optional - album finished notices are sent here)
+            </span>
+          </label>
+          <input
+            type="text"
+            inputMode="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="studio@example.com"
+            style={{ borderColor: emailBad ? "var(--red)" : undefined }}
+          />
+          {emailBad && (
+            <div style={{ fontSize: 11, color: "var(--red)", marginTop: 4 }}>
+              ⚠ This is not a valid email address.
+            </div>
+          )}
+        </div>
+
+        {error && (
+          <div style={{ fontSize: 12, color: "var(--red)" }}>⚠ {error}</div>
+        )}
+
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            type="submit"
+            disabled={saving || !name.trim() || emailBad}
+            style={{
+              flex: 1,
+              padding: "13px 0",
+              background:
+                saving || !name.trim() || emailBad
+                  ? "var(--bg3)"
+                  : "var(--amber)",
+              color:
+                saving || !name.trim() || emailBad ? "var(--text-dim)" : "#000",
+              borderRadius: 8,
+              fontWeight: 800,
+              fontSize: 15,
+            }}
+          >
+            {saving ? "Saving…" : isEdit ? "✓ Save Changes" : "✓ Submit"}
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              padding: "13px 18px",
+              background: "var(--bg3)",
+              color: "var(--text-sec)",
+              border: "1px solid var(--border)",
+              borderRadius: 8,
+              fontWeight: 700,
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function PhotographerMenu({ onEdit, onDelete }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const h = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [open]);
+
+  const itemStyle = {
+    width: "100%",
+    textAlign: "left",
+    padding: "10px 14px",
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    background: "transparent",
+    border: "none",
+    borderRadius: 6,
+    fontSize: 13,
+    fontWeight: 700,
+    cursor: "pointer",
+  };
+
+  return (
+    <div ref={ref} style={{ position: "relative", flexShrink: 0 }}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        title="Options"
+        style={{
+          padding: "6px 8px",
+          background: open ? "var(--bg3)" : "transparent",
+          color: "var(--text-sec)",
+          border: "1px solid var(--border)",
+          borderRadius: 6,
+          display: "flex",
+          alignItems: "center",
+          minHeight: "unset",
+        }}
+      >
+        <MoreVertical size={16} />
+      </button>
+
+      {open && (
+        <div
+          className="si"
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            right: 0,
+            minWidth: 140,
+            background: "var(--bg1)",
+            border: "1px solid var(--border)",
+            borderRadius: 8,
+            boxShadow: "0 8px 24px rgba(0,0,0,.5)",
+            padding: 4,
+            zIndex: 60,
+          }}
+        >
+          <button
+            onClick={() => {
+              setOpen(false);
+              onEdit();
+            }}
+            style={{ ...itemStyle, color: "var(--amber)" }}
+          >
+            <Pen size={14} /> Edit
+          </button>
+          <button
+            onClick={() => {
+              setOpen(false);
+              onDelete();
+            }}
+            style={{ ...itemStyle, color: "var(--red)" }}
+          >
+            <Trash size={14} /> Delete
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ManagePage() {
+  const { toasts, add } = useToast();
+  const isMobile = useIsMobile();
+  const [list, setList] = useState([]);
+  const [search, setSearch] = useState("");
+  const [showCreate, setShowCreate] = useState(false);
+  const [editing, setEditing] = useState(null);
+
+  const reload = useCallback(() => {
+    api
+      .photographers()
+      .then(setIfChanged(setList))
+      .catch((e) => add(e.message, "error"));
+  }, []);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+    async function handleDelete(p) {
+      
+      if (
+        !window.confirm(
+          `Delete "${p.name}"?\n\nOld job cards are kept, but address auto-fill and finished-album emails will stop for this studio.`,
+        )
+      )
+        return;
+      try {
+        await api.deletePhotographer(p.id);
+        add(`Deleted ${p.name}`, "info");
+        reload();
+      } catch (err) {
+        add(err.message, "error");
+      }
+    }
+
+  const filtered = list.filter((p) => {
+    const t = search.trim().toLowerCase();
+    if (!t) return true;
+    return (
+      p.name.toLowerCase().includes(t) ||
+      (p.email || "").toLowerCase().includes(t)
+    );
+  });
+
+  return (
+    <>
+      <Shell title="MANAGE - PHOTOGRAPHERS" accent="var(--cyan)">
+        {/* + Create, right aligned under the navigation bar */}
+        {!IS_SUPERVISOR && (
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "flex-end",
+              marginBottom: 14,
+            }}
+          >
+            <button
+              onClick={() => setShowCreate(true)}
+              style={{
+                padding: isMobile ? "10px 16px" : "10px 20px",
+                background: "var(--amber)",
+                color: "#000",
+                borderRadius: 8,
+                fontWeight: 800,
+                fontSize: 14,
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              <Plus size={16} /> Create
+            </button>
+          </div>
+        )}
+
+        <SearchBar
+          value={search}
+          onChange={setSearch}
+          placeholder="Search photographer / email…"
+        />
+
+        {filtered.length === 0 ? (
+          <div
+            style={{
+              textAlign: "center",
+              padding: "40px 0",
+              color: "var(--text-dim)",
+              fontFamily: "var(--fd)",
+              letterSpacing: ".06em",
+            }}
+          >
+            {search ? "NO MATCHING PHOTOGRAPHERS" : "NO PHOTOGRAPHERS YET"}
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {filtered.map((p) => (
+              <div
+                key={p.id}
+                style={{
+                  background: "var(--bg2)",
+                  border: "1px solid var(--border)",
+                  borderLeft: `4px solid ${p.email ? "var(--green)" : "var(--border)"}`,
+                  borderRadius: 8,
+                  padding: "12px 14px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 6,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 8,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: 15,
+                      fontWeight: 800,
+                      color: "var(--text-pri)",
+                    }}
+                  >
+                    {p.name}
+                  </span>
+                  <div
+                    style={{ display: "flex", alignItems: "center", gap: 8 }}
+                  >
+                    <span
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 700,
+                        color: p.email ? "var(--green)" : "var(--text-dim)",
+                      }}
+                    >
+                      {p.email ? `✉ ${p.email}` : "No email"}
+                    </span>
+                    {!IS_SUPERVISOR && (
+                      <PhotographerMenu
+                        onEdit={() => setEditing(p)}
+                        onDelete={() => handleDelete(p)}
+                      />
+                    )}
+                  </div>
+                </div>
+                {p.pronto_address && (
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: "var(--text-sec)",
+                      whiteSpace: "pre-line",
+                    }}
+                  >
+                    {p.pronto_address}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </Shell>
+
+      {editing && (
+        <PhotographerCreateModal
+          photographer={editing}
+          onClose={() => setEditing(null)}
+          onSaved={reload}
+          addToast={add}
+        />
+      )}
+      <ToastStack toasts={toasts} />
+    </>
+  );
+}
+
 // ── App root ──────────────────────────────────────────────────────────────────
 export default function App() {
   const [route, setRoute] = useState(getPage());
@@ -22248,8 +22835,10 @@ export default function App() {
       <GlobalResponsiveStyles />
       {page === "entry" ? (
         <EntryPage />
-      ) : page === "boxmaker" ? ( 
+      ) : page === "boxmaker" ? (
         <BoxMakerPage />
+      ) : page === "manage" ? (
+        <ManagePage />
       ) : page === "station" ? (
         <StationPage deptKey={dept} />
       ) : page === "damages" ? (
