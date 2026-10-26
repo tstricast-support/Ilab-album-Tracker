@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
-from sqlalchemy import case, desc, func, or_
+from sqlalchemy import and_, case, desc, func, or_
 from sqlalchemy.orm import Session, selectinload
 from .models import SL_TZ_OFFSET
 
@@ -2941,22 +2941,33 @@ def box_jobs(
     page: int = Query(1, ge=1),
     page_size: int = Query(30, ge=1, le=100),
 ):
+    sl_now = datetime.utcnow() + SL_TZ_OFFSET
+    today_start = datetime(sl_now.year, sl_now.month, sl_now.day) - SL_TZ_OFFSET
+
     if date:
         try:
             day_start = datetime.strptime(date, "%Y-%m-%d") - SL_TZ_OFFSET
         except ValueError:
             raise HTTPException(400, "Invalid date format. Use YYYY-MM-DD.")
     else:
-        sl_now = datetime.utcnow() + SL_TZ_OFFSET
-        day_start = datetime(sl_now.year, sl_now.month, sl_now.day) - SL_TZ_OFFSET
+        day_start = today_start
     day_end = day_start + timedelta(days=1)
 
     q = db.query(JobCard).filter(
         JobCard.box_type.isnot(None),
         func.trim(JobCard.box_type) != "",
-        JobCard.created_at >= day_start,
-        JobCard.created_at < day_end,
     )
+
+    in_day = and_(JobCard.created_at >= day_start, JobCard.created_at < day_end)
+    if day_start == today_start:
+        # Today's list = today's jobs + every older job that is still NOT done
+        carried = and_(JobCard.created_at < day_start, JobCard.box_done_at.is_(None))
+        q = q.filter(or_(in_day, carried))
+    else:
+        # Past dates stay a plain history view
+        q = q.filter(in_day)
+
+
     if search and search.strip():
         term = f"%{search.strip()}%"
         q = q.filter(or_(
@@ -2990,6 +3001,7 @@ def box_jobs(
             "priority": _str(j.priority),
             "dele_date": j.dele_date,
             "created_at": j.created_at,
+            "carried_over": j.created_at < day_start,
             "is_done": j.box_done_at is not None,
             "done_at": j.box_done_at,
             "done_by": j.box_done_by,

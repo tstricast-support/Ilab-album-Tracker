@@ -21935,9 +21935,11 @@ function useIsMobile() {
   return mobile;
 }
 
+
 function BoxMakerPage() {
   const { toasts, add } = useToast();
   const isMobile = useIsMobile();
+
   const [selectedDate, setSelectedDate] = useState(() => slDateStr(new Date()));
   const [calYear, setCalYear] = useState(new Date().getFullYear());
   const [calMonth, setCalMonth] = useState(new Date().getMonth() + 1);
@@ -21947,6 +21949,17 @@ function BoxMakerPage() {
   const [debounced, setDebounced] = useState("");
   const [page, setPage] = useState(1);
   const [data, setData] = useState(null);
+
+  const [viewJob, setViewJob] = useState(null);
+
+  async function openJob(j) {
+    try {
+      setViewJob(await api.getJob(j.id));
+    } catch (err) {
+      add(err.message, "error");
+    }
+  }
+
   const [busyId, setBusyId] = useState(null);
   const [myName, setMyName] = useState(
     () => localStorage.getItem("ilab-box-name") || "",
@@ -21957,11 +21970,14 @@ function BoxMakerPage() {
       setDebounced(search);
       setPage(1);
     }, 350);
+
     return () => clearTimeout(t);
   }, [search]);
+
   useEffect(() => {
     setPage(1);
   }, [selectedDate]);
+
   useEffect(() => {
     api
       .boxJobDates(calYear, calMonth)
@@ -21976,6 +21992,7 @@ function BoxMakerPage() {
       add(err.message, "error");
     }
   }, [selectedDate, debounced, page]);
+
   usePolling(
     reload,
     POLL_INTERVAL_MS,
@@ -21984,26 +22001,38 @@ function BoxMakerPage() {
   );
 
   async function toggleDone(j) {
-        if (IS_SUPERVISOR) {
-          add("Supervisor is view-only.", "error");
-          return;
-        }
+    if (IS_SUPERVISOR) {
+      add("Supervisor is view-only.", "error");
+      return;
+    }
+
     const markDone = !j.is_done;
+
     if (markDone && !myName.trim()) {
       add("Please enter your name first.", "error");
       return;
     }
-    if (!markDone && !window.confirm(`Undo "done" for ${j.job_no}?`)) return;
+
+    if (!markDone && !window.confirm(`Undo "done" for ${j.job_no}?`)) {
+      return;
+    }
+
     setBusyId(j.id);
+
     try {
       await api.boxJobDone(j.id, markDone, myName.trim());
-      if (markDone) localStorage.setItem("ilab-box-name", myName.trim());
+
+      if (markDone) {
+        localStorage.setItem("ilab-box-name", myName.trim());
+      }
+
       add(
         markDone
           ? `✓ Box ${j.job_no} marked done.`
           : `Box ${j.job_no} set back to pending.`,
         markDone ? "success" : "info",
       );
+
       await reload();
     } catch (err) {
       add(err.message, "error");
@@ -22013,6 +22042,7 @@ function BoxMakerPage() {
   }
 
   const accent = "#f59e0b";
+
   return (
     <>
       <Shell title="BOX MAKER - DAILY LIST" accent={accent}>
@@ -22024,8 +22054,14 @@ function BoxMakerPage() {
             alignItems: "start",
           }}
         >
-          {/* ── Left column ── */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {/* Left column */}
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 10,
+            }}
+          >
             <div>
               <label>Your name *</label>
               <input
@@ -22054,6 +22090,7 @@ function BoxMakerPage() {
                 <Calendar size={14} /> {selectedDate}
               </button>
             )}
+
             {showCal && (
               <EntryCalendar
                 year={calYear}
@@ -22069,11 +22106,7 @@ function BoxMakerPage() {
                 accent={accent}
               />
             )}
-            <SearchBar
-              value={search}
-              onChange={setSearch}
-              placeholder="Job No / Studio / Couple…"
-            />
+
             {data && (
               <div
                 style={{
@@ -22107,6 +22140,7 @@ function BoxMakerPage() {
                     {data.total}
                   </div>
                 </div>
+
                 <div>
                   <div
                     style={{
@@ -22128,6 +22162,7 @@ function BoxMakerPage() {
                     {data.done_count}
                   </div>
                 </div>
+
                 <div>
                   <div
                     style={{
@@ -22153,8 +22188,20 @@ function BoxMakerPage() {
             )}
           </div>
 
-          {/* ── Job list ── */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {/* Job list */}
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+            }}
+          >
+            <SearchBar
+              value={search}
+              onChange={setSearch}
+              placeholder="Search Job No / Studio / Couple…"
+            />
+
             {data?.jobs?.length === 0 && (
               <div
                 style={{
@@ -22166,12 +22213,14 @@ function BoxMakerPage() {
                 NO BOX JOBS ON THIS DAY
               </div>
             )}
+
             {data?.jobs?.map((j) => {
               const barColor = j.is_done
                 ? "var(--green)"
                 : j.priority === "URGENT"
                   ? "var(--red)"
                   : accent;
+
               return (
                 <div
                   key={j.id}
@@ -22187,64 +22236,117 @@ function BoxMakerPage() {
                     opacity: j.is_done ? 0.85 : 1,
                   }}
                 >
+                  {/* Clickable job details */}
                   <div
+                    onClick={() => openJob(j)}
+                    title="Click to view the full job card"
                     style={{
+                      cursor: "pointer",
                       display: "flex",
-                      justifyContent: "space-between",
+                      flexDirection: "column",
                       gap: 8,
-                      flexWrap: "wrap",
                     }}
                   >
-                    <span
+                    <div
                       style={{
-                        fontFamily: "var(--fm)",
-                        fontSize: 18,
-                        fontWeight: 800,
-                        color: "var(--amber)",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        gap: 8,
+                        flexWrap: "wrap",
                       }}
                     >
-                      {j.job_no}
-                      {j.priority === "URGENT" && (
-                        <span
-                          style={{
-                            marginLeft: 8,
-                            fontSize: 11,
-                            color: "var(--red)",
-                          }}
-                        >
-                          URGENT
-                        </span>
-                      )}
-                    </span>
-                    <span style={{ fontSize: 12, color: "var(--text-dim)" }}>
-                      Delivery{" "}
-                      {new Date(j.dele_date).toLocaleDateString("en-GB", {
-                        day: "2-digit",
-                        month: "short",
-                      })}
-                    </span>
+                      <span
+                        style={{
+                          fontFamily: "var(--fm)",
+                          fontSize: 18,
+                          fontWeight: 800,
+                          color: "var(--amber)",
+                        }}
+                      >
+                        {j.job_no}
+
+                        {j.priority === "URGENT" && (
+                          <span
+                            style={{
+                              marginLeft: 8,
+                              fontSize: 11,
+                              color: "var(--red)",
+                            }}
+                          >
+                            URGENT
+                          </span>
+                        )}
+
+                        {j.carried_over && !j.is_done && (
+                          <span
+                            style={{
+                              marginLeft: 8,
+                              fontSize: 11,
+                              padding: "2px 7px",
+                              borderRadius: 4,
+                              background: "var(--warn-bg)",
+                              color: "var(--amber)",
+                              border: "1px solid var(--amber)",
+                            }}
+                          >
+                            FROM{" "}
+                            {parseUTC(j.created_at).toLocaleDateString(
+                              "en-GB",
+                              {
+                                day: "2-digit",
+                                month: "short",
+                              },
+                            )}
+                          </span>
+                        )}
+                      </span>
+
+                      <span
+                        style={{
+                          fontSize: 12,
+                          color: "var(--text-dim)",
+                        }}
+                      >
+                        Delivery{" "}
+                        {new Date(j.dele_date).toLocaleDateString("en-GB", {
+                          day: "2-digit",
+                          month: "short",
+                        })}
+                      </span>
+                    </div>
+
+                    <div
+                      style={{
+                        fontSize: 14,
+                        fontWeight: 700,
+                        color: "var(--text-pri)",
+                      }}
+                    >
+                      {j.customer}
+                      {j.couple_name ? ` / ${j.couple_name}` : ""}
+                    </div>
+
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 6,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <Chip
+                        label="Box Type"
+                        value={j.box_name}
+                        accent={accent}
+                      />
+                      <Chip
+                        label="Box Size"
+                        value={j.box_size}
+                        accent="#3b82f6"
+                      />
+                    </div>
                   </div>
 
-                  <div
-                    style={{
-                      fontSize: 14,
-                      fontWeight: 700,
-                      color: "var(--text-pri)",
-                    }}
-                  >
-                    {j.customer}
-                    {j.couple_name ? ` / ${j.couple_name}` : ""}
-                  </div>
-
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    <Chip label="Box Type" value={j.box_name} accent={accent} />
-                    <Chip
-                      label="Box Size"
-                      value={j.box_size}
-                      accent="#3b82f6"
-                    />
-                  </div>
-
+                  {/* Done / Undo buttons remain outside the clickable wrapper */}
                   {j.is_done ? (
                     <div
                       style={{
@@ -22268,6 +22370,7 @@ function BoxMakerPage() {
                           minute: "2-digit",
                         })}
                       </span>
+
                       <button
                         onClick={() => toggleDone(j)}
                         disabled={busyId === j.id}
@@ -22304,6 +22407,7 @@ function BoxMakerPage() {
               );
             })}
 
+            {/* Pagination */}
             {data && data.pages > 1 && (
               <div
                 style={{
@@ -22319,9 +22423,11 @@ function BoxMakerPage() {
                 >
                   ◀ Prev
                 </button>
+
                 <span style={{ color: "var(--text-dim)" }}>
                   {page} / {data.pages}
                 </span>
+
                 <button
                   disabled={page === data.pages}
                   onClick={() => setPage((p) => p + 1)}
@@ -22333,10 +22439,21 @@ function BoxMakerPage() {
           </div>
         </div>
       </Shell>
+
+      {/* Full job-card modal */}
+      {viewJob && (
+        <JobCardViewModal
+          job={viewJob}
+          onClose={() => setViewJob(null)}
+          addToast={add}
+        />
+      )}
+
       <ToastStack toasts={toasts} />
     </>
   );
 }
+
 
 // ── Manage: photographers (email notifications) ──────────────────────
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
