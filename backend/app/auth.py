@@ -1,3 +1,4 @@
+import re
 import jwt
 from jwt import PyJWKClient
 from fastapi import Depends, HTTPException, Request
@@ -5,6 +6,16 @@ from .config import settings
 
 VALID_ROLES = {"ENTRY","PRINTING","LAMINATING","LASER_CUTTING","BINDING","ADMIN","BOXMAKE","SUPERVISOR"}
 PUBLIC_PREFIXES = ("/api/track/", "/api/health")
+SUPERVISOR_WRITE_ALLOWED = [
+    ("POST",  re.compile(r"^/api/jobs$")),                    # create job card
+    ("PATCH", re.compile(r"^/api/jobs/\d+/album-type$")),     # album type popup after create
+    ("PATCH", re.compile(r"^/api/jobs/\d+/payment$")),        # optional: payment (remove if not wanted)
+]
+
+def _supervisor_may_write(method: str, path: str) -> bool:
+    path = path.rstrip("/") or "/"
+    return any(method == m and rx.match(path) for m, rx in SUPERVISOR_WRITE_ALLOWED)
+
 
 _jwks = PyJWKClient(settings.CLERK_JWKS_URL, cache_keys=True) if settings.CLERK_JWKS_URL else None
 
@@ -43,7 +54,9 @@ def get_current_user(request: Request):
     if role not in VALID_ROLES:
         raise HTTPException(403, "No department role assigned")
 
-    if role == "SUPERVISOR" and request.method not in ("GET", "HEAD", "OPTIONS"):
+    if (role == "SUPERVISOR"
+            and request.method not in ("GET", "HEAD", "OPTIONS")
+            and not _supervisor_may_write(request.method, path)):
         raise HTTPException(403, "Supervisor is view-only.")
 
     return {"id": claims["sub"], "role": role}
