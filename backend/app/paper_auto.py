@@ -39,9 +39,16 @@ SIZE_MAP = {
 
 
 def album_to_paper(print_size):
-    s = str(print_size or "").lower().replace("×", "x").replace("*", "x")
-    s = re.sub(r"[^0-9x]", "", s)          # "12 x 30" -> "12x30"
-    return SIZE_MAP.get(s)
+    nums = re.findall(r"\d+(?:\.\d+)?", str(print_size or ""))
+    if len(nums) < 2:
+        return None
+
+    def fmt(v):
+        f = float(v)                      # "08" -> 8.0
+        return str(int(f)) if f == int(f) else str(f)
+
+    a, b = fmt(nums[0]), fmt(nums[1])
+    return SIZE_MAP.get(f"{a}x{b}") or SIZE_MAP.get(f"{b}x{a}")
 
 
 def _parse_pages(v):
