@@ -2933,40 +2933,130 @@ def _split_box(box_type: str, fallback_size: str = ""):
     return name, size
 
 
-@app.get("/api/box-jobs", dependencies=[Depends(require_roles("BOXMAKE", "ADMIN", "SUPERVISOR"))])
+def _is_pouch(box_type: str) -> bool:
+    return "pouch" in (box_type or "").lower()
+
+
+def _box_job_filter():
+    """Jobs that really go to the box makers: has a box type, and it is NOT a pouch."""
+    return and_(
+        JobCard.box_type.isnot(None),
+        func.trim(JobCard.box_type) != "",
+        func.lower(JobCard.box_type).notlike("%pouch%"),
+    )
+
+
+def _box_job_dict(j: JobCard) -> dict:
+    name, size = _split_box(j.box_type, j.print_size)
+    return {
+        "id": j.id,
+        "job_no": j.job_no,
+        "customer": j.customer,
+        "couple_name": j.couple_name,
+        "box_type": j.box_type,
+        "box_name": name,
+        "box_size": size,
+        "priority": _str(j.priority),
+        "dele_date": j.dele_date,
+        "created_at": j.created_at,
+        "is_done": j.box_done_at is not None,
+        "done_at": j.box_done_at,
+        "done_by": j.box_done_by,
+    }
+
+
+@app.get("/api/box-jobs")
 def box_jobs(
     db: Session = Depends(get_db),
-    date: Optional[str] = Query(None, description="YYYY-MM-DD, Sri Lanka day. Omit for today."),
+    user=Depends(require_roles("BOXMAKE", "ADMIN", "SUPERVISOR")),
+    date: Optional[str] = Query(None, description="YYYY-MM-DD, Sri Lanka day. Default = today. Ignored while searching."),
     search: Optional[str] = Query(None),
+    status: str = Query("all", description="all / pending / done"),
     page: int = Query(1, ge=1),
     page_size: int = Query(30, ge=1, le=100),
 ):
     sl_now = datetime.utcnow() + SL_TZ_OFFSET
     today_start = datetime(sl_now.year, sl_now.month, sl_now.day) - SL_TZ_OFFSET
 
+    if not date:
+        day_start = today_start
+    else:
+        try:
+            day_start = datetime.strptime(date, "%Y-%m-%d") - SL_TZ_OFFSET
+        except ValueError:
+            raise HTTPException(400, "Invalid date format. Use YYYY-MM-DD.")
+    day_end = day_start + timedelta(days=1)
+
+    searching = bool(search and search.strip())
+
+    q = db.query(JobCard).filter(_box_job_filter())
+    if searching:
+        # Search looks at ALL box jobs, any date, done or not done
+        term = f"%{search.strip()}%"
+        q = q.filter(or_(
+            JobCard.job_no.ilike(term),
+            JobCard.customer.ilike(term),
+            JobCard.couple_name.ilike(term),
+            JobCard.box_done_by.ilike(term),
+        ))
+    else:
+        q = q.filter(JobCard.created_at >= day_start, JobCard.created_at < day_end)
+
+    total = q.count()
+    done_count = q.filter(JobCard.box_done_at.isnot(None)).count()
+
+    st = (status or "all").lower()
+    if st == "pending":
+        q = q.filter(JobCard.box_done_at.is_(None))
+    elif st == "done":
+        q = q.filter(JobCard.box_done_at.isnot(None))
+    shown = q.count()
+
+    rows = (
+        q.order_by(
+            case((JobCard.box_done_at.is_(None), 0), else_=1),   # pending first
+            _urgent_first(),
+            JobCard.created_at.desc() if searching else JobCard.created_at.asc(),
+        )
+         .offset((page - 1) * page_size).limit(page_size).all()
+    )
+    return {
+        "total": total,
+        "done_count": done_count,
+        "pending_count": total - done_count,
+        "searching": searching,
+        "page": page, "page_size": page_size,
+        "pages": max(1, -(-shown // page_size)),
+        "jobs": [_box_job_dict(j) for j in rows],
+    }
+
+    
+
+# All-time list of finished boxes (opened by tapping the "Done" number)
+@app.get("/api/box-jobs/done")
+def box_jobs_done(
+    db: Session = Depends(get_db),
+    user=Depends(require_roles("BOXMAKE", "ADMIN", "SUPERVISOR")),
+    date: Optional[str] = Query(None, description="YYYY-MM-DD, Sri Lanka day. Default = today."),
+    search: Optional[str] = Query(None, description="job_no / customer / couple / done by"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+):
     if date:
         try:
             day_start = datetime.strptime(date, "%Y-%m-%d") - SL_TZ_OFFSET
         except ValueError:
             raise HTTPException(400, "Invalid date format. Use YYYY-MM-DD.")
     else:
-        day_start = today_start
+        sl_now = datetime.utcnow() + SL_TZ_OFFSET
+        day_start = datetime(sl_now.year, sl_now.month, sl_now.day) - SL_TZ_OFFSET
     day_end = day_start + timedelta(days=1)
 
     q = db.query(JobCard).filter(
-        JobCard.box_type.isnot(None),
-        func.trim(JobCard.box_type) != "",
+        JobCard.box_done_at.isnot(None),
+        JobCard.box_done_at >= day_start,
+        JobCard.box_done_at < day_end,
     )
-
-    in_day = and_(JobCard.created_at >= day_start, JobCard.created_at < day_end)
-    if day_start == today_start:
-        # Today's list = today's jobs + every older job that is still NOT done
-        carried = and_(JobCard.created_at < day_start, JobCard.box_done_at.is_(None))
-        q = q.filter(or_(in_day, carried))
-    else:
-        # Past dates stay a plain history view
-        q = q.filter(in_day)
-
 
     if search and search.strip():
         term = f"%{search.strip()}%"
@@ -2974,47 +3064,20 @@ def box_jobs(
             JobCard.job_no.ilike(term),
             JobCard.customer.ilike(term),
             JobCard.couple_name.ilike(term),
+            JobCard.box_done_by.ilike(term),
         ))
 
     total = q.count()
-    done_count = q.filter(JobCard.box_done_at.isnot(None)).count()
-
     rows = (
-        q.order_by(
-            case((JobCard.box_done_at.is_(None), 0), else_=1),   # pending first
-            _urgent_first(),
-            JobCard.created_at.asc(),
-        )
+        q.order_by(desc(JobCard.box_done_at))
          .offset((page - 1) * page_size).limit(page_size).all()
     )
-    jobs = []
-    for j in rows:
-        name, size = _split_box(j.box_type, j.print_size)
-        jobs.append({
-            "id": j.id,
-            "job_no": j.job_no,
-            "customer": j.customer,
-            "couple_name": j.couple_name,
-            "box_type": j.box_type,
-            "box_name": name,
-            "box_size": size,
-            "priority": _str(j.priority),
-            "dele_date": j.dele_date,
-            "created_at": j.created_at,
-            "carried_over": j.created_at < day_start,
-            "is_done": j.box_done_at is not None,
-            "done_at": j.box_done_at,
-            "done_by": j.box_done_by,
-        })
     return {
         "total": total,
-        "done_count": done_count,
-        "pending_count": total - done_count,
         "page": page, "page_size": page_size,
         "pages": max(1, -(-total // page_size)),
-        "jobs": jobs,
+        "jobs": [_box_job_dict(j) for j in rows],
     }
-
 
 class BoxDoneRequest(BaseModel):
     done: bool = True
@@ -3027,6 +3090,8 @@ def box_job_done(job_id: int, payload: BoxDoneRequest, db: Session = Depends(get
     job = _job_or_404(job_id, db)
     if not (job.box_type or "").strip():
         raise HTTPException(400, "This job has no box.")
+    if _is_pouch(job.box_type):
+        raise HTTPException(400, "Pouch jobs are not handled by the box makers.")
 
     if payload.done:
         name = (payload.done_by or "").strip()
@@ -3048,14 +3113,15 @@ def box_job_done(job_id: int, payload: BoxDoneRequest, db: Session = Depends(get
         "done_by": job.box_done_by,
     }
 
+
 @app.get("/api/box-jobs/dates-with-entries",
          dependencies=[Depends(require_roles("BOXMAKE", "ADMIN", "SUPERVISOR"))])
 def box_jobs_dates(year: int = Query(...), month: int = Query(...),
                    db: Session = Depends(get_db)):
-    start, end = _month_window(year, month)   # defined lower in the file; fine at runtime
+    start, end = _month_window(year, month)
     rows = (
         db.query(JobCard.created_at)
-        .filter(JobCard.box_type.isnot(None), func.trim(JobCard.box_type) != "",
+        .filter(_box_job_filter(),
                 JobCard.created_at >= start, JobCard.created_at < end)
         .all()
     )
@@ -3064,6 +3130,24 @@ def box_jobs_dates(year: int = Query(...), month: int = Query(...),
         k = str((dt + SL_TZ_OFFSET).day)
         day_counts[k] = day_counts.get(k, 0) + 1
     return day_counts
+
+@app.get("/api/box-jobs/done-dates",
+         dependencies=[Depends(require_roles("BOXMAKE", "ADMIN", "SUPERVISOR"))])
+def box_jobs_done_dates(year: int = Query(...), month: int = Query(...),
+                        db: Session = Depends(get_db)):
+    start, end = _month_window(year, month)
+    rows = (
+        db.query(JobCard.box_done_at)
+        .filter(JobCard.box_done_at.isnot(None),
+                JobCard.box_done_at >= start, JobCard.box_done_at < end)
+        .all()
+    )
+    day_counts: dict[str, int] = {}
+    for (dt,) in rows:
+        k = str((dt + SL_TZ_OFFSET).day)
+        day_counts[k] = day_counts.get(k, 0) + 1
+    return day_counts
+
 
 # ── Photographers (Manage page) ───────────────────────────────────────
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]{2,}$")

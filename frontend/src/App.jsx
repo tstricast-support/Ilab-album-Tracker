@@ -47,7 +47,11 @@ import {
   X,
   Users,
   MoreVertical,
-  Pencil,
+  CheckCircle2,
+  Clock,
+  Undo2,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import logo from "./assets/logo.jpg";
 import trackQR from "./assets/track-qr.png";
@@ -85,9 +89,9 @@ async function apiFetch(path, opts = {}) {
 }
 
 const api = {
-  boxJobs: (date = "", search = "", page = 1) =>
+  boxJobs: (date = "", search = "", page = 1, status = "all") =>
     apiFetch(
-      `/api/box-jobs?${date ? `date=${date}&` : ""}search=${encodeURIComponent(search)}&page=${page}&page_size=30`,
+      `/api/box-jobs?${date ? `date=${date}&` : ""}search=${encodeURIComponent(search)}&status=${status}&page=${page}&page_size=30`,
     ),
   boxJobDates: (year, month) =>
     apiFetch(`/api/box-jobs/dates-with-entries?year=${year}&month=${month}`),
@@ -96,6 +100,13 @@ const api = {
       method: "PATCH",
       body: JSON.stringify({ done, done_by }),
     }),
+
+  boxJobsDone: (search = "", page = 1, date = "") =>
+    apiFetch(
+      `/api/box-jobs/done?search=${encodeURIComponent(search)}&${date ? `date=${date}&` : ""}page=${page}&page_size=20`,
+    ),
+  boxJobDoneDates: (year, month) =>
+    apiFetch(`/api/box-jobs/done-dates?year=${year}&month=${month}`),
   jobs: (done = false) => apiFetch(`/api/jobs?completed=${done}`),
   createJob: (body) =>
     apiFetch("/api/jobs", { method: "POST", body: JSON.stringify(body) }),
@@ -21935,22 +21946,371 @@ function useIsMobile() {
   return mobile;
 }
 
+const IS_BOXMAKER = ROLE === "BOXMAKE";
+
+function BoxDoneHistoryModal({ onClose, addToast, initialDate }) {
+  const isMobile = useIsMobile();
+  const todayStr = slDateStr(new Date());
+  const startDate = initialDate || todayStr;
+
+  const [selectedDate, setSelectedDate] = useState(startDate);
+  const [calYear, setCalYear] = useState(+startDate.slice(0, 4));
+  const [calMonth, setCalMonth] = useState(+startDate.slice(5, 7));
+  const [dotDays, setDotDays] = useState({});
+  const [showCal, setShowCal] = useState(false);
+
+  const [search, setSearch] = useState("");
+  const [debounced, setDebounced] = useState("");
+  const [page, setPage] = useState(1);
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [viewJob, setViewJob] = useState(null);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebounced(search);
+      setPage(1);
+    }, 350);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [selectedDate]);
+
+  useEffect(() => {
+    api
+      .boxJobDoneDates(calYear, calMonth)
+      .then(setDotDays)
+      .catch(() => setDotDays({}));
+  }, [calYear, calMonth]);
+
+  useEffect(() => {
+    setLoading(true);
+    api
+      .boxJobsDone(debounced, page, selectedDate)
+      .then((d) => setData(d))
+      .catch((err) => addToast?.(err.message, "error"))
+      .finally(() => setLoading(false));
+  }, [debounced, page, selectedDate]);
+
+  async function openJob(j) {
+    try {
+      setViewJob(await api.getJob(j.id));
+    } catch (err) {
+      addToast?.(err.message, "error");
+    }
+  }
+
+  const fmtDone = (iso) =>
+    parseUTC(iso).toLocaleString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: "Asia/Colombo",
+    });
+
+  const dateLabel = new Date(selectedDate + "T00:00:00").toLocaleDateString(
+    "en-GB",
+    { day: "2-digit", month: "short", year: "numeric" },
+  );
+  const isToday = selectedDate === todayStr;
+
+  return (
+    <>
+      <div
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "var(--overlay)",
+          display: "flex",
+          alignItems: isMobile ? "flex-end" : "center",
+          justifyContent: "center",
+          zIndex: 9300,
+        }}
+        onClick={onClose}
+      >
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            background: "var(--bg1)",
+            border: "1px solid var(--green)",
+            borderRadius: isMobile ? "16px 16px 0 0" : 12,
+            padding: 20,
+            width: "100%",
+            maxWidth: 560,
+            maxHeight: isMobile ? "92dvh" : "88vh",
+            overflowY: "auto",
+            display: "flex",
+            flexDirection: "column",
+            gap: 12,
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <div>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: "var(--text-dim)",
+                  textTransform: "uppercase",
+                  letterSpacing: ".1em",
+                }}
+              >
+                Box Maker
+              </div>
+              <div
+                style={{ fontSize: 18, fontWeight: 800, color: "var(--green)" }}
+              >
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  <CheckCircle2 size={18} /> Finished Boxes{" "}
+                  {data ? `(${data.total})` : ""}
+                </span>
+              </div>
+            </div>
+            <button
+              onClick={onClose}
+              style={{
+                padding: "8px 12px",
+                background: "var(--bg3)",
+                color: "var(--text-sec)",
+                border: "1px solid var(--border)",
+                borderRadius: 6,
+                fontWeight: 700,
+              }}
+            >
+              ✕
+            </button>
+          </div>
+
+          {/* Date filter */}
+          <button
+            type="button"
+            onClick={() => setShowCal((p) => !p)}
+            style={{
+              width: "100%",
+              textAlign: "left",
+              padding: "9px 12px",
+              background: "var(--bg3)",
+              color: "var(--text-pri)",
+              border: "1px solid var(--green)",
+              borderRadius: 6,
+              fontWeight: 700,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              fontSize: 14,
+            }}
+          >
+            <Calendar size={14} />
+            {dateLabel}
+            {isToday && (
+              <span
+                style={{
+                  fontSize: 10,
+                  color: "var(--green)",
+                  marginLeft: "auto",
+                }}
+              >
+                TODAY
+              </span>
+            )}
+          </button>
+
+          {showCal && (
+            <div style={{ maxWidth: 280 }}>
+              <EntryCalendar
+                year={calYear}
+                month={calMonth}
+                onYearMonth={(y, m) => {
+                  setCalYear(y);
+                  setCalMonth(m);
+                }}
+                dotDays={dotDays}
+                selectedDate={selectedDate}
+                onSelect={setSelectedDate}
+                onAfterSelect={() => setShowCal(false)}
+                accent="var(--green)"
+              />
+            </div>
+          )}
+
+          <SearchBar
+            value={search}
+            onChange={setSearch}
+            placeholder="Job No / Studio / Couple / Done by…"
+          />
+
+          {loading && (
+            <div
+              style={{
+                textAlign: "center",
+                padding: "20px 0",
+                color: "var(--text-dim)",
+              }}
+            >
+              LOADING…
+            </div>
+          )}
+          {!loading && data?.jobs?.length === 0 && (
+            <div
+              style={{
+                textAlign: "center",
+                padding: "30px 0",
+                color: "var(--text-dim)",
+              }}
+            >
+              {isToday
+                ? "NO FINISHED BOXES TODAY"
+                : `NO FINISHED BOXES ON ${dateLabel.toUpperCase()}`}
+            </div>
+          )}
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {!loading &&
+              data?.jobs?.map((j) => (
+                <button
+                  key={j.id}
+                  onClick={() => openJob(j)}
+                  style={{
+                    textAlign: "left",
+                    background: "var(--success-bg)",
+                    border: "1px solid var(--border)",
+                    borderLeft: "4px solid var(--green)",
+                    borderRadius: 8,
+                    padding: "10px 12px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 5,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 8,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontFamily: "var(--fm)",
+                        fontSize: 15,
+                        fontWeight: 800,
+                        color: "var(--amber)",
+                      }}
+                    >
+                      {j.job_no}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: "var(--green)",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 4,
+                      }}
+                    >
+                      <Check size={12} /> {j.done_by} · {fmtDone(j.done_at)}
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 700,
+                      color: "var(--text-pri)",
+                    }}
+                  >
+                    {j.customer}
+                    {j.couple_name ? ` / ${j.couple_name}` : ""}
+                  </div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <Chip label="Box" value={j.box_name} accent="#f59e0b" />
+                    <Chip label="Size" value={j.box_size} accent="#3b82f6" />
+                  </div>
+                </button>
+              ))}
+          </div>
+
+          {data && data.pages > 1 && (
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "center",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              <button
+                disabled={page === 1}
+                onClick={() => setPage((p) => p - 1)}
+              >
+                ◀ Prev
+              </button>
+              <span style={{ color: "var(--text-dim)", fontSize: 13 }}>
+                {page} / {data.pages}
+              </span>
+              <button
+                disabled={page === data.pages}
+                onClick={() => setPage((p) => p + 1)}
+              >
+                Next ▶
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {viewJob && (
+        <JobCardViewModal
+          job={viewJob}
+          onClose={() => setViewJob(null)}
+          addToast={addToast}
+        />
+      )}
+    </>
+  );
+}
+
 
 function BoxMakerPage() {
   const { toasts, add } = useToast();
   const isMobile = useIsMobile();
 
-  const [selectedDate, setSelectedDate] = useState(() => slDateStr(new Date()));
+  const todayStr = slDateStr(new Date());
+  const [selectedDate, setSelectedDate] = useState(todayStr);
   const [calYear, setCalYear] = useState(new Date().getFullYear());
   const [calMonth, setCalMonth] = useState(new Date().getMonth() + 1);
   const [dotDays, setDotDays] = useState({});
   const [showCal, setShowCal] = useState(!isMobile);
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
+  const [status, setStatus] = useState("all"); // all / pending / done
   const [page, setPage] = useState(1);
   const [data, setData] = useState(null);
-
+  const [showDone, setShowDone] = useState(false);
   const [viewJob, setViewJob] = useState(null);
+  const [busyId, setBusyId] = useState(null);
+  const [myName, setMyName] = useState(
+    () => localStorage.getItem("ilab-box-name") || "",
+  );
+
+  const accent = "#f59e0b";
+  const searching = !!debounced.trim();
+  const canMark = !IS_SUPERVISOR; // boxmaker + admin
 
   async function openJob(j) {
     try {
@@ -21960,23 +22320,17 @@ function BoxMakerPage() {
     }
   }
 
-  const [busyId, setBusyId] = useState(null);
-  const [myName, setMyName] = useState(
-    () => localStorage.getItem("ilab-box-name") || "",
-  );
-
   useEffect(() => {
     const t = setTimeout(() => {
       setDebounced(search);
       setPage(1);
     }, 350);
-
     return () => clearTimeout(t);
   }, [search]);
 
   useEffect(() => {
     setPage(1);
-  }, [selectedDate]);
+  }, [selectedDate, status]);
 
   useEffect(() => {
     api
@@ -21987,52 +22341,43 @@ function BoxMakerPage() {
 
   const reload = useCallback(async () => {
     try {
-      setIfChanged(setData)(await api.boxJobs(selectedDate, debounced, page));
+      setIfChanged(setData)(
+        await api.boxJobs(selectedDate, debounced, page, status),
+      );
     } catch (err) {
       add(err.message, "error");
     }
-  }, [selectedDate, debounced, page]);
+  }, [selectedDate, debounced, page, status]);
 
   usePolling(
     reload,
     POLL_INTERVAL_MS,
     true,
-    `${selectedDate}|${debounced}|${page}`,
+    `${selectedDate}|${debounced}|${page}|${status}`,
   );
 
   async function toggleDone(j) {
-    if (IS_SUPERVISOR) {
+    if (!canMark) {
       add("Supervisor is view-only.", "error");
       return;
     }
-
     const markDone = !j.is_done;
-
     if (markDone && !myName.trim()) {
       add("Please enter your name first.", "error");
       return;
     }
-
-    if (!markDone && !window.confirm(`Undo "done" for ${j.job_no}?`)) {
-      return;
-    }
+    if (!markDone && !window.confirm(`Undo "done" for ${j.job_no}?`)) return;
 
     setBusyId(j.id);
-
     try {
       await api.boxJobDone(j.id, markDone, myName.trim());
-
-      if (markDone) {
-        localStorage.setItem("ilab-box-name", myName.trim());
-      }
-
+      if (markDone) localStorage.setItem("ilab-box-name", myName.trim());
       add(
         markDone
           ? `✓ Box ${j.job_no} marked done.`
           : `Box ${j.job_no} set back to pending.`,
         markDone ? "success" : "info",
       );
-
       await reload();
     } catch (err) {
       add(err.message, "error");
@@ -22041,11 +22386,31 @@ function BoxMakerPage() {
     }
   }
 
-  const accent = "#f59e0b";
+  const dateLabel = new Date(selectedDate + "T00:00:00").toLocaleDateString(
+    "en-GB",
+    { day: "2-digit", month: "short", year: "numeric" },
+  );
+  const fmtShort = (iso) =>
+    parseUTC(iso).toLocaleDateString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      timeZone: "Asia/Colombo",
+    });
+
+  const FILTERS = [
+    ["all", "All", data?.total],
+    ["pending", "Pending", data?.pending_count],
+    ["done", "Done", data?.done_count],
+  ];
 
   return (
     <>
-      <Shell title="BOX MAKER - DAILY LIST" accent={accent}>
+      <Shell
+        title={
+          IS_PRIVILEGED ? "BOX LIST - ADMIN VIEW" : "BOX MAKER - DAILY LIST"
+        }
+        accent={accent}
+      >
         <div
           style={{
             display: "grid",
@@ -22054,42 +22419,43 @@ function BoxMakerPage() {
             alignItems: "start",
           }}
         >
-          {/* Left column */}
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 10,
-            }}
-          >
-            <div>
-              <label>Your name *</label>
-              <input
-                value={myName}
-                onChange={(e) =>
-                  setMyName(
-                    e.target.value.replace(/\b\w/g, (c) => c.toUpperCase()),
-                  )
-                }
-                placeholder="Enter your name"
-              />
-            </div>
-
-            {isMobile && (
-              <button
-                onClick={() => setShowCal((p) => !p)}
-                style={{
-                  padding: "8px 12px",
-                  background: "var(--bg3)",
-                  color: "var(--text-sec)",
-                  border: `1px solid ${accent}`,
-                  borderRadius: 6,
-                  fontWeight: 700,
-                }}
-              >
-                <Calendar size={14} /> {selectedDate}
-              </button>
+          {/* ── Left column ── */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {canMark && (
+              <div>
+                <label>Your name *</label>
+                <input
+                  value={myName}
+                  onChange={(e) =>
+                    setMyName(
+                      e.target.value.replace(/\b\w/g, (c) => c.toUpperCase()),
+                    )
+                  }
+                  placeholder="Enter your name"
+                />
+              </div>
             )}
+
+            <button
+              onClick={() => setShowCal((p) => !p)}
+              style={{
+                padding: "9px 12px",
+                background: showCal ? accent : "var(--bg3)",
+                color: showCal ? "#000" : "var(--text-pri)",
+                border: `1px solid ${accent}`,
+                borderRadius: 6,
+                fontWeight: 700,
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                fontSize: 14,
+              }}
+            >
+              <Calendar size={14} /> {dateLabel}
+              {selectedDate === todayStr && (
+                <span style={{ marginLeft: "auto", fontSize: 10 }}>TODAY</span>
+              )}
+            </button>
 
             {showCal && (
               <EntryCalendar
@@ -22116,32 +22482,10 @@ function BoxMakerPage() {
                   borderRadius: 8,
                   padding: "12px 14px",
                   display: "flex",
-                  gap: 16,
+                  gap: 10,
                 }}
               >
-                <div>
-                  <div
-                    style={{
-                      fontSize: 10,
-                      color: "var(--text-dim)",
-                      textTransform: "uppercase",
-                    }}
-                  >
-                    Total
-                  </div>
-                  <div
-                    style={{
-                      fontFamily: "var(--fd)",
-                      fontSize: 28,
-                      fontWeight: 900,
-                      color: accent,
-                    }}
-                  >
-                    {data.total}
-                  </div>
-                </div>
-
-                <div>
+                <div style={{ flex: 1 }}>
                   <div
                     style={{
                       fontSize: 10,
@@ -22162,8 +22506,7 @@ function BoxMakerPage() {
                     {data.done_count}
                   </div>
                 </div>
-
-                <div>
+                <div style={{ flex: 1 }}>
                   <div
                     style={{
                       fontSize: 10,
@@ -22171,7 +22514,7 @@ function BoxMakerPage() {
                       textTransform: "uppercase",
                     }}
                   >
-                    Pending
+                    Not Done
                   </div>
                   <div
                     style={{
@@ -22186,21 +22529,78 @@ function BoxMakerPage() {
                 </div>
               </div>
             )}
+
+            <button
+              onClick={() => setShowDone(true)}
+              style={{
+                padding: "10px 12px",
+                background: "var(--success-bg)",
+                color: "var(--green)",
+                border: "1px solid var(--green)",
+                borderRadius: 8,
+                fontWeight: 800,
+                fontSize: 13,
+              }}
+            >
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  justifyContent: "center",
+                }}
+              >
+                <CheckCircle2 size={14} /> Finished Boxes History{" "}
+                <ChevronRight size={14} />
+              </span>
+            </button>
           </div>
 
-          {/* Job list */}
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 8,
-            }}
-          >
+          {/* ── Job list ── */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <SearchBar
               value={search}
               onChange={setSearch}
-              placeholder="Search Job No / Studio / Couple…"
+              placeholder="Search ALL box jobs (any date, done or not)…"
             />
+
+            {searching && (
+              <div
+                style={{
+                  fontSize: 12,
+                  color: "var(--amber)",
+                  fontWeight: 700,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                <Search size={14} style={{ flexShrink: 0 }} />
+                Searching every box job card (all dates). Clear the search to go
+                back to {dateLabel}.
+              </div>
+            )}
+
+            {/* Status filter */}
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {FILTERS.map(([k, lbl, n]) => (
+                <button
+                  key={k}
+                  onClick={() => setStatus(k)}
+                  style={{
+                    padding: "7px 14px",
+                    fontSize: 12,
+                    fontWeight: 800,
+                    borderRadius: 6,
+                    background: status === k ? accent : "var(--bg2)",
+                    color: status === k ? "#000" : "var(--text-sec)",
+                    border: `1px solid ${status === k ? accent : "var(--border)"}`,
+                  }}
+                >
+                  {lbl} {n != null ? `(${n})` : ""}
+                </button>
+              ))}
+            </div>
 
             {data?.jobs?.length === 0 && (
               <div
@@ -22210,7 +22610,11 @@ function BoxMakerPage() {
                   color: "var(--text-dim)",
                 }}
               >
-                NO BOX JOBS ON THIS DAY
+                {searching
+                  ? "NO BOX JOBS MATCH YOUR SEARCH"
+                  : selectedDate === todayStr
+                    ? "NO BOX JOBS TODAY"
+                    : "NO BOX JOBS ON THIS DAY"}
               </div>
             )}
 
@@ -22233,10 +22637,8 @@ function BoxMakerPage() {
                     display: "flex",
                     flexDirection: "column",
                     gap: 8,
-                    opacity: j.is_done ? 0.85 : 1,
                   }}
                 >
-                  {/* Clickable job details */}
                   <div
                     onClick={() => openJob(j)}
                     title="Click to view the full job card"
@@ -22253,6 +22655,7 @@ function BoxMakerPage() {
                         justifyContent: "space-between",
                         gap: 8,
                         flexWrap: "wrap",
+                        alignItems: "center",
                       }}
                     >
                       <span
@@ -22264,7 +22667,6 @@ function BoxMakerPage() {
                         }}
                       >
                         {j.job_no}
-
                         {j.priority === "URGENT" && (
                           <span
                             style={{
@@ -22276,43 +22678,55 @@ function BoxMakerPage() {
                             URGENT
                           </span>
                         )}
-
-                        {j.carried_over && !j.is_done && (
-                          <span
-                            style={{
-                              marginLeft: 8,
-                              fontSize: 11,
-                              padding: "2px 7px",
-                              borderRadius: 4,
-                              background: "var(--warn-bg)",
-                              color: "var(--amber)",
-                              border: "1px solid var(--amber)",
-                            }}
-                          >
-                            FROM{" "}
-                            {parseUTC(j.created_at).toLocaleDateString(
-                              "en-GB",
-                              {
-                                day: "2-digit",
-                                month: "short",
-                              },
-                            )}
-                          </span>
-                        )}
                       </span>
 
-                      <span
+                      <div
                         style={{
-                          fontSize: 12,
-                          color: "var(--text-dim)",
+                          display: "flex",
+                          gap: 8,
+                          alignItems: "center",
+                          flexWrap: "wrap",
                         }}
                       >
-                        Delivery{" "}
-                        {new Date(j.dele_date).toLocaleDateString("en-GB", {
-                          day: "2-digit",
-                          month: "short",
-                        })}
-                      </span>
+                        {/* Status badge - always visible, big for admin/supervisor */}
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 5,
+                            fontSize: IS_PRIVILEGED ? 12 : 10,
+                            fontWeight: 900,
+                            padding: IS_PRIVILEGED ? "4px 12px" : "2px 8px",
+                            borderRadius: 20,
+                            letterSpacing: ".06em",
+                            background: j.is_done
+                              ? "var(--green)"
+                              : "var(--danger-bg)",
+                            color: j.is_done ? "#000" : "var(--red)",
+                            border: `1px solid ${j.is_done ? "var(--green)" : "var(--red)"}`,
+                          }}
+                        >
+                          {j.is_done ? (
+                            <>
+                              <Check size={IS_PRIVILEGED ? 14 : 11} /> COMPLETE
+                            </>
+                          ) : (
+                            <>
+                              <Clock size={IS_PRIVILEGED ? 14 : 11} /> NOT
+                              COMPLETE
+                            </>
+                          )}
+                        </span>
+                        <span
+                          style={{ fontSize: 12, color: "var(--text-dim)" }}
+                        >
+                          Delivery{" "}
+                          {new Date(j.dele_date).toLocaleDateString("en-GB", {
+                            day: "2-digit",
+                            month: "short",
+                          })}
+                        </span>
+                      </div>
                     </div>
 
                     <div
@@ -22326,13 +22740,7 @@ function BoxMakerPage() {
                       {j.couple_name ? ` / ${j.couple_name}` : ""}
                     </div>
 
-                    <div
-                      style={{
-                        display: "flex",
-                        gap: 6,
-                        flexWrap: "wrap",
-                      }}
-                    >
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                       <Chip
                         label="Box Type"
                         value={j.box_name}
@@ -22343,10 +22751,16 @@ function BoxMakerPage() {
                         value={j.box_size}
                         accent="#3b82f6"
                       />
+                      {(searching || IS_PRIVILEGED) && (
+                        <Chip
+                          label="Entered"
+                          value={fmtShort(j.created_at)}
+                          accent="#888"
+                        />
+                      )}
                     </div>
                   </div>
 
-                  {/* Done / Undo buttons remain outside the clickable wrapper */}
                   {j.is_done ? (
                     <div
                       style={{
@@ -22364,30 +22778,42 @@ function BoxMakerPage() {
                           color: "var(--green)",
                         }}
                       >
-                        ✓ DONE by {j.done_by} at{" "}
-                        {parseUTC(j.done_at).toLocaleTimeString([], {
+                        DONE by {j.done_by} ·{" "}
+                        {parseUTC(j.done_at).toLocaleString("en-GB", {
+                          day: "2-digit",
+                          month: "short",
                           hour: "2-digit",
                           minute: "2-digit",
+                          timeZone: "Asia/Colombo",
                         })}
                       </span>
-
-                      <button
-                        onClick={() => toggleDone(j)}
-                        disabled={busyId === j.id}
-                        style={{
-                          padding: "5px 12px",
-                          fontSize: 11,
-                          fontWeight: 700,
-                          borderRadius: 5,
-                          background: "var(--bg3)",
-                          color: "var(--text-sec)",
-                          border: "1px solid var(--border)",
-                        }}
-                      >
-                        ↺ Undo
-                      </button>
+                      {canMark && (
+                        <button
+                          onClick={() => toggleDone(j)}
+                          disabled={busyId === j.id}
+                          style={{
+                            padding: "5px 12px",
+                            fontSize: 11,
+                            fontWeight: 700,
+                            borderRadius: 5,
+                            background: "var(--bg3)",
+                            color: "var(--text-sec)",
+                            border: "1px solid var(--border)",
+                          }}
+                        >
+                          <span
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 5,
+                            }}
+                          >
+                            <Undo2 size={12} /> Undo
+                          </span>
+                        </button>
+                      )}
                     </div>
-                  ) : (
+                  ) : canMark ? (
                     <button
                       onClick={() => toggleDone(j)}
                       disabled={busyId === j.id}
@@ -22400,14 +22826,36 @@ function BoxMakerPage() {
                         fontSize: 14,
                       }}
                     >
-                      {busyId === j.id ? "Saving…" : "✓ MARK BOX DONE"}
+                      {busyId === j.id ? (
+                        "Saving…"
+                      ) : (
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 6,
+                            justifyContent: "center",
+                          }}
+                        >
+                          <Check size={16} /> MARK BOX DONE
+                        </span>
+                      )}
                     </button>
+                  ) : (
+                    <div
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 700,
+                        color: "var(--red)",
+                      }}
+                    >
+                      Waiting for the box maker to finish this box.
+                    </div>
                   )}
                 </div>
               );
             })}
 
-            {/* Pagination */}
             {data && data.pages > 1 && (
               <div
                 style={{
@@ -22420,19 +22868,27 @@ function BoxMakerPage() {
                 <button
                   disabled={page === 1}
                   onClick={() => setPage((p) => p - 1)}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 4,
+                  }}
                 >
-                  ◀ Prev
+                  <ChevronLeft size={14} /> Prev
                 </button>
-
                 <span style={{ color: "var(--text-dim)" }}>
                   {page} / {data.pages}
                 </span>
-
                 <button
                   disabled={page === data.pages}
                   onClick={() => setPage((p) => p + 1)}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 4,
+                  }}
                 >
-                  Next ▶
+                  Next <ChevronRight size={14} />
                 </button>
               </div>
             )}
@@ -22440,7 +22896,14 @@ function BoxMakerPage() {
         </div>
       </Shell>
 
-      {/* Full job-card modal */}
+      {showDone && (
+        <BoxDoneHistoryModal
+          onClose={() => setShowDone(false)}
+          addToast={add}
+          initialDate={todayStr}
+        />
+      )}
+
       {viewJob && (
         <JobCardViewModal
           job={viewJob}
@@ -22453,7 +22916,6 @@ function BoxMakerPage() {
     </>
   );
 }
-
 
 // ── Manage: photographers (email notifications) ──────────────────────
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
