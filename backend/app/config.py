@@ -26,5 +26,9 @@ class Settings:
     GMAIL_SENDER = os.getenv("GMAIL_SENDER", "ilabalbum@gmail.com")
     EMAIL_ENABLED = os.getenv("EMAIL_ENABLED", "true").lower() == "true"
 
+    TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+    TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+    ALERTS_ENABLED = os.getenv("ALERTS_ENABLED", "true").lower() == "true"
+
 
 settings = Settings()

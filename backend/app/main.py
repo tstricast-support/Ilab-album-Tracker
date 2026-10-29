@@ -7,7 +7,13 @@ import os
 import time
 from datetime import datetime, timedelta
 from typing import List, Optional
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query,Request
+
+import traceback
+from fastapi.responses import JSONResponse
+from fastapi.exception_handlers import http_exception_handler
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from .alerts import send_alert, install_log_alerts
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -78,10 +84,32 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── Telegram alerts for server errors ─────────────────────────────────
+@app.exception_handler(Exception)
+async def unhandled_exception(request: Request, exc: Exception):
+    send_alert(
+        f"500 {request.method} {request.url.path}",
+        f"{type(exc).__name__}: {exc}\n\n{traceback.format_exc()[-1500:]}",
+        key=f"{request.url.path}:{type(exc).__name__}",
+    )
+    return JSONResponse({"detail": "Internal server error"}, status_code=500)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exc(request: Request, exc: StarletteHTTPException):
+    if exc.status_code >= 500:
+        send_alert(
+            f"{exc.status_code} {request.method} {request.url.path}",
+            str(exc.detail),
+            key=f"http:{request.url.path}:{exc.status_code}",
+        )
+    return await http_exception_handler(request, exc)
+
 @app.on_event("startup")
 def on_startup():
     init_db()
     run_migration()
+    install_log_alerts()
 
 COMPLETED_VISIBLE_HOURS = 24
 EXPIRING_SOON_HOURS     = 20
@@ -3273,6 +3301,23 @@ def admin_resend_email(job_id: int, db: Session = Depends(get_db)):
         raise HTTPException(409, "Job is not finished yet.")
     return {"result": notify_album_finished(job.id, force=True)}
 
+
+class ClientError(BaseModel):
+    message: str
+    page: str = ""
+    stack: str = ""
+
+
+@app.post("/api/client-error")
+def client_error(p: ClientError, user=Depends(get_current_user)):
+    role = user["role"] if user else "?"
+    send_alert(
+        f"Frontend error ({role})",
+        f"{p.message}\nPage: {p.page}\n{p.stack[:800]}",
+        key=f"fe:{p.message[:80]}",
+    )
+    return {"ok": True}
+
 # ── Static SPA ────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DIST_DIR = os.path.join(BASE_DIR, "frontend", "dist")
@@ -3324,3 +3369,4 @@ def serve_spa(full_path: str):
     if not os.path.exists(index):
         raise HTTPException(404, "Frontend not built.")
     return FileResponse(index)
+

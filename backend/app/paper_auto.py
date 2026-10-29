@@ -15,6 +15,7 @@ from datetime import datetime
 
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
+from .alerts import send_alert
 
 from .models import (
     PaperStock, PaperUsageEntry, PaperPending, PaperPrice,
@@ -109,6 +110,11 @@ def auto_deduct_job(db: Session, job):
     pages = _parse_pages(job.print_pages)
     size = album_to_paper(job.print_size)
     if pages <= 0 or not size:
+        send_alert(
+            "Paper auto-deduct skipped",
+            f"Job {job.job_no}: print_size={job.print_size!r}, pages={job.print_pages!r}",
+            key=f"deduct:{job.id}",
+        )
         return             # unknown size / no pages -> nothing to deduct
     log = (
         db.query(DepartmentLog)

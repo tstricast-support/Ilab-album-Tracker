@@ -6,6 +6,7 @@ import {
   createContext,
   useContext,
   cloneElement,
+  Component,
 } from "react";
 import {
   API_BASE,
@@ -57,6 +58,25 @@ import logo from "./assets/logo.jpg";
 import trackQR from "./assets/track-qr.png";
 import "./index.css";
 
+
+async function reportClientError(message, stack = "") {
+  try {
+    const token = await window.Clerk?.session?.getToken();
+    fetch(`${API_BASE}/api/client-error`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({
+        message: String(message).slice(0, 300),
+        page: window.location.pathname,
+        stack: String(stack).slice(0, 800),
+      }),
+    }).catch(() => {});
+  } catch {}
+}
+
 // ── API ───────────────────────────────────────────────────────────────────────
 async function apiFetch(path, opts = {}) {
   // Get the Clerk session token (null if not signed in yet)
@@ -75,13 +95,15 @@ async function apiFetch(path, opts = {}) {
       ...extraHeaders,
     },
   });
-
   if (!res.ok) {
     let msg = res.statusText;
     try {
       const j = await res.json();
       msg = j.detail || msg;
     } catch {}
+    if (res.status >= 500 && !path.startsWith("/api/client-error")) {
+      reportClientError(`API ${res.status} ${path}: ${msg}`);
+    }
     throw new Error(msg);
   }
   if (res.status === 204) return null;
@@ -23404,6 +23426,26 @@ function ManagePage() {
   );
 }
 
+class ErrorBoundary extends Component {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  componentDidCatch(error, info) {
+    reportClientError(error.message, (error.stack || "") + (info?.componentStack || ""));
+  }
+  render() {
+    if (this.state.failed) {
+      return (
+        <div style={{ padding: 40, textAlign: "center", color: "#fff" }}>
+          Something went wrong. Please refresh the page.
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // ── App root ──────────────────────────────────────────────────────────────────
 export default function App() {
   const [route, setRoute] = useState(getPage());
@@ -23414,11 +23456,23 @@ export default function App() {
     return () => window.removeEventListener("popstate", handler);
   }, []);
 
+    useEffect(() => {
+    const onErr = (e) => reportClientError(e.message, e.error?.stack);
+    const onRej = (e) => reportClientError(e.reason?.message || e.reason, e.reason?.stack);
+    window.addEventListener("error", onErr);
+    window.addEventListener("unhandledrejection", onRej);
+    return () => {
+      window.removeEventListener("error", onErr);
+      window.removeEventListener("unhandledrejection", onRej);
+    };
+  }, []);
+
   const { page, dept } = route;
   if (page === "track") return <TrackPage />;
 
   return (
     <AppearanceProvider>
+      <ErrorBoundary>
       <GlobalResponsiveStyles />
       {page === "entry" ? (
         <EntryPage />
@@ -23447,6 +23501,7 @@ export default function App() {
       ) : (
         <DashboardPage />
       )}
+      </ErrorBoundary>
     </AppearanceProvider>
   );
 }
