@@ -17833,14 +17833,15 @@ function PrintingMachineBreakdownPanel({ hideHeader = false, ym = null }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {PRINTING_MACHINES.map((m) => {
             const isMOpen = expandedMachine === m.key;
-            const dailyTotal = m.albumTypes.reduce(
-              (s, at) => s + (data.daily[at]?.machines[m.key] || 0),
-              0,
-            );
-            const monthlyTotal = m.albumTypes.reduce(
-              (s, at) => s + (data.monthly[at]?.machines[m.key] || 0),
-              0,
-            );
+            const dailyTotal = m.albumTypes
+              .filter((at) => at !== "REBIND")
+              .reduce((s, at) => s + (data.daily[at]?.machines[m.key] || 0), 0);
+            const monthlyTotal = m.albumTypes
+              .filter((at) => at !== "REBIND")
+              .reduce(
+                (s, at) => s + (data.monthly[at]?.machines[m.key] || 0),
+                0,
+              );
 
             return (
               <div

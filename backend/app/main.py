@@ -265,6 +265,11 @@ def _job_or_404(job_id: int, db: Session) -> JobCard:
 def _urgent_first():
     return case((JobCard.priority == PriorityEnum.URGENT, 0), else_=1)
 
+def _no_rebind_for_printing(q, dept_enum):
+    """Printing never counts REBIND albums. q must already be joined to JobCard."""
+    if dept_enum == DepartmentEnum.PRINTING:
+        q = q.filter(or_(JobCard.album_type.is_(None), JobCard.album_type != "REBIND"))
+    return q
 
 # ── Routes ────────────────────────────────────────────────────────────
 
@@ -1259,18 +1264,15 @@ def station_history(
 
         q = (
             db.query(JobCard)
-            .join(
-                DepartmentLog,
-                DepartmentLog.job_id == JobCard.id
-            )
+            .join(DepartmentLog, DepartmentLog.job_id == JobCard.id)
             .filter(
                 DepartmentLog.department == dept_enum,
                 DepartmentLog.exited_at.isnot(None),
             )
         )
+        q = _no_rebind_for_printing(q, dept_enum)   
 
         order_col = DepartmentLog.exited_at
-
     
     if date:
         try:
@@ -1375,11 +1377,13 @@ def station_history_dates(
                 col,
                 func.count(DepartmentLog.id).label("cnt")
             )
+            .join(JobCard, JobCard.id == DepartmentLog.job_id)      
             .filter(
                 DepartmentLog.department == dept_enum,
                 DepartmentLog.exited_at.isnot(None),
             )
         )
+        q = _no_rebind_for_printing(q, dept_enum)                    
 
    
     start = (
@@ -1508,10 +1512,16 @@ def get_dept_stats(db: Session = Depends(get_db)):
     # TODAY's per-department completed count (daily)
     daily_rows = (
         db.query(DepartmentLog.department, func.count(DepartmentLog.id))
+        .join(JobCard, JobCard.id == DepartmentLog.job_id)
         .filter(
             DepartmentLog.exited_at != None,
             DepartmentLog.exited_at >= day_start,
             DepartmentLog.exited_at <  day_end,
+            or_(
+                DepartmentLog.department != DepartmentEnum.PRINTING,
+                JobCard.album_type.is_(None),
+                JobCard.album_type != "REBIND",
+            ),
         )
         .group_by(DepartmentLog.department)
         .all()
