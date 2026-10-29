@@ -168,6 +168,17 @@ const api = {
       `/api/stats/album-jobs?dept=${dept}&album_type=${albumType}${date ? `&date=${date}` : ""}&page=${page}&page_size=15`,
     ),
   printingSection: () => apiFetch("/api/stats/printing-section"),
+  printingRebind: (date) =>
+    apiFetch(`/api/stats/printing-rebind${date ? `?date=${date}` : ""}`),
+
+  printingRebindJobs: (date, page = 1) =>
+    apiFetch(
+      `/api/stats/printing-rebind/jobs?${date ? `date=${date}&` : ""}page=${page}&page_size=15`,
+    ),
+  printingRebindDates: (year, month) =>
+    apiFetch(
+      `/api/stats/printing-rebind/dates-with-entries?year=${year}&month=${month}`,
+    ),
 
   printingBreakdown: (ym) => {
     const [y, m] = ym ? ym.split("-") : [];
@@ -16511,6 +16522,437 @@ function ThroughputTicker({ done, hideHeader = false }) {
   );
 }
 
+function RebindBox({ rebind, dayLabel, monthLabel, onClick }) {
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      title="Click to see rebind list"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick?.();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          e.stopPropagation();
+          onClick?.();
+        }
+      }}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 14,
+        padding: "6px 12px",
+        background: "#f2f2f2",
+        border: "1px solid #ccc",
+        borderRight: "4px solid #0ea5e9",
+        borderRadius: 6,
+        cursor: "pointer",
+      }}
+    >
+      <span
+        style={{
+          fontSize: 11,
+          fontWeight: 800,
+          color: "#0ea5e9",
+          textTransform: "uppercase",
+          letterSpacing: ".06em",
+        }}
+      >
+        Rebind Albums
+      </span>
+      <div style={{ textAlign: "right" }}>
+        <div style={{ fontSize: 10, color: "#333", letterSpacing: ".08em" }}>
+          {dayLabel}
+        </div>
+        <div style={{ fontSize: 18, fontWeight: 800, color: "#3c24a5" }}>
+          {rebind.daily}
+        </div>
+      </div>
+      <div style={{ width: 1, alignSelf: "stretch", background: "#bbb" }} />
+      <div style={{ textAlign: "right" }}>
+        <div style={{ fontSize: 10, color: "#333", letterSpacing: ".08em" }}>
+          {monthLabel}
+        </div>
+        <div style={{ fontSize: 18, fontWeight: 800, color: "#2ECC71" }}>
+          {rebind.monthly}
+        </div>
+      </div>
+      <ChevronRight size={16} style={{ color: "#0ea5e9" }} />
+    </div>
+  );
+}
+
+function RebindListModal({ onClose }) {
+  const isMobile = useIsMobile();
+  const accent = "#157faf";
+  const [selDate, setSelDate] = useState(null); // null = today
+  const [page, setPage] = useState(1);
+  const [result, setResult] = useState(null); // data | "loading" | "error"
+  const [counts, setCounts] = useState(null);
+  const [showCal, setShowCal] = useState(false);
+  const [calYear, setCalYear] = useState(new Date().getFullYear());
+  const [calMonth, setCalMonth] = useState(new Date().getMonth() + 1);
+  const [dotDays, setDotDays] = useState({});
+  const [viewJob, setViewJob] = useState(null);
+
+  useEffect(() => {
+    setResult("loading");
+    api
+      .printingRebindJobs(selDate, page)
+      .then(setResult)
+      .catch(() => setResult("error"));
+  }, [selDate, page]);
+
+  useEffect(() => {
+    api
+      .printingRebind(selDate)
+      .then(setCounts)
+      .catch(() => {});
+  }, [selDate]);
+
+  useEffect(() => {
+    if (!showCal) return;
+    api
+      .printingRebindDates(calYear, calMonth)
+      .then(setDotDays)
+      .catch(() => setDotDays({}));
+  }, [showCal, calYear, calMonth]);
+
+  const dateObj = selDate ? new Date(selDate + "T00:00:00") : null;
+  const dayLabel = dateObj
+    ? dateObj.toLocaleDateString("en-GB", { day: "2-digit", month: "short" })
+    : "Today";
+  const monthLabel = dateObj
+    ? dateObj.toLocaleDateString("en-GB", { month: "long" })
+    : "Monthly";
+
+  function pickDate(dt) {
+    setSelDate(dt);
+    setPage(1);
+    setShowCal(false);
+  }
+  function pickToday() {
+    setSelDate(null);
+    setPage(1);
+    setShowCal(false);
+  }
+
+  const ok = result && result !== "loading" && result !== "error";
+
+  return (
+    <>
+      <div
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "var(--overlay)",
+          display: "flex",
+          alignItems: isMobile ? "flex-end" : "center",
+          justifyContent: "center",
+          zIndex: 9400,
+        }}
+        onClick={onClose}
+      >
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            background: "var(--bg1)",
+            border: `1px solid ${accent}`,
+            borderRadius: isMobile ? "16px 16px 0 0" : 12,
+            padding: 20,
+            width: "100%",
+            maxWidth: 560,
+            maxHeight: isMobile ? "92dvh" : "88vh",
+            overflowY: "auto",
+            display: "flex",
+            flexDirection: "column",
+            gap: 12,
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <div>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: "var(--text-dim)",
+                  textTransform: "uppercase",
+                  letterSpacing: ".1em",
+                }}
+              >
+                Printing
+              </div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: accent }}>
+                Rebind Albums List
+              </div>
+            </div>
+            <button
+              onClick={onClose}
+              style={{
+                padding: "8px 12px",
+                background: "var(--bg3)",
+                color: "var(--text-sec)",
+                border: "1px solid var(--border)",
+                borderRadius: 6,
+                fontWeight: 700,
+              }}
+            >
+              ✕
+            </button>
+          </div>
+
+          {counts && (
+            <div
+              style={{
+                display: "flex",
+                gap: 20,
+                background: "var(--bg2)",
+                border: `1px solid ${accent}55`,
+                borderTop: `3px solid ${accent}`,
+                borderRadius: 8,
+                padding: "10px 14px",
+              }}
+            >
+              <div>
+                <div
+                  style={{
+                    fontSize: 10,
+                    color: "var(--text-dim)",
+                    letterSpacing: ".08em",
+                  }}
+                >
+                  {dayLabel.toUpperCase()}
+                </div>
+                <div
+                  style={{ fontSize: 24, fontWeight: 900, color: "#3c24a5" }}
+                >
+                  {counts.daily}
+                </div>
+              </div>
+              <div style={{ width: 1, background: "var(--border)" }} />
+              <div>
+                <div
+                  style={{
+                    fontSize: 10,
+                    color: "var(--text-dim)",
+                    letterSpacing: ".08em",
+                  }}
+                >
+                  {monthLabel.toUpperCase()}
+                </div>
+                <div
+                  style={{ fontSize: 24, fontWeight: 900, color: "#2ECC71" }}
+                >
+                  {counts.monthly}
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <button
+              onClick={pickToday}
+              style={{
+                padding: "6px 14px",
+                fontSize: 12,
+                fontWeight: 700,
+                borderRadius: 4,
+                background: !selDate ? "#2ECC71" : "var(--bg3)",
+                color: !selDate ? "#fff" : "var(--text-sec)",
+              }}
+            >
+              Today
+            </button>
+            <button
+              onClick={() => setShowCal((p) => !p)}
+              style={{
+                padding: "6px 14px",
+                fontSize: 12,
+                fontWeight: 700,
+                borderRadius: 4,
+                background: selDate ? "#3c24a5" : "var(--bg3)",
+                color: selDate ? "#fff" : "var(--text-sec)",
+                display: "flex",
+                alignItems: "center",
+                gap: 5,
+              }}
+            >
+              <Calendar size={12} />
+              {selDate ? dayLabel : "Pick a day"}
+            </button>
+          </div>
+
+          {showCal && (
+            <div style={{ width: "100%", maxWidth: 280 }}>
+              <EntryCalendar
+                year={calYear}
+                month={calMonth}
+                onYearMonth={(y, m) => {
+                  setCalYear(y);
+                  setCalMonth(m);
+                }}
+                dotDays={dotDays}
+                selectedDate={selDate || ""}
+                onSelect={pickDate}
+                accent={accent}
+              />
+            </div>
+          )}
+
+          {result === "loading" && (
+            <div
+              style={{
+                textAlign: "center",
+                padding: "16px 0",
+                color: "var(--text-dim)",
+                fontSize: 12,
+              }}
+            >
+              Loading…
+            </div>
+          )}
+          {result === "error" && (
+            <div style={{ color: "var(--red)", fontSize: 12 }}>
+              ⚠ Failed to load list.
+            </div>
+          )}
+
+          {ok && result.jobs.length === 0 && (
+            <div
+              style={{
+                textAlign: "center",
+                padding: "24px 0",
+                color: "var(--text-dim)",
+                fontSize: 13,
+              }}
+            >
+              No rebind albums {selDate ? `on ${dayLabel}` : "today"}.
+            </div>
+          )}
+
+          {ok && result.jobs.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {result.jobs.map((j) => (
+                <button
+                  key={j.id}
+                  onClick={() => setViewJob(j)}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 8,
+                    textAlign: "left",
+                    background: "var(--bg2)",
+                    border: "1px solid var(--border)",
+                    borderLeft: `4px solid ${accent}`,
+                    borderRadius: 6,
+                    padding: "9px 12px",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontFamily: "var(--fm)",
+                      fontSize: 13,
+                      fontWeight: 800,
+                      color: "var(--amber)",
+                      flexShrink: 0,
+                    }}
+                  >
+                    {j.job_no}
+                  </span>
+                  <span
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      fontSize: 12,
+                      color: "var(--text-pri)",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {j.customer}
+                    {j.couple_name ? ` / ${j.couple_name}` : ""}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 11,
+                      color: "var(--text-dim)",
+                      flexShrink: 0,
+                    }}
+                  >
+                    {j.print_size || "-"}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {ok && result.pages > 1 && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+              }}
+            >
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page === 1}
+                style={{
+                  padding: "5px 12px",
+                  background: "var(--bg2)",
+                  color: "var(--text-sec)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 4,
+                  fontSize: 12,
+                  fontWeight: 700,
+                }}
+              >
+                ◀ Prev
+              </button>
+              <span style={{ fontSize: 12, color: "var(--text-dim)" }}>
+                {page} / {result.pages}
+              </span>
+              <button
+                onClick={() => setPage((p) => Math.min(result.pages, p + 1))}
+                disabled={page === result.pages}
+                style={{
+                  padding: "5px 12px",
+                  background: "var(--bg2)",
+                  color: "var(--text-sec)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 4,
+                  fontSize: 12,
+                  fontWeight: 700,
+                }}
+              >
+                Next ▶
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {viewJob && (
+        <JobCardViewModal
+          job={viewJob}
+          onClose={() => setViewJob(null)}
+          addToast={() => {}}
+        />
+      )}
+    </>
+  );
+}
+
 function DeptTotalsPanel({ addToast, hideHeader = false }) {
   const [data, setData] = useState(null);
   const [expanded, setExpanded] = useState(null); // dept key
@@ -16523,10 +16965,28 @@ function DeptTotalsPanel({ addToast, hideHeader = false }) {
   const [calMonth, setCalMonth] = useState(new Date().getMonth() + 1);
   const [viewJob, setViewJob] = useState(null);
   const [selectedMonthTotal, setSelectedMonthTotal] = useState({});
+  const [rebind, setRebind] = useState(null);
+     const [showRebindList, setShowRebindList] = useState(false);
   const isMobile = useIsMobile();
 
+  const printingDate = dateByDept["PRINTING"] ?? null;
+
   usePolling(() =>
-    api.deptStats().then(setIfChanged(setData)).catch(() => {}),
+    api
+      .deptStats()
+      .then(setIfChanged(setData))
+      .catch(() => {}),
+  );
+
+  usePolling(
+    () =>
+      api
+        .printingRebind(printingDate)
+        .then(setIfChanged(setRebind))
+        .catch(() => {}),
+    POLL_INTERVAL_MS,
+    true,
+    printingDate,
   );
 
   const rows = [
@@ -16701,6 +17161,8 @@ function DeptTotalsPanel({ addToast, hideHeader = false }) {
               monthValue = selectedMonthTotal[r.key] ?? "…";
             }
 
+            const showRebind = r.key === "PRINTING" && !!rebind;
+
             return (
               <div
                 key={r.key}
@@ -16773,54 +17235,84 @@ function DeptTotalsPanel({ addToast, hideHeader = false }) {
                     </div>
                   ) : (
                     <div
-                      style={{ display: "flex", gap: 20, alignItems: "center" }}
+                      style={{ display: "flex", gap: 24, alignItems: "center" }}
                     >
-                      <div style={{ textAlign: "right" }}>
-                        <div
-                          style={{
-                            fontSize: 11,
-                            color: "#333",
-                            letterSpacing: ".08em",
-                          }}
-                        >
-                          {dayLabel}
-                        </div>
-                        <div
-                          style={{
-                            fontSize: 20,
-                            fontWeight: 800,
-                            color: "#3c24a5",
-                          }}
-                        >
-                          {dayValue}
-                        </div>
-                      </div>
+                      {/* Desktop: Rebind box sits BEFORE Today | Monthly */}
+                      {showRebind && !isMobile && (
+                        <RebindBox
+                          rebind={rebind}
+                          dayLabel={dayLabel}
+                          monthLabel={monthLabel}
+                          onClick={() => setShowRebindList(true)}
+                        />
+                      )}
+
                       <div
-                        style={{ width: 1, height: 30, background: "#bbb" }}
-                      />
-                      <div style={{ textAlign: "right" }}>
-                        <div
-                          style={{
-                            fontSize: 11,
-                            color: "#333",
-                            letterSpacing: ".08em",
-                          }}
-                        >
-                          {monthLabel}
+                        style={{
+                          display: "flex",
+                          gap: 20,
+                          alignItems: "center",
+                        }}
+                      >
+                        <div style={{ textAlign: "right" }}>
+                          <div
+                            style={{
+                              fontSize: 11,
+                              color: "#333",
+                              letterSpacing: ".08em",
+                            }}
+                          >
+                            {dayLabel}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: 20,
+                              fontWeight: 800,
+                              color: "#3c24a5",
+                            }}
+                          >
+                            {dayValue}
+                          </div>
                         </div>
                         <div
-                          style={{
-                            fontSize: 20,
-                            fontWeight: 800,
-                            color: "#2ECC71",
-                          }}
-                        >
-                          {monthValue}
+                          style={{ width: 1, height: 30, background: "#bbb" }}
+                        />
+                        <div style={{ textAlign: "right" }}>
+                          <div
+                            style={{
+                              fontSize: 11,
+                              color: "#333",
+                              letterSpacing: ".08em",
+                            }}
+                          >
+                            {monthLabel}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: 20,
+                              fontWeight: 800,
+                              color: "#2ECC71",
+                            }}
+                          >
+                            {monthValue}
+                          </div>
                         </div>
                       </div>
                     </div>
                   )}
                 </button>
+
+                {/* Mobile: Rebind strip under the row (outside the button) */}
+                {showRebind && isMobile && (
+                  <div style={{ margin: "0 14px 12px" }}>
+                    <RebindBox
+                      rebind={rebind}
+                      dayLabel={dayLabel}
+                      monthLabel={monthLabel}
+                      onClick={() => setShowRebindList(true)}
+                    />
+                  </div>
+                )}
 
                 {isOpen && (
                   <div
@@ -16987,7 +17479,6 @@ function DeptTotalsPanel({ addToast, hideHeader = false }) {
                                 >
                                   {isMobile ? (
                                     <>
-                                      {/* mobile: unchanged */}
                                       <span
                                         style={{
                                           fontSize: 12,
@@ -17004,7 +17495,6 @@ function DeptTotalsPanel({ addToast, hideHeader = false }) {
                                       </span>
                                     </>
                                   ) : (
-                                    /* desktop: full-width grid, fixed columns separated by | */
                                     <div
                                       style={{
                                         display: "grid",
@@ -17133,6 +17623,9 @@ function DeptTotalsPanel({ addToast, hideHeader = false }) {
           onClose={() => setViewJob(null)}
           addToast={addToast}
         />
+      )}
+      {showRebindList && (
+        <RebindListModal onClose={() => setShowRebindList(false)} />
       )}
     </div>
   );

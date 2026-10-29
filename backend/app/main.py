@@ -1598,6 +1598,115 @@ def get_dept_stats(db: Session = Depends(get_db)):
     _dept_stats_cache["ts"] = time.monotonic()
     return payload
 
+@app.get("/api/stats/printing-rebind")
+def printing_rebind_stats(
+    date: Optional[str] = Query(None, description="YYYY-MM-DD, Sri Lanka day. Omit for today."),
+    db: Session = Depends(get_db),
+):
+    """Rebind albums printed - shown separately, never added to Printing totals."""
+    if date:
+        try:
+            sel = datetime.strptime(date, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(400, "Invalid date format. Use YYYY-MM-DD.")
+    else:
+        sel = datetime.utcnow() + SL_TZ_OFFSET
+
+    day_start = datetime(sel.year, sel.month, sel.day) - SL_TZ_OFFSET
+    day_end   = day_start + timedelta(days=1)
+    month_start, month_end = _month_window(sel.year, sel.month)
+
+    def count_for(start, end):
+        return (
+            db.query(func.count(DepartmentLog.id))
+            .join(JobCard, JobCard.id == DepartmentLog.job_id)
+            .filter(
+                DepartmentLog.department == DepartmentEnum.PRINTING,
+                DepartmentLog.exited_at.isnot(None),
+                DepartmentLog.exited_at >= start,
+                DepartmentLog.exited_at <  end,
+                JobCard.album_type == "REBIND",
+            )
+            .scalar() or 0
+        )
+
+    return {
+        "daily":   count_for(day_start, day_end),
+        "monthly": count_for(month_start, month_end),
+    }
+
+@app.get("/api/stats/printing-rebind/jobs")
+def printing_rebind_jobs(
+    date: Optional[str] = Query(None, description="YYYY-MM-DD, Sri Lanka day. Omit for today."),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(15, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    if date:
+        try:
+            sel = datetime.strptime(date, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(400, "Invalid date format. Use YYYY-MM-DD.")
+    else:
+        sel = datetime.utcnow() + SL_TZ_OFFSET
+
+    day_start = datetime(sel.year, sel.month, sel.day) - SL_TZ_OFFSET
+    day_end   = day_start + timedelta(days=1)
+
+    q = (
+        db.query(JobCard)
+        .join(DepartmentLog, DepartmentLog.job_id == JobCard.id)
+        .filter(
+            DepartmentLog.department == DepartmentEnum.PRINTING,
+            DepartmentLog.exited_at.isnot(None),
+            DepartmentLog.exited_at >= day_start,
+            DepartmentLog.exited_at <  day_end,
+            JobCard.album_type == "REBIND",
+        )
+        .order_by(desc(DepartmentLog.exited_at))
+    )
+    total = q.count()
+    rows = (
+        q.options(selectinload(JobCard.logs), selectinload(JobCard.movements), selectinload(JobCard.edit_logs))
+         .offset((page - 1) * page_size)
+         .limit(page_size)
+         .all()
+    )
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "pages": max(1, -(-total // page_size)),
+        "jobs": [_out(j, db).model_dump() for j in rows],
+    }
+
+
+@app.get("/api/stats/printing-rebind/dates-with-entries")
+def printing_rebind_dates(
+    year: int = Query(...),
+    month: int = Query(...),
+    db: Session = Depends(get_db),
+):
+    start, end = _month_window(year, month)
+    rows = (
+        db.query(DepartmentLog.exited_at, func.count(DepartmentLog.id))
+        .join(JobCard, JobCard.id == DepartmentLog.job_id)
+        .filter(
+            DepartmentLog.department == DepartmentEnum.PRINTING,
+            DepartmentLog.exited_at.isnot(None),
+            DepartmentLog.exited_at >= start,
+            DepartmentLog.exited_at <  end,
+            JobCard.album_type == "REBIND",
+        )
+        .group_by(DepartmentLog.exited_at)
+        .all()
+    )
+    day_counts: dict[str, int] = {}
+    for exited_at, cnt in rows:
+        k = str((exited_at + SL_TZ_OFFSET).day)
+        day_counts[k] = day_counts.get(k, 0) + cnt
+    return day_counts
+
 @app.get("/api/stats/departments/monthly")
 def get_dept_month_total(
     year: int = Query(...),
