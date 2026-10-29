@@ -2110,8 +2110,9 @@ def operator_stats(
     end   = (datetime(year + 1, 1, 1) if month == 12 else datetime(year, month + 1, 1)) - TZ_OFFSET
 
     def named_counts(dept_enum, column, ts_column):
-        rows = (
+        q = (
             db.query(column, func.count(DepartmentLog.id).label("count"))
+            .join(JobCard, JobCard.id == DepartmentLog.job_id)
             .filter(
                 DepartmentLog.department == dept_enum,
                 column.isnot(None),
@@ -2119,18 +2120,19 @@ def operator_stats(
                 ts_column >= start,
                 ts_column < end,
             )
-            .group_by(column)
-            .all()
         )
+        q = _no_rebind_for_printing(q, dept_enum)
+        rows = q.group_by(column).all()
         return [{"operator_name": r[0], "under_whom": None, "count": r[1]} for r in rows]
 
     # ── PRINTING: operators (with loader detail) + loader totals ──
-    printing_rows = (
+    printing_q = (
         db.query(
             DepartmentLog.operator_name,
             DepartmentLog.under_whom,
             func.count(DepartmentLog.id).label("count"),
         )
+        .join(JobCard, JobCard.id == DepartmentLog.job_id)
         .filter(
             DepartmentLog.department == DepartmentEnum.PRINTING,
             DepartmentLog.operator_name.isnot(None),
@@ -2138,9 +2140,11 @@ def operator_stats(
             DepartmentLog.entered_at >= start,
             DepartmentLog.entered_at < end,
         )
-        .group_by(DepartmentLog.operator_name, DepartmentLog.under_whom)
-        .all()
     )
+    printing_q = _no_rebind_for_printing(printing_q, DepartmentEnum.PRINTING)
+    printing_rows = printing_q.group_by(
+        DepartmentLog.operator_name, DepartmentLog.under_whom
+    ).all()
     printing_operators = [
         {"operator_name": r.operator_name, "under_whom": r.under_whom, "count": r.count}
         for r in printing_rows
@@ -2217,7 +2221,7 @@ def operator_jobs_list(
         )
         .order_by(desc(ts_col))
     )
-
+    q = _no_rebind_for_printing(q, dept_enum)
     total = q.count()
     rows = q.offset((page - 1) * page_size).limit(page_size).all()
 
