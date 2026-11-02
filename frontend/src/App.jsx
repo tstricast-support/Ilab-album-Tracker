@@ -402,9 +402,36 @@ function fmtPackets(sheets) {
   return `${packets} pkt + ${remainder} sh`;
 }
 
+
 function parseUTC(s) {
   if (!s) return null;
   return new Date(s.endsWith("Z") ? s : s + "Z");
+}
+
+// ───────── ADD THESE (always Sri Lanka time, whatever the device timezone) ─────────
+const SL_TZ = "Asia/Colombo";
+
+function fmtSLDate(iso) {
+  if (!iso) return "—";
+  return parseUTC(iso).toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    timeZone: SL_TZ,
+  });
+}
+function fmtSLTime(iso) {
+  if (!iso) return "—";
+  return parseUTC(iso).toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+    timeZone: SL_TZ,
+  });
+}
+function fmtSLDateTime(iso) {
+  if (!iso) return "—";
+  return `${fmtSLDate(iso)} · ${fmtSLTime(iso)}`;
 }
 
 function setIfChanged(setter) {
@@ -3710,6 +3737,13 @@ function CompactJobPreviewModal({ job, onClose, onViewFull }) {
           </span>
         </div>
 
+        <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
+          Entered: {fmtSLDate(job.created_at)} · {fmtSLTime(job.created_at)}
+          {job.is_fully_completed && job.completed_at
+            ? ` · Completed: ${fmtSLDate(job.completed_at)}`
+            : ""}
+        </div>
+
         <div
           style={{
             display: "grid",
@@ -3771,22 +3805,24 @@ function CompactJobPreviewModal({ job, onClose, onViewFull }) {
         </div>
 
         {(ROLE === "ENTRY" || IS_ADMIN) && (
-  <button
-    onClick={() => setPrinting(true)}
-    style={{
-      padding: "11px 0",
-      background: "var(--bg3)",
-      color: "var(--cyan)",
-      border: "1px solid var(--cyan)",
-      borderRadius: 8,
-      fontWeight: 800,
-      fontSize: 14,
-    }}
-  >
-    🖨 Print Job Card
-  </button>
-)}
-{printing && <PrintJobCardModal job={job} onClose={() => setPrinting(false)} />}
+          <button
+            onClick={() => setPrinting(true)}
+            style={{
+              padding: "11px 0",
+              background: "var(--bg3)",
+              color: "var(--cyan)",
+              border: "1px solid var(--cyan)",
+              borderRadius: 8,
+              fontWeight: 800,
+              fontSize: 14,
+            }}
+          >
+            🖨 Print Job Card
+          </button>
+        )}
+        {printing && (
+          <PrintJobCardModal job={job} onClose={() => setPrinting(false)} />
+        )}
 
         <button
           onClick={onViewFull}
@@ -5689,6 +5725,8 @@ function StageRow({ job }) {
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "space-between",
+                            flexWrap: "wrap",
+                            gap: 4,
                           }}
                         >
                           <span
@@ -5709,10 +5747,7 @@ function StageRow({ job }) {
                               color: "var(--text-pri)",
                             }}
                           >
-                            {parseUTC(log.entered_at).toLocaleTimeString([], {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
+                            {fmtSLDateTime(log.entered_at)}
                           </span>
                         </div>
                       )}
@@ -5723,6 +5758,8 @@ function StageRow({ job }) {
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "space-between",
+                            flexWrap: "wrap", 
+                            gap: 4,
                           }}
                         >
                           <span
@@ -5743,10 +5780,7 @@ function StageRow({ job }) {
                               color: "var(--text-pri)",
                             }}
                           >
-                            {parseUTC(log.exited_at).toLocaleTimeString([], {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
+                            {fmtSLDateTime(log.exited_at)}
                           </span>
                         </div>
                       )}
@@ -6890,6 +6924,138 @@ function ReturnedAlbumsPanel() {
   );
 }
 
+// ── Job Dates: actual entry / per-department / completed dates ────────
+function JobDatesPanel({ job }) {
+  const latestLog = (dept) =>
+    (job.logs || [])
+      .filter((l) => l.department === dept)
+      .sort((a, b) => parseUTC(b.entered_at) - parseUTC(a.entered_at))[0];
+
+  function stageItem(label, dept, field, color) {
+    const status = job[field];
+    const log = latestLog(dept);
+    if (status === "SKIPPED")
+      return { label, color: "#666", main: "Not needed", sub: "" };
+    if (status === "COMPLETED" && log?.exited_at)
+      return {
+        label, color,
+        main: fmtSLDate(log.exited_at),
+        sub: `Done ${fmtSLTime(log.exited_at)}` +
+             (log.entered_at ? ` · Started ${fmtSLDate(log.entered_at)} ${fmtSLTime(log.entered_at)}` : ""),
+      };
+    if (status === "IN_PROGRESS" && log)
+      return {
+        label, color: "var(--amber)",
+        main: "In progress",
+        sub: `Started ${fmtSLDate(log.entered_at)} · ${fmtSLTime(log.entered_at)}`,
+      };
+    return { label, color: "var(--text-dim)", main: "Pending", sub: "" };
+  }
+
+  const items = [
+    {
+      label: "Entered", color: "var(--amber)",
+      main: fmtSLDate(job.created_at),
+      sub: fmtSLTime(job.created_at),
+    },
+    stageItem("Printing", "PRINTING", "status_printing", "var(--blue)"),
+    stageItem("Laser Cut", "LASER_CUTTING", "status_laser_cutting", "var(--purple)"),
+    stageItem("Laminating", "LAMINATING", "status_laminating", "var(--cyan)"),
+    stageItem("Binding", "BINDING", "status_binding", "var(--green)"),
+    job.is_fully_completed && job.completed_at
+      ? {
+          label: "Completed", color: "var(--green)",
+          main: fmtSLDate(job.completed_at),
+          sub: fmtSLTime(job.completed_at),
+        }
+      : { label: "Completed", color: "var(--text-dim)", main: "Not yet", sub: "" },
+  ];
+
+  return (
+    <div
+      style={{
+        background: "var(--bg1)",
+        border: "1px solid var(--border)",
+        borderRadius: 6,
+        overflow: "hidden",
+      }}
+    >
+      <div
+        style={{
+          padding: "6px 12px",
+          borderBottom: "1px solid var(--border)",
+          fontSize: 12,
+          fontWeight: 800,
+          textTransform: "uppercase",
+          letterSpacing: ".1em",
+          color: "var(--text-pri)",
+        }}
+      >
+        Job Dates
+      </div>
+      {/* auto-fit = 3 cols desktop, 2 cols tablet, 1-2 cols phone, no media query needed */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+          gap: 8,
+          padding: 10,
+        }}
+      >
+        {items.map((it) => (
+          <div
+            key={it.label}
+            style={{
+              background: "var(--surface-sunken)",
+              border: "1px solid var(--border)",
+              borderLeft: `3px solid ${it.color}`,
+              borderRadius: 6,
+              padding: "7px 10px",
+              minWidth: 0,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                textTransform: "uppercase",
+                letterSpacing: ".08em",
+                color: it.color,
+              }}
+            >
+              {it.label}
+            </div>
+            <div
+              style={{
+                fontSize: 13,
+                fontWeight: 800,
+                color: "var(--text-pri)",
+                marginTop: 2,
+                wordBreak: "break-word",
+              }}
+            >
+              {it.main}
+            </div>
+            {it.sub && (
+              <div
+                style={{
+                  fontSize: 10,
+                  color: "var(--text-dim)",
+                  marginTop: 1,
+                  lineHeight: 1.4,
+                  wordBreak: "break-word",
+                }}
+              >
+                {it.sub}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Full Job Card ─────────────────────────────────────────────────────────────
 function JobCardFull({
   job,
@@ -6996,7 +7162,7 @@ function JobCardFull({
                     border: "1px solid var(--cyan)",
                   }}
                 >
-                EDITED
+                  EDITED
                 </span>
               )}
 
@@ -7136,9 +7302,9 @@ function JobCardFull({
         <LocationChip movement={job.open_return} />
         <SpecialNote note={job.special_note} />
         <EditHistoryBlock logs={job.edit_logs} />
+        <JobDatesPanel job={job} /> 
         <StageRow job={job} />
         <DelayReasonsList logs={job.logs} />
-
         {actionLabel &&
           onAction &&
           !job.open_return &&
@@ -7187,7 +7353,6 @@ function JobCardFull({
               </button>
             );
           })()}
-
         {onReturn &&
           returnDept &&
           !job.open_return &&
@@ -7209,7 +7374,6 @@ function JobCardFull({
               ↩ RETURN ALBUM TO EARLIER DEPARTMENT
             </button>
           )}
-
         {onAddReason &&
           (() => {
             const thisLog = job.logs?.find(
