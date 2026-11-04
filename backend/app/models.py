@@ -512,6 +512,7 @@ class PaperPending(Base):
     paper_size    = Column(String(16), nullable=False)
     sheets        = Column(Integer, nullable=False)
     ok_pages      = Column(Integer, nullable=False, default=0)
+    print_damage  = Column(Integer, nullable=False, default=0)
     accu_rp       = Column(Integer, nullable=False, default=0)
     bind_rp       = Column(Integer, nullable=False, default=0)
     created_at    = Column(DateTime, nullable=False, default=datetime.utcnow)
@@ -569,6 +570,12 @@ def run_migration():
             if "source_id" not in pu_cols:
                 conn.execute(text("ALTER TABLE paper_usage_entries ADD COLUMN source_id INTEGER"))
             conn.commit()
+
+        pp_cols = {c["name"] for c in inspector.get_columns("paper_pending")}
+        with engine.connect() as conn:
+            if "print_damage" not in pp_cols:
+                conn.execute(text("ALTER TABLE paper_pending ADD COLUMN print_damage INTEGER DEFAULT 0"))
+                conn.commit()
 
             
 
@@ -718,6 +725,11 @@ def run_migration():
         conn.execute(text("""
             ALTER TABLE job_cards
             ADD COLUMN IF NOT EXISTS email_sent_at TIMESTAMP;
+        """))
+
+        conn.execute(text("""
+            ALTER TABLE paper_pending
+            ADD COLUMN IF NOT EXISTS print_damage INTEGER DEFAULT 0;
         """))
 
         conn.commit()

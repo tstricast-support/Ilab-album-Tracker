@@ -69,27 +69,30 @@ def _apply(db: Session, p: PaperPending) -> bool:
         operator_name=p.operator_name or "Auto",
         paper_size=p.paper_size,
         ok_pages=p.ok_pages or 0,
-        print_damage=0,
+        print_damage=p.print_damage or 0,      # ← was always 0
         accu_rp=p.accu_rp or 0,
         bind_rp=p.bind_rp or 0,
         total_used=p.sheets,
         source=p.source,
         source_id=p.source_id,
+        created_at=p.created_at or datetime.utcnow(),   # ← keeps the backfilled date
     ))
     return True
 
 
-def _queue(db, *, source, source_id, job_no, operator, size, ok=0, accu=0, bind=0):
-    sheets = ok + accu + bind
+def _queue(db, *, source, source_id, job_no, operator, size,
+           ok=0, print_dmg=0, accu=0, bind=0, created_at=None):
+    sheets = ok + print_dmg + accu + bind
     if sheets <= 0 or size not in PAPER_SIZES:
         return
     p = PaperPending(
         source=source, source_id=source_id, job_no=job_no,
         operator_name=operator, paper_size=size, sheets=sheets,
-        ok_pages=ok, accu_rp=accu, bind_rp=bind,
+        ok_pages=ok, print_damage=print_dmg, accu_rp=accu, bind_rp=bind,
+        created_at=created_at or datetime.utcnow(),
     )
     if not _apply(db, p):
-        db.add(p)          # not enough paper -> stays pending + alert
+        db.add(p)         # not enough paper -> stays pending + alert
 
 
 def _already_done(db, source, source_id) -> bool:
@@ -127,10 +130,9 @@ def auto_deduct_job(db: Session, job):
            operator=(log.operator_name if log else None), size=size, ok=pages)
 
 
-# ── Laminating / Binding recorded a damage ───────────────────────────
 def auto_deduct_damage(db: Session, entry):
     dept = entry.department.value if hasattr(entry.department, "value") else str(entry.department)
-    if dept not in ("LAMINATING", "BINDING"):
+    if dept not in ("PRINTING", "LAMINATING", "BINDING"):   # ← PRINTING added
         return
     price = db.query(PaperPrice).filter(PaperPrice.id == entry.paper_price_id).first()
     if not price or price.size == "OTHER":
@@ -139,8 +141,10 @@ def auto_deduct_damage(db: Session, entry):
     _queue(db, source="AUTO_DAMAGE", source_id=entry.id,
            job_no=entry.job_no or "DAMAGE", operator=entry.operator_name,
            size=price.size,
+           print_dmg=qty if dept == "PRINTING" else 0,
            accu=qty if dept == "LAMINATING" else 0,
-           bind=qty if dept == "BINDING" else 0)
+           bind=qty if dept == "BINDING" else 0,
+           created_at=entry.created_at)
 
 
 # ── Refund (damage edited / deleted) ─────────────────────────────────

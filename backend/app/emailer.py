@@ -1,7 +1,4 @@
-"""backend/app/emailer.py
-Sends the "album finished" email through the Gmail API (HTTPS / port 443).
-SMTP is blocked on Railway Hobby, the Gmail API is not.
-No extra packages needed - stdlib only."""
+
 import base64
 import json
 import logging
