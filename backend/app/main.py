@@ -3465,6 +3465,22 @@ def unregistered_customers(db: Session = Depends(get_db)):
         if re.sub(r"[^a-z0-9]+", "", (n or "").lower()) not in registered
     ]
 
+from fastapi.responses import HTMLResponse
+
+@app.get("/privacy", response_class=HTMLResponse, include_in_schema=False)
+def privacy():
+    return """
+    <html><head><meta charset="utf-8"><title>Privacy Policy</title></head>
+    <body style="font-family:Arial;max-width:640px;margin:40px auto;line-height:1.6">
+      <h1>Privacy Policy</h1>
+      <p>i Lab Gampaha uses this system to track album production.</p>
+      <p>When an album is finished, the system sends an email to the registered
+      studio. We only use the studio name and email address that the studio gave us.
+      We do not share or sell this information.</p>
+      <p>Contact: ilabalbum@gmail.com</p>
+    </body></html>
+    """
+
 # ── Static SPA ────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DIST_DIR = os.path.join(BASE_DIR, "frontend", "dist")
