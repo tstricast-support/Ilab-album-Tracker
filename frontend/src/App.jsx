@@ -402,6 +402,18 @@ function fmtPackets(sheets) {
   return `${packets} pkt + ${remainder} sh`;
 }
 
+// 120 -> "1 packet and 20 papers", 200 -> "2 packets", 45 -> "45 papers"
+function fmtPacketsLong(sheets) {
+  const total = Number(sheets) || 0;
+  const packets = Math.floor(total / SHEETS_PER_PACKET);
+  const rem = total % SHEETS_PER_PACKET;
+  const pk = `${packets} packet${packets !== 1 ? "s" : ""}`;
+  const pp = `${rem} paper${rem !== 1 ? "s" : ""}`;
+  if (total === 0) return "0 papers";
+  if (packets === 0) return pp;
+  if (rem === 0) return pk;
+  return `${pk} and ${pp}`;
+}
 
 function parseUTC(s) {
   if (!s) return null;
@@ -3904,7 +3916,6 @@ function JobCardViewModal({ job, onClose, addToast }) {
   );
 }
 
-// ── Completed / Dispatched dropdown (lives in the header topRight space) ────────
 function DeptCompletedDropdown({
   deptKey,
   title = "Dispatched",
@@ -3913,6 +3924,8 @@ function DeptCompletedDropdown({
   addToast,
   showBreakdown = false,
   forceLabel = false,
+  renderTrigger, // NEW: custom element that opens the panel
+  showDateFilter = false, // NEW: date picker inside the panel
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -3925,6 +3938,13 @@ function DeptCompletedDropdown({
   const wrapRef = useRef(null);
   const isMobile = useIsMobile();
 
+  // NEW: date filter state (null = today)
+  const [selDate, setSelDate] = useState(null);
+  const [showCal, setShowCal] = useState(false);
+  const [calYear, setCalYear] = useState(new Date().getFullYear());
+  const [calMonth, setCalMonth] = useState(new Date().getMonth() + 1);
+  const [dotDays, setDotDays] = useState({});
+
   useEffect(() => {
     const t = setTimeout(() => {
       setDebouncedSearch(search);
@@ -3932,6 +3952,10 @@ function DeptCompletedDropdown({
     }, 350);
     return () => clearTimeout(t);
   }, [search]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [selDate]);
 
   useEffect(() => {
     api
@@ -3945,7 +3969,7 @@ function DeptCompletedDropdown({
     setLoading(true);
     setError("");
     api
-      .stationHistory(deptKey, debouncedSearch, page)
+      .stationHistory(deptKey, debouncedSearch, page, selDate || "")
       .then((d) => {
         setData(d);
         setLoading(false);
@@ -3954,7 +3978,16 @@ function DeptCompletedDropdown({
         setError(err.message || "Failed to load");
         setLoading(false);
       });
-  }, [deptKey, debouncedSearch, page, open]);
+  }, [deptKey, debouncedSearch, page, open, selDate]);
+
+  // calendar dots (days that have done jobs)
+  useEffect(() => {
+    if (!open || !showCal || !showDateFilter) return;
+    api
+      .stationHistoryDates(deptKey, calYear, calMonth)
+      .then(setDotDays)
+      .catch(() => setDotDays({}));
+  }, [open, showCal, showDateFilter, deptKey, calYear, calMonth]);
 
   useEffect(() => {
     function handler(e) {
@@ -3965,37 +3998,52 @@ function DeptCompletedDropdown({
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
 
+  const dateLabel = selDate
+    ? new Date(selDate + "T00:00:00").toLocaleDateString("en-GB", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      })
+    : "Today";
+
   return (
     <div
       ref={wrapRef}
-      style={{ position: "relative", width: isMobile ? "100%" : "auto" }}
+      style={{
+        position: "relative",
+        width: renderTrigger ? "auto" : isMobile ? "100%" : "auto",
+      }}
     >
-      <button
-        onClick={() => setOpen((p) => !p)}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          padding: forceLabel
-            ? "12px 14px"
-            : isMobile
-              ? "6px 10px"
-              : "8px 14px",
-          width: forceLabel ? "100%" : "auto",
-          background: "var(--bg3)",
-          color: accent,
-          marginBottom: mrb,
-          border: `1px solid ${accent}`,
-          borderRadius: 6,
-          fontWeight: 700,
-          cursor: "pointer",
-          fontSize: forceLabel ? 14 : isMobile ? 11 : 13,
-        }}
-      >
-        <Calendar size={14} />
-        {(!isMobile || forceLabel) && title}
-        {data ? ` (${data.total})` : ""}
-      </button>
+      {renderTrigger ? (
+        renderTrigger({ open, toggle: () => setOpen((p) => !p) })
+      ) : (
+        <button
+          onClick={() => setOpen((p) => !p)}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: forceLabel
+              ? "12px 14px"
+              : isMobile
+                ? "6px 10px"
+                : "8px 14px",
+            width: forceLabel ? "100%" : "auto",
+            background: "var(--bg3)",
+            color: accent,
+            marginBottom: mrb,
+            border: `1px solid ${accent}`,
+            borderRadius: 6,
+            fontWeight: 700,
+            cursor: "pointer",
+            fontSize: forceLabel ? 14 : isMobile ? 11 : 13,
+          }}
+        >
+          <Calendar size={14} />
+          {(!isMobile || forceLabel) && title}
+          {data ? ` (${data.total})` : ""}
+        </button>
+      )}
 
       {open && (
         <div
@@ -4020,9 +4068,71 @@ function DeptCompletedDropdown({
             overflowY: "auto",
           }}
         >
-          {/* ── NEW: Album Type Breakdown, only inside this dropdown ── */}
           {showBreakdown && (
             <AlbumTypeBreakdownPanel dept={deptKey} accent={accent} />
+          )}
+
+          {/* NEW: date filter (used by Laser Cutting) */}
+          {showDateFilter && (
+            <>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                <button
+                  onClick={() => {
+                    setSelDate(null);
+                    setShowCal(false);
+                  }}
+                  style={{
+                    padding: "6px 14px",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    borderRadius: 4,
+                    background: !selDate ? accent : "var(--bg3)",
+                    color: !selDate ? "#000" : "var(--text-sec)",
+                  }}
+                >
+                  Today
+                </button>
+                <button
+                  onClick={() => setShowCal((p) => !p)}
+                  style={{
+                    padding: "6px 14px",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    borderRadius: 4,
+                    background: selDate ? accent : "var(--bg3)",
+                    color: selDate ? "#000" : "var(--text-sec)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 5,
+                  }}
+                >
+                  <Calendar size={12} />
+                  {selDate ? dateLabel : "Pick a day"}
+                </button>
+              </div>
+              {showCal && (
+                <div style={{ width: "100%", maxWidth: 280 }}>
+                  <EntryCalendar
+                    year={calYear}
+                    month={calMonth}
+                    onYearMonth={(y, m) => {
+                      setCalYear(y);
+                      setCalMonth(m);
+                    }}
+                    dotDays={dotDays}
+                    selectedDate={selDate || slDateStr(new Date())}
+                    onSelect={setSelDate}
+                    onAfterSelect={() => setShowCal(false)}
+                    accent={accent}
+                  />
+                </div>
+              )}
+              {data && (
+                <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
+                  {data.total} done · {dateLabel}
+                </div>
+              )}
+            </>
           )}
 
           <SearchBar
@@ -8119,13 +8229,8 @@ async function handleEditSave(e) {
     }
   }
 
-  // Manage names first, then previously used studio names
-  const customerSuggestions = [
-    ...new Set([
-      ...photographers.map((p) => p.name),
-      ...(suggestions.customer || []),
-    ]),
-  ];
+// Only registered (Manage) photographers are suggested
+const customerSuggestions = photographers.map((p) => p.name);
 
   // ── Editable jobs (filtered list - re-evaluated every second via `now`) ──────
   const editableJobs = jobs.filter(isEditable);
@@ -11877,15 +11982,6 @@ function StationPage({ deptKey }) {
             </button>
           ) : null
         }
-        topRightMid={
-          <DeptCompletedDropdown
-            deptKey={cfg.dept}
-            title={`Done Today - ${cfg.label}`}
-            accent={cfg.accent}
-            addToast={add}
-            showBreakdown={cfg.dept !== "LASER_CUTTING"}
-          />
-        }
         topRight={
           <div
             style={{
@@ -11954,59 +12050,82 @@ function StationPage({ deptKey }) {
               </div>
             </div>
 
-            {/* Daily Done */}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: isMobile ? 6 : 8,
-                background: "#020015",
-                border: "1px solid #1a1c3a",
-                borderRadius: 8,
-                padding: isMobile ? "4px 10px" : "2px 10px 2px 8px",
-                minWidth: 0,
-              }}
-            >
-              <span
-                style={{
-                  fontFamily: "var(--fd)",
-                  fontSize: isMobile ? 30 : 50,
-                  fontWeight: 900,
-                  lineHeight: 1,
-                  color: deptDailyCount > 0 ? "#4749c2" : "var(--text-dim)",
-                }}
-              >
-                {deptDailyCount ?? "-"}
-              </span>
-              <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-                <span
+            {/* Daily Done — click to open the done panel */}
+            <DeptCompletedDropdown
+              deptKey={cfg.dept}
+              accent={cfg.accent}
+              addToast={add}
+              showBreakdown={cfg.dept !== "LASER_CUTTING"}
+              showDateFilter={cfg.dept === "LASER_CUTTING"}
+              renderTrigger={({ open, toggle }) => (
+                <div
+                  onClick={toggle}
+                  role="button"
+                  title="Click to see Daily Done jobs"
                   style={{
-                    fontSize: isMobile ? 10 : 12,
-                    fontWeight: 800,
-                    color: "#ffff",
-                    textTransform: "uppercase",
-                    letterSpacing: ".08em",
-                    lineHeight: 1,
-                    whiteSpace: "nowrap",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: isMobile ? 6 : 8,
+                    background: "#020015",
+                    border: `1px solid ${open ? cfg.accent : "#1a1c3a"}`,
+                    borderRadius: 8,
+                    cursor: "pointer",
+                    padding: isMobile ? "4px 10px" : "2px 10px 2px 8px",
+                    minWidth: 0,
                   }}
                 >
-                  Daily
-                </span>
-                <span
-                  style={{
-                    fontSize: isMobile ? 9 : 10,
-                    fontWeight: 600,
-                    color: "#4749c2",
-                    textTransform: "uppercase",
-                    letterSpacing: ".08em",
-                    lineHeight: 1,
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  Done
-                </span>
-              </div>
-            </div>
+                  <span
+                    style={{
+                      fontFamily: "var(--fd)",
+                      fontSize: isMobile ? 30 : 50,
+                      fontWeight: 900,
+                      lineHeight: 1,
+                      color: deptDailyCount > 0 ? "#4749c2" : "var(--text-dim)",
+                    }}
+                  >
+                    {deptDailyCount ?? "-"}
+                  </span>
+                  <div
+                    style={{ display: "flex", flexDirection: "column", gap: 1 }}
+                  >
+                    <span
+                      style={{
+                        fontSize: isMobile ? 10 : 12,
+                        fontWeight: 800,
+                        color: "#ffff",
+                        textTransform: "uppercase",
+                        letterSpacing: ".08em",
+                        lineHeight: 1,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      Daily
+                    </span>
+                    <span
+                      style={{
+                        fontSize: isMobile ? 9 : 10,
+                        fontWeight: 600,
+                        color: "#4749c2",
+                        textTransform: "uppercase",
+                        letterSpacing: ".08em",
+                        lineHeight: 1,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      Done
+                    </span>
+                  </div>
+                  <ChevronDown
+                    size={14}
+                    style={{
+                      color: "#4749c2",
+                      transition: "transform .2s ease",
+                      transform: open ? "rotate(180deg)" : "rotate(0deg)",
+                    }}
+                  />
+                </div>
+              )}
+            />
 
             {/* Completed count (24h / monthly) */}
             <div
@@ -15113,6 +15232,9 @@ function PapersPage() {
                     borderTop: "3px solid var(--blue)",
                     borderRadius: 8,
                     padding: "12px 14px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
                   }}
                 >
                   <div
@@ -15121,23 +15243,105 @@ function PapersPage() {
                       color: "var(--text-dim)",
                       textTransform: "uppercase",
                       letterSpacing: ".08em",
-                      marginBottom: 6,
                     }}
                   >
                     {selectedDate} Total
                   </div>
+
+                  {/* one row per paper size */}
+                  {PAPER_SIZES.filter(
+                    (s) => (data.day_by_size?.[s] || 0) > 0,
+                  ).map((s) => {
+                    const n = data.day_by_size[s];
+                    return (
+                      <div
+                        key={s}
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "baseline",
+                          gap: 8,
+                          background: "var(--surface-sunken)",
+                          border: "1px solid var(--border)",
+                          borderLeft: "3px solid var(--blue)",
+                          borderRadius: 6,
+                          padding: "6px 10px",
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: 13,
+                            fontWeight: 800,
+                            color: "var(--blue)",
+                            fontFamily: "var(--fm)",
+                          }}
+                        >
+                          {s}
+                        </span>
+                        <span style={{ textAlign: "right" }}>
+                          <span
+                            style={{
+                              fontSize: 15,
+                              fontWeight: 900,
+                              color: "var(--text-pri)",
+                              fontFamily: "var(--fm)",
+                            }}
+                          >
+                            {n}
+                          </span>
+                          <span
+                            style={{
+                              fontSize: 11,
+                              color: "var(--text-dim)",
+                              display: "block",
+                            }}
+                          >
+                            {fmtPacketsLong(n)}
+                          </span>
+                        </span>
+                      </div>
+                    );
+                  })}
+
+                  {Object.keys(data.day_by_size || {}).length === 0 && (
+                    <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
+                      No usage.
+                    </div>
+                  )}
+
+                  {/* overall total */}
                   <div
                     style={{
-                      fontFamily: "var(--fm)",
-                      fontSize: 22,
-                      fontWeight: 900,
-                      color: "var(--blue)",
+                      borderTop: "1px dashed var(--border)",
+                      paddingTop: 8,
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "baseline",
                     }}
                   >
-                    {data.day_total_used ?? 0}
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: "var(--text-dim)",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      All sizes
+                    </span>
+                    <span
+                      style={{
+                        fontFamily: "var(--fm)",
+                        fontSize: 20,
+                        fontWeight: 900,
+                        color: "var(--blue)",
+                      }}
+                    >
+                      {data.day_total_used ?? 0}
+                    </span>
                   </div>
                   <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
-                    sheets used · {data.total} entries
+                    {fmtPacketsLong(data.day_total_used ?? 0)} · {data.total}{" "}
+                    entries
                   </div>
                 </div>
               )}
