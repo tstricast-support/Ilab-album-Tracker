@@ -2507,8 +2507,16 @@ def list_paper_usage(
         day_end   = day_start + timedelta(days=1)
         q = q.filter(PaperUsageEntry.created_at >= day_start, PaperUsageEntry.created_at < day_end)
 
-    total = q.count()
+        total = q.count()
     day_total_used = q.with_entities(func.coalesce(func.sum(PaperUsageEntry.total_used), 0)).scalar() or 0
+
+    # per paper-size totals (respects the same date + search filters)
+    size_rows = (
+        q.with_entities(PaperUsageEntry.paper_size, func.coalesce(func.sum(PaperUsageEntry.total_used), 0))
+         .group_by(PaperUsageEntry.paper_size)
+         .all()
+    )
+    day_by_size = {s: int(n) for s, n in size_rows}
 
     rows = (
         q.order_by(desc(PaperUsageEntry.created_at))
@@ -2522,6 +2530,7 @@ def list_paper_usage(
         "page_size": page_size,
         "pages": max(1, -(-total // page_size)),
         "day_total_used": int(day_total_used),
+        "day_by_size": day_by_size,
         "entries": [PaperUsageEntryOut.model_validate(r).model_dump() for r in rows],
     }
 @app.get("/api/paper-usage/dates-with-entries")
@@ -3049,7 +3058,7 @@ def health():
     return {"status": "ok", "service": "i Lab Gampaha", "time": datetime.utcnow().isoformat()}
 
 
-SUGGEST_FIELDS = ["customer", "print_size", "laminate_type", "bind_rexing_no", "box_type", "laser_cover_type"]
+SUGGEST_FIELDS = ["print_size", "laminate_type", "bind_rexing_no", "box_type", "laser_cover_type"]
 
 @app.get("/api/suggestions/job-fields")
 def job_field_suggestions(db: Session = Depends(get_db)):
@@ -3440,6 +3449,21 @@ def client_error(p: ClientError, user=Depends(get_current_user)):
         key=f"fe:{p.message[:80]}",
     )
     return {"ok": True}
+
+@app.get("/api/admin/unregistered-customers", dependencies=[Depends(require_roles("ADMIN"))])
+def unregistered_customers(db: Session = Depends(get_db)):
+    registered = {re.sub(r"[^a-z0-9]+", "", p.name.lower()) for p in db.query(Photographer).all()}
+    rows = (
+        db.query(JobCard.customer, func.count(JobCard.id))
+        .group_by(JobCard.customer)
+        .order_by(desc(func.count(JobCard.id)))
+        .all()
+    )
+    return [
+        {"name": n, "jobs": c}
+        for n, c in rows
+        if re.sub(r"[^a-z0-9]+", "", (n or "").lower()) not in registered
+    ]
 
 # ── Static SPA ────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

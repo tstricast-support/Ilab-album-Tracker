@@ -402,6 +402,18 @@ function fmtPackets(sheets) {
   return `${packets} pkt + ${remainder} sh`;
 }
 
+// 120 -> "1 packet and 20 papers", 200 -> "2 packets", 45 -> "45 papers"
+function fmtPacketsLong(sheets) {
+  const total = Number(sheets) || 0;
+  const packets = Math.floor(total / SHEETS_PER_PACKET);
+  const rem = total % SHEETS_PER_PACKET;
+  const pk = `${packets} packet${packets !== 1 ? "s" : ""}`;
+  const pp = `${rem} paper${rem !== 1 ? "s" : ""}`;
+  if (total === 0) return "0 papers";
+  if (packets === 0) return pp;
+  if (rem === 0) return pk;
+  return `${pk} and ${pp}`;
+}
 
 function parseUTC(s) {
   if (!s) return null;
@@ -8217,13 +8229,8 @@ async function handleEditSave(e) {
     }
   }
 
-  // Manage names first, then previously used studio names
-  const customerSuggestions = [
-    ...new Set([
-      ...photographers.map((p) => p.name),
-      ...(suggestions.customer || []),
-    ]),
-  ];
+// Only registered (Manage) photographers are suggested
+const customerSuggestions = photographers.map((p) => p.name);
 
   // ── Editable jobs (filtered list - re-evaluated every second via `now`) ──────
   const editableJobs = jobs.filter(isEditable);
@@ -15225,6 +15232,9 @@ function PapersPage() {
                     borderTop: "3px solid var(--blue)",
                     borderRadius: 8,
                     padding: "12px 14px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
                   }}
                 >
                   <div
@@ -15233,23 +15243,105 @@ function PapersPage() {
                       color: "var(--text-dim)",
                       textTransform: "uppercase",
                       letterSpacing: ".08em",
-                      marginBottom: 6,
                     }}
                   >
                     {selectedDate} Total
                   </div>
+
+                  {/* one row per paper size */}
+                  {PAPER_SIZES.filter(
+                    (s) => (data.day_by_size?.[s] || 0) > 0,
+                  ).map((s) => {
+                    const n = data.day_by_size[s];
+                    return (
+                      <div
+                        key={s}
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "baseline",
+                          gap: 8,
+                          background: "var(--surface-sunken)",
+                          border: "1px solid var(--border)",
+                          borderLeft: "3px solid var(--blue)",
+                          borderRadius: 6,
+                          padding: "6px 10px",
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: 13,
+                            fontWeight: 800,
+                            color: "var(--blue)",
+                            fontFamily: "var(--fm)",
+                          }}
+                        >
+                          {s}
+                        </span>
+                        <span style={{ textAlign: "right" }}>
+                          <span
+                            style={{
+                              fontSize: 15,
+                              fontWeight: 900,
+                              color: "var(--text-pri)",
+                              fontFamily: "var(--fm)",
+                            }}
+                          >
+                            {n}
+                          </span>
+                          <span
+                            style={{
+                              fontSize: 11,
+                              color: "var(--text-dim)",
+                              display: "block",
+                            }}
+                          >
+                            {fmtPacketsLong(n)}
+                          </span>
+                        </span>
+                      </div>
+                    );
+                  })}
+
+                  {Object.keys(data.day_by_size || {}).length === 0 && (
+                    <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
+                      No usage.
+                    </div>
+                  )}
+
+                  {/* overall total */}
                   <div
                     style={{
-                      fontFamily: "var(--fm)",
-                      fontSize: 22,
-                      fontWeight: 900,
-                      color: "var(--blue)",
+                      borderTop: "1px dashed var(--border)",
+                      paddingTop: 8,
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "baseline",
                     }}
                   >
-                    {data.day_total_used ?? 0}
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: "var(--text-dim)",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      All sizes
+                    </span>
+                    <span
+                      style={{
+                        fontFamily: "var(--fm)",
+                        fontSize: 20,
+                        fontWeight: 900,
+                        color: "var(--blue)",
+                      }}
+                    >
+                      {data.day_total_used ?? 0}
+                    </span>
                   </div>
                   <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
-                    sheets used · {data.total} entries
+                    {fmtPacketsLong(data.day_total_used ?? 0)} · {data.total}{" "}
+                    entries
                   </div>
                 </div>
               )}
